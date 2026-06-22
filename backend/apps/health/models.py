@@ -203,3 +203,32 @@ class UserBodyInfo(models.Model):
         if self.height_cm is None:
             return None
         return round(float(self.height_cm) / 100, 2)
+
+
+class MenstrualRecord(models.Model):
+    """好朋友跟踪"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    year = models.IntegerField(verbose_name='年份')
+    month = models.CharField(max_length=10, verbose_name='月份')
+    start_date = models.DateField(verbose_name='开始日期')
+    offset = models.IntegerField(default=0, verbose_name='偏移量(天)')
+    cycle_days = models.IntegerField(default=30, verbose_name='周期跨度(天)')
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'health_menstrual_record'
+        ordering = ['-start_date']
+        verbose_name = '好朋友记录'
+        verbose_name_plural = '好朋友记录'
+        constraints = [
+            models.UniqueConstraint(fields=['user_id', 'start_date'], name='uk_menstrual_user_date'),
+        ]
+        indexes = [
+            models.Index(fields=['start_date']),
+            models.Index(fields=['user_id']),
+        ]
+
+    def __str__(self):
+        return f'{self.start_date} 周期{self.cycle_days}天'

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from .constants import CONVERSION_RATES
-from .models import HealthRecord, UserBodyInfo, WeightGoal, WeightMilestone, WeightRecord
+from .models import HealthRecord, MenstrualRecord, UserBodyInfo, WeightGoal, WeightMilestone, WeightRecord
 
 
 class HealthRecordSerializer(serializers.ModelSerializer):
@@ -160,3 +160,12 @@ class WeightTrendSerializer(serializers.Serializer):
     records = serializers.ListField(child=serializers.DictField())
     milestones = serializers.ListField(child=serializers.DictField())
     target_weight_kg = serializers.FloatField(allow_null=True)
+
+
+class MenstrualRecordSerializer(serializers.ModelSerializer):
+    """好朋友记录序列化器"""
+
+    class Meta:
+        model = MenstrualRecord
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']

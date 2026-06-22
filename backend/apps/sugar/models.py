@@ -143,6 +143,13 @@ class SugarRecord(models.Model):
     category = models.CharField(
         max_length=20, choices=CATEGORY_CHOICES, blank=True, null=True, verbose_name='分类',
     )
+    joy_type = models.CharField(
+        max_length=20, blank=True, default='', verbose_name='快乐类型',
+        choices=[
+            ('创造', '🎨 创造'), ('社交', '💬 社交'), ('独处', '🧘 独处'),
+            ('户外', '🌿 户外'), ('美食', '🍽️ 美食'), ('学习', '📚 学习'), ('其他', '✨ 其他'),
+        ],
+    )
     tags = models.CharField(max_length=255, blank=True, null=True, verbose_name='标签，逗号分隔')
     notes = models.TextField(blank=True, null=True, verbose_name='详细描述')
     reward_amount = models.DecimalField(

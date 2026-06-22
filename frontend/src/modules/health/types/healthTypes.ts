@@ -222,3 +222,31 @@ export const BMI_RANGES = [
   { max: 28, label: '超重', color: '#F59E0B', advice: '注意控制' },
   { max: Infinity, label: '肥胖', color: '#EF4444', advice: '需减重' },
 ]
+
+// ─── 好朋友跟踪 ───
+
+export interface MenstrualRecord {
+  id: number
+  user_id: number
+  year: number
+  month: string
+  start_date: string
+  offset: number
+  cycle_days: number
+  notes: string
+  created_at: string
+}
+
+export interface MenstrualStats {
+  total_records: number
+  avg_cycle: number
+  avg_offset: number
+  predicted_next: string | null
+  min_cycle: number
+  max_cycle: number
+}
+
+export interface MenstrualTrendItem {
+  date: string
+  cycle_days: number
+}

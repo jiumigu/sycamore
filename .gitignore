@@ -40,3 +40,57 @@ private_notes/
 *.tmp
 *.bak
 *.orig
+backend/media/
+
+# Django 媒体和静态文件（用户上传）
+backend/media/
+backend/staticfiles/
+backend/static/
+
+# 数据库文件
+*.sqlite3
+*.db
+db.sqlite3
+
+# 日志文件
+*.log
+logs/
+backend/logs/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+
+# 前端构建产物
+frontend/dist/
+frontend/.vite/
+frontend/node_modules/
+
+# 环境变量（包含密钥）
+.env
+.env.local
+.env.*.local
+backend/sycamore/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 临时文件
+*.tmp
+*.bak
+*.orig
+
+# 软链接目录（指向笔记）
+analysis_notes/
+private_notes/
+.claude/

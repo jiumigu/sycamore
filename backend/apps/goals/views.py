@@ -57,7 +57,10 @@ class GoalViewSet(viewsets.ModelViewSet):
         return GoalDetailSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().annotate(
+            action_count=Count('actions', distinct=True),
+            milestone_count=Count('milestones', distinct=True),
+        )
         params = self.request.query_params
 
         year = params.get('year')
@@ -102,35 +105,7 @@ class GoalViewSet(viewsets.ModelViewSet):
         GoalProgressService.recalculate(goal)
 
     def perform_update(self, serializer):
-        old_reward = serializer.instance.default_reward_amount if serializer.instance else None
         goal = serializer.save()
-        new_reward = goal.default_reward_amount
-
-        # 默认奖励金额变更时，同步调整已完成里程碑的奖励
-        if old_reward is not None and old_reward != new_reward:
-            from django.db import transaction as db_transaction
-            from apps.reward.services import RewardPoolService
-
-            delta = new_reward - old_reward
-            milestones = goal.milestones.filter(
-                status='completed',
-                reward_synced=True,
-                reward_amount__isnull=True,
-            )
-            if milestones.exists():
-                with db_transaction.atomic():
-                    for m in milestones:
-                        RewardPoolService.adjust_reward(
-                            source_id=m.id,
-                            source_type='milestone',
-                            delta=delta,
-                            description=f'目标默认奖励变更：{old_reward}→{new_reward}（里程碑：{m.title}）',
-                        )
-                    # 用 bulk_update 一次性更新所有里程碑的 reward_amount
-                    milestones.update(
-                        reward_amount=F('reward_amount') + delta,
-                    )
-
         GoalProgressService.recalculate(goal)
 
     @action(detail=False, methods=['get'])
@@ -262,6 +237,10 @@ class GoalViewSet(viewsets.ModelViewSet):
             year=data['year'],
             frequency=data['frequency'],
             reward_per_milestone=data['reward_per_milestone'],
+            start_date=data.get('start_date'),
+            end_date=data.get('end_date'),
+            content_order=data.get('content_order', 'asc'),
+            display_order=data.get('display_order', 'asc'),
         )
         return Response({
             'goal': GoalDetailSerializer(result['goal']).data,
@@ -371,9 +350,16 @@ class MilestoneViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().select_related('goal')
-        goal_id = self.request.query_params.get('goal')
+        params = self.request.query_params
+        goal_id = params.get('goal')
         if goal_id:
             qs = qs.filter(goal_id=goal_id)
+        target_year = params.get('target_date_year')
+        target_month = params.get('target_date_month')
+        if target_year:
+            qs = qs.filter(target_date__year=target_year)
+        if target_month:
+            qs = qs.filter(target_date__month=target_month)
         return qs
 
     def perform_create(self, serializer):
@@ -384,10 +370,38 @@ class MilestoneViewSet(viewsets.ModelViewSet):
         GoalProgressService.recalculate(instance.goal)
 
     def perform_update(self, serializer):
-        old_reward = MilestoneRewardService._get_reward_amount(serializer.instance)
-        old_status = serializer.instance.status
+        old_instance = self.get_object()
+
+        # 判断状态是否从非完成变为完成
+        is_newly_completed = (
+            old_instance.status != 'completed' and
+            serializer.validated_data.get('status') == 'completed'
+        )
+
         instance = serializer.save()
-        MilestoneRewardService().sync_on_update(instance, old_status, old_reward)
+
+        # 只有首次完成时才发放奖励
+        if is_newly_completed and not old_instance.reward_synced:
+            from apps.reward.services import RewardPoolService
+            from decimal import Decimal
+
+            reward_amount = (
+                instance.reward_amount
+                or instance.goal.default_reward_amount
+                or Decimal('0')
+            )
+            if reward_amount > 0:
+                RewardPoolService.add_reward(
+                    source_id=instance.id,
+                    source_type='milestone',
+                    amount=reward_amount,
+                    transaction_type='milestone_complete',
+                    description=f'完成里程碑「{instance.title}」（{instance.goal.title}），获得{reward_amount}元奖励',
+                )
+                instance.reward_synced = True
+                instance.reward_issued_at = timezone.now()
+                instance.save(update_fields=['reward_synced', 'reward_issued_at'])
+
         GoalProgressService.recalculate(instance.goal)
 
     def perform_destroy(self, instance):

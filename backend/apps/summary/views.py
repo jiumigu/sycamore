@@ -2,13 +2,16 @@
 
 from datetime import datetime
 
-from rest_framework import status, viewsets
+from django.db.models import Avg, Count, Q
+from django.db.models.functions import TruncDate
+
+from rest_framework import status, views, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .constants import MODULE_LIST
-from .services import ProgressAggregator, QuarterlyWorkbenchService
+from .services import BodyMindCorrelationService, ProgressAggregator, QuarterlyWorkbenchService
 
 
 class SummaryViewSet(viewsets.ViewSet):
@@ -89,7 +92,7 @@ class SummaryViewSet(viewsets.ViewSet):
         # 随机日记
         try:
             from apps.temporal.models import OneDayPage
-            diary = OneDayPage.objects.exclude(title='').order_by('?').values('title', 'begin_date').first()
+            diary = OneDayPage.objects.exclude(title='').exclude(title__icontains='幸福未被发现').order_by('?').values('title', 'begin_date').first()
             if diary:
                 items.append({
                     'type': '📝 日记',
@@ -121,6 +124,26 @@ class SummaryViewSet(viewsets.ViewSet):
                     'type': '📖 读书感悟',
                     'content': f"《{book['btitle']}」{book['closedop'][:180]}"[:200],
                     'date': book['readDate'].isoformat() if book['readDate'] else '',
+                })
+        except Exception:
+            pass
+
+        # 随机摘录
+        try:
+            from apps.toolkit.models import Quote
+            quote = Quote.objects.exclude(
+                content__icontains='幸福未被发现，就叫做普通的一天'
+            ).exclude(
+                short_title__icontains='幸福未被发现，就叫做普通的一天'
+            ).order_by('?').first()
+            if quote:
+                text = quote.short_title or quote.content[:200]
+                if quote.author:
+                    text += f' —— {quote.author}'
+                items.append({
+                    'type': '📖 摘录',
+                    'content': text,
+                    'date': quote.created_at.isoformat() if quote.created_at else '',
                 })
         except Exception:
             pass
@@ -186,3 +209,211 @@ class SummaryViewSet(viewsets.ViewSet):
             return Response({'error': '需要 year 和 quarter 参数'}, status=status.HTTP_400_BAD_REQUEST)
         data = QuarterlyWorkbenchService.get_insights(int(year), int(quarter))
         return Response(data)
+
+    # ── 身体-状态关联 ─────────────────────────────────────
+
+    @action(detail=False, methods=['get'])
+    def body_mind(self, request):
+        """身体-状态关联：睡眠、良品率、情绪趋势"""
+        weeks = int(request.query_params.get('weeks', 12))
+        user_id = int(request.query_params.get('user_id', 1))
+        data = BodyMindCorrelationService.get_correlation_data(user_id=user_id, weeks=weeks)
+        return Response(data)
+
+
+class PersonalProfileView(views.APIView):
+    """个人画像仪表盘"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        year = request.query_params.get('year')
+        if year:
+            year = int(year)
+        else:
+            year = datetime.now().year
+
+        return Response({
+            'health': self._health_profile(year),
+            'energy': self._energy_profile(year),
+            'mood': self._mood_profile(year),
+            'relation': self._relation_profile(year),
+            'output': self._output_profile(year),
+            'inbox': self._inbox_profile(),
+            'decision': self._decision_profile(year),
+        })
+
+    def _health_profile(self, year: int) -> dict:
+        """健康画像：最新自查分 + 体重趋势"""
+        from apps.toolkit.models import HealthSelfCheck
+        from apps.health.models import WeightRecord
+
+        latest_check = HealthSelfCheck.objects.filter(
+            check_date__year=year, user_id=1,
+        ).order_by('-check_date').first()
+
+        checks = list(HealthSelfCheck.objects.filter(
+            check_date__year=year, user_id=1,
+        ).values('check_date', 'health_score').order_by('check_date'))
+
+        weight_qs = WeightRecord.objects.filter(
+            record_date__year=year,
+        ).order_by('-record_date')
+
+        latest_weight = weight_qs.first()
+        all_weights = list(weight_qs.order_by('record_date').values('record_date', 'weight_kg'))
+
+        return {
+            'latest_score': latest_check.health_score if latest_check else None,
+            'score_trend': [{'date': c['check_date'], 'value': c['health_score']} for c in checks],
+            'latest_weight': float(latest_weight.weight_kg) if latest_weight else None,
+            'weight_trend': [{'date': w['record_date'], 'value': float(w['weight_kg'])} for w in all_weights],
+            'check_count': len(checks),
+        }
+
+    def _energy_profile(self, year: int) -> dict:
+        """职业能量画像"""
+        from apps.toolkit.models import CareerEnergyAudit
+
+        latest = CareerEnergyAudit.objects.filter(
+            audit_date__year=year, user_id=1,
+        ).order_by('-audit_date').first()
+
+        all_audits = list(CareerEnergyAudit.objects.filter(
+            audit_date__year=year, user_id=1,
+        ).values('audit_date', 'total_score', 'work_score', 'env_score', 'growth_score', 'body_score').order_by('audit_date'))
+
+        return {
+            'latest': {
+                'total_score': latest.total_score if latest else None,
+                'work_score': latest.work_score if latest else None,
+                'env_score': latest.env_score if latest else None,
+                'growth_score': latest.growth_score if latest else None,
+                'body_score': latest.body_score if latest else None,
+                'decision': latest.decision if latest else None,
+            } if latest else None,
+            'trend': [{
+                'date': a['audit_date'],
+                'total': a['total_score'],
+                'work': a['work_score'],
+                'env': a['env_score'],
+                'growth': a['growth_score'],
+                'body': a['body_score'],
+            } for a in all_audits],
+            'audit_count': len(all_audits),
+        }
+
+    def _mood_profile(self, year: int) -> dict:
+        """情绪画像：小确幸数据"""
+        from apps.sugar.models import SugarRecord
+
+        qs = SugarRecord.objects.filter(years=year)
+        total = qs.count()
+
+        if total == 0:
+            return {'total_records': 0, 'avg_happiness': None, 'happiness_trend': [], 'active_days': 0}
+
+        agg = qs.aggregate(avg=Avg('level_of_happiness'))
+        trend = list(qs.values('time', 'level_of_happiness').order_by('time'))
+
+        return {
+            'total_records': total,
+            'avg_happiness': round(float(agg['avg'] or 0), 2),
+            'happiness_trend': [{'date': t['time'], 'value': float(t['level_of_happiness'])} for t in trend],
+            'active_days': qs.dates('time', 'day').count(),
+        }
+
+    def _relation_profile(self, year: int) -> dict:
+        """关系画像"""
+        from apps.relation.models import Relationship, Interaction
+
+        total_relations = Relationship.objects.count()
+        active_relations = Interaction.objects.filter(
+            happened_at__year=year,
+        ).values('relationship_id').distinct().count()
+
+        interaction_count = Interaction.objects.filter(happened_at__year=year).count()
+
+        return {
+            'total_relations': total_relations,
+            'active_relations': active_relations,
+            'interactions_this_year': interaction_count,
+        }
+
+    def _output_profile(self, year: int) -> dict:
+        """良品率画像"""
+        from apps.goals.models import OutputRecord
+
+        qs = OutputRecord.objects.filter(created_at__year=year)
+        total = qs.count()
+        if total == 0:
+            return {'total_records': 0, 'good_rate': None, 'by_category': []}
+
+        good = qs.filter(quality='good').count()
+        by_cat = list(qs.values('category').annotate(
+            total=Count('id'),
+            good=Count('id', filter=Q(quality='good')),
+        ))
+
+        return {
+            'total_records': total,
+            'good_rate': round(good / total * 100, 1) if total > 0 else 0,
+            'by_category': [{
+                'category': c['category'],
+                'total': c['total'],
+                'good': c['good'],
+                'rate': round(c['good'] / c['total'] * 100, 1) if c['total'] > 0 else 0,
+            } for c in by_cat],
+        }
+
+    def _inbox_profile(self) -> dict:
+        """收件箱画像"""
+        from apps.inbox.models import InboxItem
+
+        pending = InboxItem.objects.filter(status='pending').count()
+        hesitating = InboxItem.objects.filter(status='hesitating').count()
+        done_this_year = InboxItem.objects.filter(
+            status='done', updated_at__year=datetime.now().year,
+        ).count()
+        total = InboxItem.objects.count()
+
+        by_category = list(InboxItem.objects.values('category').annotate(
+            count=Count('id'),
+        ))
+
+        return {
+            'pending': pending,
+            'hesitating': hesitating,
+            'done_this_year': done_this_year,
+            'total': total,
+            'by_category': by_category,
+        }
+
+    def _decision_profile(self, year: int) -> dict:
+        """决策画像"""
+        from apps.toolkit.models import DecisionLog
+
+        qs = DecisionLog.objects.filter(decision_date__year=year)
+        total = qs.count()
+        if total == 0:
+            return {'total_decisions': 0, 'right_rate': None, 'by_category': [], 'top_bias': ''}
+
+        right = qs.filter(was_right=True).count()
+        wrong = qs.filter(was_right=False).count()
+        reviewed = qs.exclude(actual_outcome='').count()
+
+        by_cat = list(qs.values('category').annotate(count=Count('id')))
+        biases = list(qs.exclude(bias_found='').values('bias_found').annotate(
+            count=Count('id'),
+        ).order_by('-count'))
+
+        return {
+            'total_decisions': total,
+            'right_count': right,
+            'wrong_count': wrong,
+            'right_rate': round(right / (right + wrong) * 100, 1) if (right + wrong) > 0 else None,
+            'reviewed_count': reviewed,
+            'by_category': by_cat,
+            'top_bias': biases[0]['bias_found'] if biases else '',
+            'bias_distribution': [{'bias': b['bias_found'], 'count': b['count']} for b in biases],
+        }

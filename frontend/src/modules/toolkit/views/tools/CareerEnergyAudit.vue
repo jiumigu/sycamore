@@ -3,8 +3,8 @@
     <h2 class="page-title">⚡ 职业能量审计</h2>
     <p class="subtitle">不是"该不该走"，是"现在走到哪了"。</p>
 
-    <el-card class="audit-form">
-      <el-form :model="form" label-position="top">
+    <el-card class="audit-form" style="max-width: 100%">
+      <el-form :model="form" label-position="left" label-width="120px">
         <el-collapse v-model="activePanels">
           <!-- 工作内容本身 -->
           <el-collapse-item title="💼 工作内容本身" name="work">
@@ -109,15 +109,23 @@
 
     <!-- 审计结果 -->
     <el-card v-if="result" class="audit-result" :class="resultClass">
-      <div class="result-score">{{ result.total_score }} <span class="result-range">/ 130</span></div>
+      <div class="result-score">{{ result.total_score }} 分</div>
       <div class="result-detail">
-        <div class="detail-item work"><span class="detail-label">工作</span><span class="detail-value">{{ result.work_score }}</span></div>
-        <div class="detail-item env"><span class="detail-label">环境</span><span class="detail-value">{{ result.env_score }}</span></div>
-        <div class="detail-item growth"><span class="detail-label">成长</span><span class="detail-value">{{ result.growth_score }}</span></div>
-        <div class="detail-item body"><span class="detail-label">身体</span><span class="detail-value">{{ result.body_score }}</span></div>
+        <span>工作 {{ result.work_score }}</span>
+        <span>环境 {{ result.env_score }}</span>
+        <span>成长 {{ result.growth_score }}</span>
+        <span>身体 {{ result.body_score }}</span>
       </div>
       <div class="result-decision">{{ result.decision }}</div>
-      <div class="result-advice" v-html="result.advice.replace(/\n/g, '<br>')" />
+      <div class="result-advice">{{ result.advice }}</div>
+
+      <!-- 环境分值连续低迷时提示环境校准 -->
+      <el-alert v-if="showEnvCalibrationHint" type="warning" :closable="false" style="margin-top:12px">
+        <template #title>
+          ⚠️ 环境分值已连续 {{ consecutiveLowEnvMonths }} 个月拖后腿。
+          要不要<a @click="goToEnvAudit" style="cursor:pointer;color:#409eff;text-decoration:underline">对当前环境做一次校准</a>？
+        </template>
+      </el-alert>
     </el-card>
 
     <!-- 历史记录 -->
@@ -129,21 +137,20 @@
         </div>
       </template>
       <el-table v-if="history.length > 0" :data="history" style="width:100%">
-        <el-table-column prop="audit_date" label="日期" width="100" />
+        <el-table-column prop="audit_date" label="日期" width="110">
+          <template #default="{ row }">
+            <span style="white-space: nowrap">{{ row.audit_date }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="total_score" label="总分" width="70" />
         <el-table-column prop="decision" label="判定" width="110">
           <template #default="{ row }">
             <el-tag :type="tagType(row.total_score)" size="small">{{ row.decision }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="维度" min-width="140">
+        <el-table-column label="维度" width="180">
           <template #default="{ row }">
-            <span class="dimension-bar">
-              <span class="dim-item">工{{ row.work_score }}</span>
-              <span class="dim-item">环{{ row.env_score }}</span>
-              <span class="dim-item">成{{ row.growth_score }}</span>
-              <span class="dim-item">身{{ row.body_score }}</span>
-            </span>
+            工作{{ row.work_score }} 环境{{ row.env_score }} 成长{{ row.growth_score }} 身体{{ row.body_score }}
           </template>
         </el-table-column>
         <el-table-column prop="body_signals" label="身体信号" min-width="120" show-overflow-tooltip />
@@ -161,6 +168,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as toolkitApi from '../../api/toolkitApi'
 
@@ -261,6 +269,11 @@ function defaultForm() {
 
 const form = reactive<Record<string, any>>(defaultForm())
 
+const consecutiveLowEnvMonths = ref(0)
+const router = useRouter()
+
+const showEnvCalibrationHint = computed(() => consecutiveLowEnvMonths.value >= 3)
+
 async function handleAudit() {
   if (!form.audit_date) {
     ElMessage.warning('请选择审计日期')
@@ -298,9 +311,24 @@ async function fetchHistory() {
   try {
     const resp = await toolkitApi.getCareerEnergyAudits({ page_size: 100 })
     history.value = (resp.data?.results ?? resp.data ?? []) as AuditRecord[]
+
+    // 计算连续环境低分月数
+    let count = 0
+    for (const record of history.value) {
+      if (record.env_score < 0) {
+        count++
+      } else {
+        break
+      }
+    }
+    consecutiveLowEnvMonths.value = count
   } catch {
     history.value = []
   }
+}
+
+function goToEnvAudit() {
+  router.push('/toolkit/environment-audit')
 }
 
 async function handleDelete(id: number) {
@@ -345,8 +373,7 @@ onMounted(fetchHistory)
 
 <style scoped>
 .career-audit {
-  max-width: 800px;
-  margin: 0 auto;
+  width: 100%;
 }
 .page-title {
   font-size: 22px; font-weight: 700; margin: 0 0 4px;
@@ -356,6 +383,15 @@ onMounted(fetchHistory)
 }
 .audit-form {
   margin-bottom: 18px;
+}
+.audit-form :deep(.el-form-item__label) {
+  width: 120px;
+}
+.audit-form :deep(.el-slider) {
+  width: 100%;
+}
+:deep(.el-table__cell) {
+  white-space: nowrap;
 }
 .audit-form :deep(.el-collapse-item__header) {
   font-weight: 600;
@@ -395,26 +431,21 @@ onMounted(fetchHistory)
 .result-score {
   font-size: 48px; font-weight: 700; line-height: 1;
 }
-.result-range {
-  font-size: 18px; font-weight: 400; color: #9CA3AF;
-}
 .result-detail {
   display: flex; justify-content: center; gap: 24px; margin: 16px 0;
+  font-size: 16px; font-weight: 500;
+  color: #6B7280;
 }
-.detail-item {
-  display: flex; flex-direction: column; align-items: center;
-}
-.detail-label { font-size: 11px; color: #9CA3AF; }
-.detail-value { font-size: 20px; font-weight: 600; }
-.detail-item.work .detail-value { color: #3B82F6; }
-.detail-item.env .detail-value { color: #10B981; }
-.detail-item.growth .detail-value { color: #8B5CF6; }
-.detail-item.body .detail-value { color: #F59E0B; }
+.result-detail span:nth-child(1) { color: #3B82F6; }
+.result-detail span:nth-child(2) { color: #10B981; }
+.result-detail span:nth-child(3) { color: #8B5CF6; }
+.result-detail span:nth-child(4) { color: #F59E0B; }
 .result-decision {
   font-size: 24px; font-weight: 600; margin: 8px 0;
 }
 .result-advice {
   font-size: 14px; color: #6B7280; line-height: 1.6;
+  white-space: pre-wrap;
 }
 .verdict-good { background: #ecfdf5; }
 .verdict-ok { background: #fffbeb; }
@@ -428,8 +459,4 @@ onMounted(fetchHistory)
 .history-header {
   display: flex; justify-content: space-between; align-items: center;
 }
-.dimension-bar {
-  display: flex; gap: 8px; font-size: 12px; color: #6B7280;
-}
-.dim-item { white-space: nowrap; }
 </style>

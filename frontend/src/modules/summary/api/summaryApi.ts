@@ -50,6 +50,12 @@ export function getQuarterlyAnswers(params: { year: number; quarter: number }) {
   return request({ url: '/summary/quarterly_answers/', method: 'get', params })
 }
 
+// ── 身体-状态关联 ──────────────────────────────────────
+
+export function getBodyMindData(params?: { weeks?: number }) {
+  return request({ url: '/summary/body_mind/', method: 'get', params })
+}
+
 export function saveQuarterlyAnswers(params: { year: number; quarter: number }, data: Record<string, unknown> | Record<string, unknown>[]) {
   return request({ url: '/summary/quarterly_answers/', method: 'post', params, data })
 }

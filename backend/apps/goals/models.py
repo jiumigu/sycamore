@@ -92,6 +92,8 @@ class Milestone(models.Model):
     title = models.CharField(max_length=255, verbose_name='里程碑标题')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='状态')
     completed_note = models.TextField(blank=True, null=True, verbose_name='完成备注说明')
+    self_review = models.TextField(blank=True, default='', verbose_name='自我批阅')
+    description = models.TextField(blank=True, default='', verbose_name='详细描述')
     order_num = models.IntegerField(default=0, verbose_name='排序序号')
     target_date = models.DateField(blank=True, null=True, verbose_name='目标日期')
     target_value = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True, verbose_name='目标值')

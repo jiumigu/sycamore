@@ -90,8 +90,13 @@
       <el-divider>里程碑</el-divider>
       <div v-if="goalId" class="milestones-editor">
         <div v-for="(m, i) in form.milestones" :key="i" class="milestone-row">
-          <el-input v-model="m.title" placeholder="里程碑描述" class="milestone-input" />
-          <el-button type="danger" :icon="Delete" circle size="small" @click="removeMilestone(i)" />
+          <div class="milestone-fields">
+            <div class="milestone-title-row">
+              <el-input v-model="m.title" placeholder="里程碑描述" class="milestone-input" />
+              <el-button type="danger" :icon="Delete" circle size="small" @click="removeMilestone(i)" />
+            </div>
+            <el-input v-model="m.description" type="textarea" :rows="2" placeholder="详情（可选）" maxlength="500" show-word-limit class="milestone-desc" />
+          </div>
         </div>
         <el-button type="primary" :icon="Plus" @click="addMilestone">添加里程碑</el-button>
       </div>
@@ -123,7 +128,7 @@ const submitting = ref(false)
 const form = reactive({
   title: '', description: '', category: '', status: '', priority: 'p2', tags: [] as string[],
   reward_value: 0, enable_reward: false, default_reward_amount: 0, start_date: '', deadline: '', notes: '',
-  milestones: [] as Array<{ title: string; status: string }>,
+  milestones: [] as Array<{ title: string; status: string; description?: string }>,
 })
 
 const rules = {
@@ -131,7 +136,7 @@ const rules = {
   category: [{ required: true, message: '请选择类型', trigger: 'change' }],
 }
 
-function addMilestone() { form.milestones.push({ title: '', status: 'pending' }) }
+function addMilestone() { form.milestones.push({ title: '', status: 'pending', description: '' }) }
 function removeMilestone(i: number) { form.milestones.splice(i, 1) }
 
 watch(() => props.goalId, async (id) => {
@@ -158,7 +163,7 @@ watch(() => props.goalId, async (id) => {
     form.start_date = goal.start_date || ''
     form.deadline = goal.deadline || ''
     form.notes = goal.notes || ''
-    form.milestones = (goal.milestones || []).map((m: Milestone) => ({ title: m.title, status: m.status }))
+    form.milestones = (goal.milestones || []).map((m: Milestone) => ({ title: m.title, status: m.status, description: m.description || '' }))
     if (!form.milestones.length) form.milestones.push({ title: '', status: 'pending' })
   } catch { ElMessage.error('加载目标失败') }
 })
@@ -202,8 +207,13 @@ async function handleSubmit() {
 <style scoped lang="scss">
 .goal-form { max-height: 65vh; overflow-y: auto; padding-right: 8px; }
 .milestones-editor { display: flex; flex-direction: column; gap: 8px;
-  .milestone-row { display: flex; gap: 8px; align-items: center;
-    .milestone-input { flex: 1; }
+  .milestone-row { display: flex; gap: 8px;
+    .milestone-fields { flex: 1; display: flex; flex-direction: column; gap: 4px;
+      .milestone-title-row { display: flex; gap: 8px; align-items: center;
+        .milestone-input { flex: 1; }
+      }
+      .milestone-desc { margin-top: 2px; }
+    }
   }
 }
 

@@ -15,6 +15,10 @@
           <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
+        <el-button @click="$router.push('/sugar/joy-types')">
+          <el-icon><DataAnalysis /></el-icon>
+          偏好图谱
+        </el-button>
       </div>
     </div>
 
@@ -115,51 +119,78 @@
     <el-dialog
       v-model="dialogVisible"
       :title="editingId ? '编辑小确幸' : '记录小确幸'"
-      width="580px"
+      width="520px"
       destroy-on-close
       :close-on-click-modal="false"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="0" class="sugar-form">
-        <el-form-item prop="title">
-          <el-input v-model="form.title" placeholder="小确幸标题 *" maxlength="100" show-word-limit />
-        </el-form-item>
-
-        <div class="form-section-label">快乐程度 *</div>
-        <el-form-item prop="level_of_happiness">
-          <HappinessSlider v-model="form.level_of_happiness" />
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
+        <el-form-item label="内容" prop="content">
+          <el-input v-model="form.content" type="textarea" :rows="3" placeholder="记录今天的小确幸..." maxlength="100" show-word-limit />
         </el-form-item>
 
         <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item prop="time">
-              <el-date-picker v-model="form.time" type="date" placeholder="发生日期 *" style="width: 100%" value-format="YYYY-MM-DD" />
+          <el-col :span="16">
+            <el-form-item label="快乐程度">
+              <div class="happiness-slider">
+                <el-slider v-model="form.level_of_happiness" :min="5" :max="20" show-stops />
+                <span class="happiness-label">{{ form.level_of_happiness }} — {{ happinessText }}</span>
+              </div>
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item prop="category">
-              <el-select v-model="form.category" placeholder="分类" clearable style="width: 100%">
-                <el-option v-for="c in CATEGORY_OPTIONS" :key="c.value" :label="`${c.icon} ${c.label}`" :value="c.value" />
-              </el-select>
+          <el-col :span="8">
+            <el-form-item label="奖励">
+              <span class="reward-display">💰 ¥{{ rewardAmount }}</span>
             </el-form-item>
           </el-col>
         </el-row>
 
-        <el-form-item label="标签" prop="tags">
-          <el-select
-            v-model="form.tags"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            placeholder="输入标签后回车"
-            style="width: 100%"
-          >
-            <el-option v-for="t in SUGGESTED_TAGS" :key="t" :label="t" :value="t" />
+        <el-form-item label="快乐类型" prop="joy_type">
+          <el-select v-model="form.joy_type" placeholder="选填" clearable style="width:100%">
+            <el-option v-for="j in JOY_TYPE_OPTIONS" :key="j.value" :label="`${j.icon} ${j.label}`" :value="j.value" />
           </el-select>
         </el-form-item>
 
+        <el-form-item label="标签">
+          <div class="tags-wrapper">
+            <span class="preset-label">常用：</span>
+            <el-tag
+              v-for="tag in presetTags"
+              :key="tag"
+              size="small"
+              :class="{ selected: form.tagList.includes(tag) }"
+              class="preset-tag"
+              @click="togglePresetTag(tag)"
+            >
+              {{ tag }}
+            </el-tag>
+
+            <div class="custom-tags">
+              <el-tag
+                v-for="tag in customTags"
+                :key="tag"
+                closable
+                size="small"
+                type="warning"
+                @close="removeTag(tag)"
+              >
+                {{ tag }}
+              </el-tag>
+              <el-input
+                v-if="showTagInput"
+                v-model="newTag"
+                ref="tagInputRef"
+                size="small"
+                style="width:80px"
+                @keyup.enter="addTag"
+                @blur="addTag"
+              />
+              <el-button v-else size="small" @click="showTagInput = true">+ 自定义</el-button>
+            </div>
+          </div>
+        </el-form-item>
+
         <el-form-item label="备注" prop="notes">
-          <el-input v-model="form.notes" type="textarea" :rows="3" placeholder="记录你的快乐感受..." maxlength="500" show-word-limit />
+          <el-input v-model="form.notes" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="补充说明..." />
         </el-form-item>
       </el-form>
 
@@ -176,14 +207,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh, DataAnalysis } from '@element-plus/icons-vue'
 import { useSugarStore } from '../stores/sugarStore'
-import { CATEGORY_OPTIONS } from '../types/sugarTypes'
+import { CATEGORY_OPTIONS, JOY_TYPE_OPTIONS } from '../types/sugarTypes'
 import type { SugarRecord } from '../types/sugarTypes'
 import SugarCard from '../components/SugarCard.vue'
-import HappinessSlider from '../components/HappinessSlider.vue'
 import { getRewardPool } from '@/modules/reward/api/rewardApi'
 
 const store = useSugarStore()
@@ -218,19 +248,39 @@ const editingId = ref<number | undefined>()
 const formRef = ref<FormInstance>()
 
 const form = reactive({
-  title: '',
-  level_of_happiness: 7,
-  time: new Date().toISOString().slice(0, 10),
-  category: '',
-  tags: [] as string[],
+  content: '',
+  level_of_happiness: 10,
+  joy_type: '',
+  tagList: [] as string[],
   notes: '',
 })
 
+const showTagInput = ref(false)
+const newTag = ref('')
+const tagInputRef = ref<HTMLInputElement>()
+
 const rules = {
-  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
+  content: [{ required: true, message: '请输入内容', trigger: 'blur' }],
   level_of_happiness: [{ required: true, message: '请选择快乐程度', trigger: 'change' }],
-  time: [{ required: true, message: '请选择日期', trigger: 'change' }],
 }
+
+const presetTags = ['美食', '旅行', '人际关系', '学习成长', '工作成就', '自然', '音乐', '阅读', '运动', '意外惊喜']
+
+const customTags = computed(() => {
+  return form.tagList.filter(t => !presetTags.includes(t))
+})
+
+const happinessTexts: Record<number, string> = {
+  5: '一般般', 6: '还行', 7: '还不错', 8: '挺开心', 9: '很开心', 10: '超开心',
+  11: '特别开心', 12: '非常开心', 13: '极度开心', 14: '幸福爆棚', 15: '人生巅峰',
+  16: '无与伦比', 17: '心花怒放', 18: '飘飘欲仙', 19: '天堂般', 20: '无可超越',
+}
+
+const happinessText = computed(() => {
+  return happinessTexts[form.level_of_happiness] || '开心'
+})
+
+const rewardAmount = computed(() => form.level_of_happiness)
 
 const SUGGESTED_TAGS = ['惊喜', '感动', '成就', '小确幸', '美食', '友情', '家庭', '自然', '成长', '放松']
 
@@ -244,29 +294,52 @@ const expectedReward = computed(() => {
 })
 
 function resetForm() {
-  form.title = ''
-  form.level_of_happiness = 7
-  form.time = new Date().toISOString().slice(0, 10)
-  form.category = ''
-  form.tags = []
+  form.content = ''
+  form.level_of_happiness = 10
+  form.joy_type = ''
+  form.tagList = []
   form.notes = ''
+  showTagInput.value = false
+  newTag.value = ''
+}
+
+function togglePresetTag(tag: string) {
+  if (form.tagList.includes(tag)) {
+    form.tagList = form.tagList.filter(t => t !== tag)
+  } else {
+    form.tagList.push(tag)
+  }
+}
+
+function addTag() {
+  const tag = newTag.value.trim()
+  if (tag && !form.tagList.includes(tag)) {
+    form.tagList.push(tag)
+  }
+  newTag.value = ''
+  showTagInput.value = false
+}
+
+function removeTag(tag: string) {
+  form.tagList = form.tagList.filter(t => t !== tag)
 }
 
 function openCreate() {
   editingId.value = undefined
   resetForm()
   dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
 }
 
 function openEdit(record: SugarRecord) {
   editingId.value = record.s_id
-  form.title = record.title
-  form.level_of_happiness = Number(record.level_of_happiness) || 7
-  form.time = record.time?.slice(0, 10) || ''
-  form.category = record.category || ''
-  form.tags = record.tags ? record.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+  form.content = record.title
+  form.level_of_happiness = Number(record.level_of_happiness) || 10
+  form.joy_type = record.joy_type || ''
+  form.tagList = record.tags ? record.tags.split(',').map(t => t.trim()).filter(Boolean) : []
   form.notes = record.notes || ''
   dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
 }
 
 async function handleSubmit() {
@@ -275,11 +348,13 @@ async function handleSubmit() {
   if (!valid) return
 
   const data: Record<string, unknown> = {
-    title: form.title.trim(),
+    title: form.content.trim(),
     level_of_happiness: form.level_of_happiness,
-    time: form.time,
-    category: form.category || null,
-    tags: form.tags.length ? form.tags.join(',') : null,
+    reward_amount: form.level_of_happiness,
+    time: new Date().toISOString().slice(0, 10),
+    category: null,
+    joy_type: form.joy_type || null,
+    tags: form.tagList.length ? form.tagList.join(',') : null,
     notes: form.notes?.trim() || null,
   }
 
@@ -458,6 +533,56 @@ function formatMoney(v: number | string | null | undefined): string {
     margin-bottom: 6px;
     font-weight: 500;
   }
+}
+
+.happiness-slider {
+  width: 100%;
+  .happiness-label {
+    display: block;
+    font-size: 13px;
+    color: #666;
+    margin-top: 4px;
+  }
+}
+
+.reward-display {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e6a23c;
+  line-height: 40px;
+}
+
+.tags-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.preset-label {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.preset-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover { opacity: 0.8; }
+
+  &.selected {
+    background: #ecf5ff;
+    border-color: #409eff;
+    color: #409eff;
+  }
+}
+
+.custom-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .dialog-footer { display: flex; justify-content: flex-end; gap: 12px; }

@@ -1,6 +1,48 @@
 from django.db import models
 
 
+class Quote(models.Model):
+    """摘录馆"""
+
+    LANGUAGE_CHOICES = [
+        ('中文', '🇨🇳 中文'), ('英语', '🇬🇧 英语'), ('日语', '🇯🇵 日语'),
+        ('德语', '🇩🇪 德语'), ('法语', '🇫🇷 法语'), ('韩语', '🇰🇷 韩语'),
+        ('其他', '🌐 其他'),
+    ]
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    content = models.TextField(verbose_name='内容')
+    author = models.CharField(max_length=200, blank=True, default='', verbose_name='作者/出处')
+    language = models.CharField(max_length=20, default='中文', choices=LANGUAGE_CHOICES, verbose_name='语言')
+    category = models.CharField(max_length=50, blank=True, default='', verbose_name='分类')
+    is_paragraph = models.BooleanField(default=False, verbose_name='是否段落')
+    short_title = models.CharField(max_length=100, blank=True, default='', verbose_name='缩减标题')
+    source = models.CharField(max_length=200, blank=True, default='', verbose_name='来源')
+    tags = models.CharField(max_length=500, blank=True, default='', verbose_name='标签')
+    is_favorite = models.BooleanField(default=False, verbose_name='收藏')
+    review_count = models.IntegerField(default=0, verbose_name='回顾次数')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_quote'
+        ordering = ['-created_at']
+        verbose_name = '摘录'
+
+    def __str__(self):
+        return self.content[:50]
+
+    def save(self, *args, **kwargs):
+        if self.is_paragraph and not self.short_title:
+            self.short_title = self.content[:50] + ('...' if len(self.content) > 50 else '')
+        super().save(*args, **kwargs)
+
+    @property
+    def display_title(self):
+        if self.is_paragraph and self.short_title:
+            return self.short_title
+        return self.content[:50]
+
+
 class CityCoordinate(models.Model):
     """中国城市经纬度坐标"""
     name = models.CharField(max_length=100, verbose_name='城市名称')
@@ -201,3 +243,192 @@ class CareerEnergyAudit(models.Model):
 
     def __str__(self):
         return f'职业能量 {self.audit_date} ({self.total_score}分)'
+
+
+class DecisionLog(models.Model):
+    """决策日志"""
+
+    CATEGORY_CHOICES = [
+        ('职业', '职业'), ('关系', '关系'), ('财务', '财务'),
+        ('健康', '健康'), ('居住', '居住'), ('学习', '学习'),
+        ('其他', '其他'),
+    ]
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    title = models.CharField(max_length=200, verbose_name='决策标题')
+    decision_date = models.DateField(verbose_name='决策日期')
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='其他', verbose_name='分类')
+    background = models.TextField(verbose_name='背景/情境')
+    options = models.JSONField(default=list, verbose_name='选项列表', help_text='[{name, pros, cons}]')
+    chosen = models.CharField(max_length=200, verbose_name='最终选择')
+    reason = models.TextField(verbose_name='选择理由')
+    expected_outcome = models.TextField(verbose_name='预期结果')
+    fear_factor = models.IntegerField(default=5, verbose_name='恐惧指数', help_text='1-10')
+    actual_outcome = models.TextField(blank=True, default='', verbose_name='实际结果（半年后回顾）')
+    was_right = models.BooleanField(null=True, blank=True, verbose_name='决策是否正确')
+    learned = models.TextField(blank=True, default='', verbose_name='学到的经验')
+    bias_found = models.CharField(max_length=100, blank=True, default='', verbose_name='发现的偏误')
+    review_date = models.DateField(null=True, blank=True, verbose_name='回顾日期')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_decision_log'
+        ordering = ['-decision_date']
+        verbose_name = '决策日志'
+
+    def __str__(self):
+        return f'{self.title} ({self.decision_date})'
+
+
+class HealthSelfCheck(models.Model):
+    """身体健康自查"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    check_date = models.DateField(verbose_name='检查日期')
+
+    # 头部（4项）
+    headache = models.CharField(max_length=20, default='无', verbose_name='头痛/偏头痛')
+    dizzy = models.CharField(max_length=20, default='无', verbose_name='头晕/眩晕')
+    hairloss = models.CharField(max_length=20, default='正常', verbose_name='脱发')
+    memory = models.CharField(max_length=20, default='无变化', verbose_name='记忆力变化')
+
+    # 五官（5项）
+    vision = models.CharField(max_length=20, default='无', verbose_name='视力模糊/眼干')
+    ear = models.CharField(max_length=20, default='无', verbose_name='耳鸣/听力')
+    ulcer = models.CharField(max_length=20, default='无', verbose_name='口腔溃疡')
+    gum = models.CharField(max_length=20, default='无', verbose_name='牙龈出血')
+    allergy = models.CharField(max_length=20, default='无', verbose_name='鼻塞/过敏')
+
+    # 皮肤（3项）
+    spots = models.CharField(max_length=20, default='无', verbose_name='新发痣/斑')
+    spots_location = models.CharField(max_length=100, blank=True, default='', verbose_name='痣/斑部位')
+    rash = models.CharField(max_length=20, default='无', verbose_name='皮疹/瘙痒')
+    wound_healing = models.CharField(max_length=20, default='正常', verbose_name='伤口愈合速度')
+
+    # 四肢/肌肉（4项）
+    joint = models.CharField(max_length=20, default='无', verbose_name='关节疼痛/僵硬')
+    numbness = models.CharField(max_length=20, default='无', verbose_name='手脚发麻')
+    muscle = models.CharField(max_length=20, default='无', verbose_name='肌肉酸痛')
+    finger_flex = models.CharField(max_length=20, default='正常', verbose_name='手指灵活性')
+
+    # 消化系统（5项）
+    appetite = models.CharField(max_length=20, default='正常', verbose_name='食欲')
+    bloating = models.CharField(max_length=20, default='无', verbose_name='腹胀/打嗝')
+    abdominal_pain = models.CharField(max_length=20, default='无', verbose_name='腹痛')
+    reflux = models.CharField(max_length=20, default='无', verbose_name='胃酸反流')
+    stool_count = models.IntegerField(null=True, blank=True, verbose_name='大便次数')
+    stool_type = models.CharField(max_length=20, default='正常', verbose_name='大便性状')
+
+    # 泌尿系统（2项）
+    urination_pain = models.CharField(max_length=20, default='无', verbose_name='尿频/尿急/尿痛')
+    nocturia = models.IntegerField(null=True, blank=True, verbose_name='夜尿次数')
+
+    # 睡眠（4项）
+    sleep_latency = models.IntegerField(null=True, blank=True, verbose_name='入睡时间(分钟)')
+    awakenings = models.IntegerField(null=True, blank=True, verbose_name='夜间醒来次数')
+    morning_energy = models.CharField(max_length=20, default='恢复感好', verbose_name='晨起精力')
+    snoring = models.CharField(max_length=20, default='无', verbose_name='打鼾')
+
+    # 精力/情绪（4项）
+    fatigue = models.CharField(max_length=20, default='无', verbose_name='疲劳感')
+    mood = models.CharField(max_length=20, default='偶尔', verbose_name='情绪低落/焦虑')
+    afternoon_fatigue = models.CharField(max_length=20, default='偶尔', verbose_name='午后犯困')
+    interest_change = models.CharField(max_length=20, default='正常', verbose_name='兴趣变化')
+
+    # 评分和汇总
+    health_score = models.IntegerField(default=0, verbose_name='健康分')
+    last_score = models.IntegerField(null=True, blank=True, verbose_name='上次分数')
+    score_change = models.IntegerField(null=True, blank=True, verbose_name='分数变化')
+    alert_items = models.TextField(blank=True, default='', verbose_name='异常项汇总')
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_health_self_check'
+        ordering = ['-check_date']
+        verbose_name = '身体健康自查'
+
+    def __str__(self):
+        return f'{self.check_date} 健康分:{self.health_score}'
+
+
+class FreeSpendingCalculator(models.Model):
+    """自由支配额度计算器"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    liquid_assets = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='可支配流动资产(元)')
+    annual_income = models.DecimalField(max_digits=12, decimal_places=2, verbose_name='年稳定收入(元)')
+    debt = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name='固定债务(元)')
+    work_years = models.IntegerField(default=20, verbose_name='预计工作年限')
+    free_amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='计算结果(元/次)')
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_free_spending'
+        ordering = ['-created_at']
+        verbose_name = '自由支配额度计算'
+
+    def __str__(self):
+        return f'¥{self.free_amount} ({self.created_at})'
+
+
+class ReviewRecord(models.Model):
+    """复盘记录"""
+
+    REVIEW_TYPES = [
+        ('daily', '每日复盘'),
+        ('weekly', '周复盘'),
+        ('monthly', '月复盘'),
+        ('quarterly', '季度复盘'),
+        ('life', '人生编舟'),
+    ]
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    review_type = models.CharField(max_length=20, choices=REVIEW_TYPES, verbose_name='复盘类型')
+    review_date = models.DateField(verbose_name='复盘日期')
+
+    # 每日复盘
+    daily_status = models.CharField(max_length=50, blank=True, default='', verbose_name='状态')
+    daily_people = models.TextField(blank=True, default='', verbose_name='那些人那些事')
+    johari_window = models.JSONField(default=dict, blank=True, verbose_name='约哈里窗')
+    emotions = models.JSONField(default=dict, blank=True, verbose_name='情绪清单')
+
+    # 周/月复盘
+    completed = models.TextField(blank=True, default='', verbose_name='本周/月完成')
+    plan_next = models.TextField(blank=True, default='', verbose_name='下周/月计划')
+    reflection = models.TextField(blank=True, default='', verbose_name='反思总结')
+
+    # 月复盘专属
+    grai = models.JSONField(default=dict, blank=True, verbose_name='GRAI复盘')
+    orid = models.JSONField(default=dict, blank=True, verbose_name='ORID复盘')
+
+    # 季度复盘
+    nourishing = models.TextField(blank=True, default='', verbose_name='滋养小事')
+    draining = models.TextField(blank=True, default='', verbose_name='消耗黑洞')
+    fears = models.TextField(blank=True, default='', verbose_name='害怕的事')
+    worries = models.TextField(blank=True, default='', verbose_name='烦恼的事')
+    envy_target = models.TextField(blank=True, default='', verbose_name='羡慕的对象')
+    regret_at_80 = models.TextField(blank=True, default='', verbose_name='80岁遗憾')
+    life_paths = models.TextField(blank=True, default='', verbose_name='5年路径推演')
+
+    # 人生编舟
+    life_line = models.TextField(blank=True, default='', verbose_name='生命线回顾')
+    personal_goals = models.TextField(blank=True, default='', verbose_name='个人目标')
+    time_plan = models.TextField(blank=True, default='', verbose_name='四象限规划')
+    deep_reflection = models.TextField(blank=True, default='', verbose_name='深度复盘')
+
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_review_record'
+        ordering = ['-review_date', '-created_at']
+        verbose_name = '复盘记录'
+        indexes = [
+            models.Index(fields=['review_type']),
+            models.Index(fields=['review_date']),
+        ]
+
+    def __str__(self):
+        return f'{self.get_review_type_display()} {self.review_date}'

@@ -98,6 +98,7 @@ class InboxViewSet(viewsets.ModelViewSet):
             'goal_id': request.data.get('goal_id'),
             'milestone_name': request.data.get('milestone_name', ''),
             'target_date': request.data.get('target_date'),
+            'description': request.data.get('description', ''),
         }
         item = ConverterService.process(item, action_type, **extra)
         serializer = self.get_serializer(item)
@@ -160,6 +161,7 @@ class InboxViewSet(viewsets.ModelViewSet):
             m = Milestone.objects.create(
                 goal=goal,
                 title=item.content,
+                description=item.description or item.content,
                 status='pending',
                 order_num=i + 1,
                 reward_amount=float(reward) if reward else None,
@@ -176,6 +178,22 @@ class InboxViewSet(viewsets.ModelViewSet):
             'milestone_count': len(milestones),
             'converted_count': len(items),
         })
+
+    @action(detail=False, methods=['get'])
+    def calendar(self, request):
+        """获取有截止日期的待办事项（日历视图用，排除已转为目标的）"""
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        qs = InboxItem.objects.filter(
+            due_date__isnull=False,
+        ).exclude(status='processed')
+        if year:
+            qs = qs.filter(due_date__year=year)
+        if month:
+            qs = qs.filter(due_date__month=month)
+        qs = qs.order_by('due_date')
+        serializer = InboxItemSerializer(qs, many=True)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'])
     def today_pending(self, request):
@@ -209,6 +227,7 @@ class InboxViewSet(viewsets.ModelViewSet):
         stats = {
             'total': qs.count(),
             'pending': qs.filter(status='pending').count(),
+            'hesitating': qs.filter(status='hesitating').count(),
             'completed': qs.filter(status='done').count(),
             'processed': qs.filter(status='processed').count(),
         }

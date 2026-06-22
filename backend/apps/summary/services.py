@@ -491,6 +491,20 @@ class QuarterlyWorkbenchService:
             'modules': modules_data,
         }
 
+    # ── 犹豫中事项查询 ────────────────────────────────
+
+    @staticmethod
+    def _hesitating_items() -> list[str]:
+        """返回犹豫中事项的内容列表（最多10条）"""
+        try:
+            from apps.inbox.models import InboxItem
+            return list(
+                InboxItem.objects.filter(status='hesitating')
+                .values_list('content', flat=True)[:10]
+            )
+        except Exception:
+            return []
+
     # ── 公开: 生成洞察与追问 ──────────────────────────
 
     @classmethod
@@ -595,6 +609,20 @@ class QuarterlyWorkbenchService:
                 'question_text': f'已经过去 {quarter}/4 年，但只完成了全年目标的 {round(ytd_ratio * 100, 1)}%。'
                                  f'剩下的时间需要加倍投入。最重要的 1-2 个冲刺目标是什么？',
                 'related_module': '',
+            })
+
+        # 5. 犹豫中事项追问
+        hesitating_items = cls._hesitating_items()
+        if hesitating_items:
+            qk += 1
+            names = '、'.join(f'「{item}」' for item in hesitating_items[:3])
+            extra = f'还有 {len(hesitating_items) - 3} 件类似事项' if len(hesitating_items) > 3 else ''
+            questions.append({
+                'question_key': f'hesitating_{qk}',
+                'question_category': 'general',
+                'question_text': f'你有 {len(hesitating_items)} 件一直想做但不敢开始的事：{names}{extra}。'
+                                 f'这些事你真的做不到，还是只是害怕？如果去掉对结果的担忧，你最想先开始哪一件？',
+                'related_module': 'inbox',
             })
 
         # 如果没有明显问题，给一个正面追问
@@ -728,3 +756,59 @@ class QuarterlyWorkbenchService:
                 })
 
         return insights
+
+
+class BodyMindCorrelationService:
+    """身体-状态关联分析 —— 睡眠、良品率、情绪的相关性"""
+
+    @staticmethod
+    def get_correlation_data(user_id: int = 1, weeks: int = 12) -> list[dict[str, Any]]:
+        """获取近 N 周的睡眠-良品率-情绪关联数据"""
+        from datetime import date, timedelta
+
+        from django.db.models import Avg, Count
+
+        from apps.goals.models import OutputRecord
+        from apps.sugar.models import SugarRecord
+        from apps.toolkit.models import HealthSelfCheck
+
+        result: list[dict[str, Any]] = []
+
+        for i in range(weeks):
+            week_end = date.today() - timedelta(weeks=i)
+            week_start = week_end - timedelta(days=6)
+
+            # 睡眠数据（取每周平均）
+            sleep_checks = HealthSelfCheck.objects.filter(
+                user_id=user_id,
+                check_date__gte=week_start,
+                check_date__lte=week_end,
+            )
+            avg_sleep_latency = sleep_checks.aggregate(avg=Avg('sleep_latency'))['avg'] or 0
+            avg_awakenings = sleep_checks.aggregate(avg=Avg('awakenings'))['avg'] or 0
+
+            # 良品率
+            outputs = OutputRecord.objects.filter(
+                user_id=user_id,
+                occurred_at__gte=week_start,
+                occurred_at__lte=week_end,
+            )
+            total = outputs.count()
+            good = outputs.filter(quality='good').count()
+            output_rate = round(good / total * 100, 1) if total > 0 else None
+
+            # 情绪（小确幸快乐程度均值作为情绪代理）
+            sugar_mood = SugarRecord.objects.filter(
+                time__gte=week_start,
+                time__lte=week_end,
+            ).aggregate(avg=Avg('level_of_happiness'))['avg'] or 0
+
+            result.append({
+                'week': week_end.isoformat(),
+                'week_label': f'{week_start.month}/{week_start.day}-{week_end.month}/{week_end.day}',
+                'sleep_score': round(100 - float(avg_sleep_latency) * 1.5 - float(avg_awakenings) * 15, 1),
+                'output_rate': output_rate,
+                'mood': round(float(sugar_mood), 1),
+            })
+
+        return list(reversed(result))

@@ -42,6 +42,7 @@ class ConverterService:
         milestone = Milestone.objects.create(
             goal=goal,
             title=milestone_name,
+            description=extra.get('description', '') or inbox_item.content,
             status='pending',
             order_num=max_order + 1,
             target_date=extra.get('target_date') or None,

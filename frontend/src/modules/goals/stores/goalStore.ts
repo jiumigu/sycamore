@@ -159,6 +159,7 @@ export const useGoalStore = defineStore('goal', () => {
     if (ms) {
       if (data.status) ms.status = data.status as Milestone['status']
       if (data.completed_note !== undefined) ms.completed_note = data.completed_note as string | null
+      if (data.self_review !== undefined) ms.self_review = data.self_review as string
     }
 
     try {

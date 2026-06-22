@@ -128,6 +128,9 @@
       </div>
     </el-card>
 
+    <!-- 身体-状态关联 -->
+    <BodyMindChart />
+
     <!-- 月度详情表格 -->
     <el-card shadow="hover" class="chart-card full-card">
       <template #header>
@@ -167,6 +170,30 @@
       </el-table>
     </el-card>
 
+    <!-- 每日金句 -->
+    <el-card shadow="hover" class="chart-card full-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">📖 每日金句</span>
+          <el-button size="small" text @click="refreshQuote">🔄 换一句</el-button>
+        </div>
+      </template>
+      <div class="quote-card-body" v-if="dailyQuote">
+        <div v-if="dailyQuote.is_paragraph" class="quote-title" @click="showQuoteFull = true">
+          {{ dailyQuote.short_title || dailyQuote.content.slice(0, 50) + '...' }}
+        </div>
+        <div v-else class="quote-content">{{ dailyQuote.content }}</div>
+        <div class="quote-author" v-if="dailyQuote.author">— {{ dailyQuote.author }}</div>
+        <el-tag size="small">{{ dailyQuote.language }}</el-tag>
+      </div>
+      <div v-else class="chart-empty">暂无金句</div>
+    </el-card>
+    <el-dialog v-model="showQuoteFull" title="金句详情" width="500px">
+      <div class="full-quote-content">{{ dailyQuote?.content }}</div>
+      <div v-if="dailyQuote?.author" class="full-quote-author">— {{ dailyQuote.author }}</div>
+      <div v-if="dailyQuote?.source" class="full-quote-source">📎 {{ dailyQuote.source }}</div>
+    </el-dialog>
+
     <!-- 月度详情弹窗 -->
     <MonthlyModal
       v-model:visible="showMonthModal"
@@ -187,11 +214,25 @@ import ModuleBar from '../components/ModuleBar.vue'
 import RadarChart from '../components/RadarChart.vue'
 import TrendChart from '../components/TrendChart.vue'
 import MonthlyModal from '../components/MonthlyModal.vue'
+import BodyMindChart from '../components/BodyMindChart.vue'
+import { getRandomQuote } from '@/modules/toolkit/api/quoteApi'
+import type { Quote } from '@/modules/toolkit/types/quoteTypes'
 
 const store = useSummaryStore()
 const currentYear = computed(() => store.currentYear)
 const overview = computed(() => store.overview)
 const showMonthModal = ref(false)
+const dailyQuote = ref<Quote | null>(null)
+const showQuoteFull = ref(false)
+
+async function refreshQuote() {
+  try {
+    const res = await getRandomQuote()
+    dailyQuote.value = res.data as Quote
+  } catch {
+    dailyQuote.value = null
+  }
+}
 
 const monthTableData = computed(() => {
   return store.trendData.map(d => ({
@@ -212,6 +253,7 @@ function handleRowClick(row: { month: number }) {
 
 onMounted(() => {
   store.fetchAll()
+  refreshQuote()
 })
 </script>
 
@@ -365,5 +407,44 @@ onMounted(() => {
 .text-warning {
   color: #F59E0B;
   font-weight: 600;
+}
+
+.quote-card-body {
+  padding: 8px 0;
+}
+.quote-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  line-height: 1.5;
+}
+.quote-content {
+  font-size: 14px;
+  color: #1F2937;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.quote-author {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #6B7280;
+  font-style: italic;
+}
+.full-quote-content {
+  font-size: 16px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  margin-bottom: 12px;
+}
+.full-quote-author {
+  font-size: 14px;
+  color: #6B7280;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.full-quote-source {
+  font-size: 13px;
+  color: #9CA3AF;
 }
 </style>

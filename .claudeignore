@@ -1,0 +1,5 @@
+# 禁止 Claude 访问隐私笔记
+/Users/syca/01work/logseq_sycamore
+*.logseq
+**/证件*
+**/密码*

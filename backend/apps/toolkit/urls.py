@@ -9,6 +9,11 @@ router.register(r'cities', views.CityCoordinateViewSet, basename='city-coordinat
 router.register(r'travel-routes', views.TravelRoutePresetViewSet, basename='travel-route')
 router.register(r'environment-audits', views.EnvironmentAuditViewSet, basename='environment-audit')
 router.register(r'career-energy-audits', views.CareerEnergyAuditViewSet, basename='career-energy-audit')
+router.register(r'decision-logs', views.DecisionLogViewSet, basename='decision-log')
+router.register(r'health-self-checks', views.HealthSelfCheckViewSet, basename='health-self-check')
+router.register(r'free-spending', views.FreeSpendingCalculatorViewSet, basename='free-spending')
+router.register(r'review-records', views.ReviewRecordViewSet, basename='review-record')
+router.register(r'quotes', views.QuoteViewSet, basename='quote')
 
 urlpatterns = [
     path('tools/', views.ToolListView.as_view(), name='toolkit-tools'),

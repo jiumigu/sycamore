@@ -13,7 +13,7 @@ class SugarRecordSerializer(serializers.ModelSerializer):
         model = SugarRecord
         fields = [
             's_id', 'years', 'month', 'title', 'level_of_happiness',
-            'time', 'category', 'category_display', 'tags', 'notes',
+            'time', 'category', 'category_display', 'tags', 'joy_type', 'notes',
             'reward_amount', 'reward_synced', 'reward_label',
             'created_at', 'updated_at',
         ]

@@ -25,8 +25,8 @@ const option = computed(() => {
 
   const records = props.trend.records || []
   const dates = records.map(r => r.date)
-  const weights = records.map(r => r.weight_kg)
-  const targetLine = props.trend.target_weight_kg ?? props.stats?.target_weight_kg
+  const weights = records.map(r => (r.weight_kg * 2))  // kg → 斤
+  const targetLine = (props.trend.target_weight_kg ?? props.stats?.target_weight_kg) * 2
 
   const series: echarts.EChartsOption['series'] = [
     {
@@ -57,7 +57,7 @@ const option = computed(() => {
   if (props.trend.milestones?.length) {
     const milestoneMark = props.trend.milestones.map(m => ({
       name: `第${m.month}月`,
-      value: m.target_weight_kg,
+      value: m.target_weight_kg * 2,
       xAxis: dates.length > 0 ? dates[Math.min(m.month * 30, dates.length - 1)] : '',
     }))
     series.push({
@@ -68,7 +68,7 @@ const option = computed(() => {
           const idx = Math.min(m.month * 30, dates.length - 1)
           return i === idx
         })
-        return ms ? ms.target_weight_kg : null
+        return ms ? ms.target_weight_kg * 2 : null
       }),
       symbol: 'diamond',
       symbolSize: 12,
@@ -100,7 +100,7 @@ const option = computed(() => {
           if (p.value === null || p.value === undefined) continue
           html += `<div style="display:flex;justify-content:space-between;gap:12px">
             <span>${p.marker as string} ${p.seriesName as string}</span>
-            <b>${(Number(p.value) * 2).toFixed(1)} 斤</b>
+            <b>${Number(p.value).toFixed(1)} 斤</b>
           </div>`
         }
         return html
@@ -116,11 +116,16 @@ const option = computed(() => {
     },
     yAxis: {
       type: 'value',
+      min: 90,
       name: '斤',
       nameTextStyle: { color: '#9CA3AF', fontSize: 11 },
       axisLine: { show: false },
       splitLine: { lineStyle: { color: '#F3F4F6' } },
-      axisLabel: { color: '#6B7280', fontSize: 11 },
+      axisLabel: {
+        color: '#6B7280',
+        fontSize: 11,
+        formatter: (v: number) => v + ' 斤',
+      },
     },
     series,
   }
