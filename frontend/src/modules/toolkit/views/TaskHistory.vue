@@ -127,9 +127,7 @@ function handlePageChange(p: number) {
 }
 
 onMounted(async () => {
-  await Promise.all([
-    store.fetchTools(),
-  ])
+  [await store.fetchTools()]
   await refresh()
 })
 </script>

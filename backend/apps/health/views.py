@@ -3,9 +3,10 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import HealthRecord, WeightGoal, WeightMilestone, WeightRecord, UserBodyInfo
+from .models import HealthRecord, MenstrualRecord, WeightGoal, WeightMilestone, WeightRecord, UserBodyInfo
 from .serializers import (
     HealthRecordSerializer,
+    MenstrualRecordSerializer,
     UserBodyInfoSerializer,
     WeightGoalSerializer,
     WeightMilestoneSerializer,
@@ -190,3 +191,64 @@ class WeightViewSet(viewsets.ModelViewSet):
         )
         serializer = UserBodyInfoSerializer(info)
         return Response(serializer.data)
+
+
+class MenstrualViewSet(viewsets.ModelViewSet):
+    """好朋友跟踪视图集"""
+
+    permission_classes = [AllowAny]
+    serializer_class = MenstrualRecordSerializer
+
+    def get_queryset(self):
+        qs = MenstrualRecord.objects.filter(user_id=1)
+        year = self.request.query_params.get('year')
+        if year:
+            qs = qs.filter(year=int(year))
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(user_id=1)
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """统计：平均周期、平均偏移、下次预测"""
+        records = MenstrualRecord.objects.filter(user_id=1).order_by('-start_date')
+        total = records.count()
+        if total == 0:
+            return Response({
+                'total_records': 0, 'avg_cycle': 0, 'avg_offset': 0,
+                'predicted_next': None, 'min_cycle': 0, 'max_cycle': 0,
+            })
+
+        cycles = [r.cycle_days for r in records if r.cycle_days > 0]
+        offsets = [r.offset for r in records]
+
+        avg_cycle = round(sum(cycles) / len(cycles)) if cycles else 0
+        avg_offset = round(sum(offsets) / len(offsets)) if offsets else 0
+        min_cycle = min(cycles) if cycles else 0
+        max_cycle = max(cycles) if cycles else 0
+
+        latest = records.first()
+        from datetime import timedelta
+        predicted_next = (latest.start_date + timedelta(days=avg_cycle)).isoformat() if avg_cycle else None
+
+        return Response({
+            'total_records': total,
+            'avg_cycle': avg_cycle,
+            'avg_offset': avg_offset,
+            'predicted_next': predicted_next,
+            'min_cycle': min_cycle,
+            'max_cycle': max_cycle,
+        })
+
+    @action(detail=False, methods=['get'])
+    def trend(self, request):
+        """周期跨度趋势（全部记录正序）"""
+        records = MenstrualRecord.objects.filter(
+            user_id=1, cycle_days__gt=0
+        ).order_by('start_date')
+
+        return Response([{
+            'date': r.start_date.isoformat(),
+            'cycle_days': r.cycle_days,
+        } for r in records])

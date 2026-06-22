@@ -93,3 +93,49 @@ export function createCareerEnergyAudit(data: Record<string, unknown>) {
 export function deleteCareerEnergyAudit(id: number) {
   return request({ url: `/toolkit/career-energy-audits/${id}/`, method: 'delete' })
 }
+
+// ────────── 身体健康自查 ──────────
+
+export function getHealthSelfChecks(params?: Record<string, unknown>) {
+  return request({ url: '/toolkit/health-self-checks/', method: 'get', params })
+}
+
+export function createHealthSelfCheck(data: Record<string, unknown>) {
+  return request({ url: '/toolkit/health-self-checks/', method: 'post', data })
+}
+
+export function deleteHealthSelfCheck(id: number) {
+  return request({ url: `/toolkit/health-self-checks/${id}/`, method: 'delete' })
+}
+
+// ────────── 复盘记录 ──────────
+
+export function getReviewRecords(params?: Record<string, unknown>) {
+  return request({ url: '/toolkit/review-records/', method: 'get', params })
+}
+
+export function createReviewRecord(data: Record<string, unknown>) {
+  return request({ url: '/toolkit/review-records/', method: 'post', data })
+}
+
+export function updateReviewRecord(id: number, data: Record<string, unknown>) {
+  return request({ url: `/toolkit/review-records/${id}/`, method: 'patch', data })
+}
+
+export function deleteReviewRecord(id: number) {
+  return request({ url: `/toolkit/review-records/${id}/`, method: 'delete' })
+}
+
+// ────────── 自由支配额度计算 ──────────
+
+export function getFreeSpendingList(params?: Record<string, unknown>) {
+  return request({ url: '/toolkit/free-spending/', method: 'get', params })
+}
+
+export function createFreeSpending(data: Record<string, unknown>) {
+  return request({ url: '/toolkit/free-spending/', method: 'post', data })
+}
+
+export function deleteFreeSpending(id: number) {
+  return request({ url: `/toolkit/free-spending/${id}/`, method: 'delete' })
+}

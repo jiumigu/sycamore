@@ -3,6 +3,7 @@ import os
 import time
 import uuid
 
+from django.db import models
 from django.conf import settings
 from django.utils import timezone
 
@@ -12,18 +13,23 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import CareerEnergyAudit, CityCoordinate, EnvironmentAudit, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 from .registry import ToolRegistry
 from .serializers import (
     CareerEnergyAuditSerializer,
     CityCoordinateSerializer,
+    DecisionLogSerializer,
     EnvironmentAuditSerializer,
     ExecutionSerializer,
     ExecuteToolSerializer,
+    FreeSpendingCalculatorSerializer,
+    HealthSelfCheckSerializer,
+    QuoteSerializer,
+    ReviewRecordSerializer,
     ToolInfoSerializer,
     TravelRoutePresetSerializer,
 )
-from .services import update_career_audit_decision
+from .services import calculate_health_score, collect_health_alerts, update_career_audit_decision
 
 
 class CityCoordinateViewSet(viewsets.ReadOnlyModelViewSet):
@@ -433,3 +439,140 @@ class CareerEnergyAuditViewSet(viewsets.ModelViewSet):
             'total_score', 'decision', 'advice',
             'work_score', 'env_score', 'growth_score', 'body_score',
         ])
+
+
+class QuoteViewSet(viewsets.ModelViewSet):
+    """摘录馆"""
+    queryset = Quote.objects.all()
+    permission_classes = [AllowAny]
+    serializer_class = QuoteSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tags = self.request.query_params.get('tags', '').strip()
+        if tags:
+            qs = qs.filter(tags__contains=tags)
+        lang = self.request.query_params.get('language', '').strip()
+        if lang:
+            qs = qs.filter(language=lang)
+        para = self.request.query_params.get('is_paragraph')
+        if para is not None and para != '':
+            qs = qs.filter(is_paragraph=para.lower() in ('true', '1'))
+        return qs
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        qs = self.get_queryset()
+        total = qs.count()
+        paragraphs = qs.filter(is_paragraph=True).count()
+        total_reviews = qs.aggregate(total=models.Sum('review_count'))['total'] or 0
+        return Response({
+            'total': total,
+            'paragraphs': paragraphs,
+            'shorts': total - paragraphs,
+            'total_reviews': total_reviews,
+        })
+
+    @action(detail=False, methods=['get'])
+    def random(self, request):
+        """随机返回一条摘录（排除默认日记标题）"""
+        quote = Quote.objects.exclude(
+            content__icontains='幸福未被发现，就叫做普通的一天'
+        ).exclude(
+            short_title__icontains='幸福未被发现，就叫做普通的一天'
+        ).order_by('?').first()
+        if not quote:
+            return Response(None, status=204)
+        # 每次随机查看增加回顾次数
+        Quote.objects.filter(id=quote.id).update(review_count=models.F('review_count') + 1)
+        quote.refresh_from_db()
+        return Response(QuoteSerializer(quote).data)
+
+
+class DecisionLogViewSet(viewsets.ModelViewSet):
+    """决策日志 CRUD"""
+
+    permission_classes = [AllowAny]
+    queryset = DecisionLog.objects.all()
+    serializer_class = DecisionLogSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        year = self.request.query_params.get('year')
+        category = self.request.query_params.get('category')
+        if year:
+            qs = qs.filter(decision_date__year=int(year))
+        if category:
+            qs = qs.filter(category=category)
+        return qs
+
+
+class HealthSelfCheckViewSet(viewsets.ModelViewSet):
+    """身体健康自查 CRUD"""
+
+    permission_classes = [AllowAny]
+    queryset = HealthSelfCheck.objects.all()
+    serializer_class = HealthSelfCheckSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        year = self.request.query_params.get('year')
+        if year:
+            qs = qs.filter(check_date__year=int(year))
+        return qs
+
+    def perform_create(self, serializer):
+        instance = serializer.save(user_id=1)
+        self._recalc(instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self._recalc(instance)
+
+    def _recalc(self, instance):
+        data = {f.name: getattr(instance, f.name) for f in HealthSelfCheck._meta.fields}
+        instance.health_score = calculate_health_score(data)
+        instance.alert_items = '；'.join(collect_health_alerts(data))
+
+        prev = (HealthSelfCheck.objects
+                .filter(check_date__lt=instance.check_date, user_id=1)
+                .order_by('-check_date').first())
+        if prev:
+            instance.last_score = prev.health_score
+            instance.score_change = instance.health_score - prev.health_score
+
+        instance.save(update_fields=['health_score', 'last_score', 'score_change', 'alert_items'])
+
+
+class FreeSpendingCalculatorViewSet(viewsets.ModelViewSet):
+    """自由支配额度计算 CRUD"""
+
+    permission_classes = [AllowAny]
+    queryset = FreeSpendingCalculator.objects.all()
+    serializer_class = FreeSpendingCalculatorSerializer
+
+    def get_queryset(self):
+        return FreeSpendingCalculator.objects.filter(user_id=1)
+
+    def perform_create(self, serializer):
+        serializer.save(user_id=1)
+
+
+class ReviewRecordViewSet(viewsets.ModelViewSet):
+    """复盘记录 CRUD"""
+
+    permission_classes = [AllowAny]
+    serializer_class = ReviewRecordSerializer
+
+    def get_queryset(self):
+        qs = ReviewRecord.objects.filter(user_id=1)
+        rtype = self.request.query_params.get('review_type', '').strip()
+        if rtype:
+            qs = qs.filter(review_type=rtype)
+        year = self.request.query_params.get('year')
+        if year:
+            qs = qs.filter(review_date__year=int(year))
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(user_id=1)

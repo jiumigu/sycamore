@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import CareerEnergyAudit, CityCoordinate, EnvironmentAudit, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, Quote, ReviewRecord, TravelRoutePreset
 
 
 class CityCoordinateSerializer(serializers.ModelSerializer):
@@ -73,3 +73,43 @@ class CareerEnergyAuditSerializer(serializers.ModelSerializer):
         model = CareerEnergyAudit
         fields = '__all__'
         read_only_fields = ['total_score', 'decision', 'advice', 'work_score', 'env_score', 'growth_score', 'body_score', 'created_at']
+
+
+class QuoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Quote
+        fields = '__all__'
+        read_only_fields = ['review_count', 'created_at']
+
+
+class DecisionLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DecisionLog
+        fields = '__all__'
+        read_only_fields = ['created_at']
+
+
+class HealthSelfCheckSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HealthSelfCheck
+        fields = '__all__'
+        read_only_fields = ['health_score', 'last_score', 'score_change', 'alert_items', 'created_at']
+
+
+class FreeSpendingCalculatorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FreeSpendingCalculator
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+
+class ReviewRecordSerializer(serializers.ModelSerializer):
+    review_type_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReviewRecord
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+    def get_review_type_display(self, obj):
+        return obj.get_review_type_display()

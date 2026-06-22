@@ -24,6 +24,10 @@ export function getSugarCategories(params?: Record<string, unknown>) {
   return request({ url: '/sugar/categories/', method: 'get', params })
 }
 
+export function getJoyTypeStats(params?: Record<string, unknown>) {
+  return request({ url: '/sugar/records/joy_type_stats/', method: 'get', params })
+}
+
 // ─── 小确幸模板 API ───
 
 export function getSugarTemplates() {

@@ -133,6 +133,7 @@ async function handleConvert() {
     extra.goal_id = goalId.value
     extra.milestone_name = milestoneName.value || ''
     extra.target_date = targetDate.value || ''
+    extra.description = props.item.content
   }
 
   await store.convertItem(props.item.id, action.value, extra)

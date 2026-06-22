@@ -20,6 +20,18 @@
     <!-- ========== 奖励池卡片 ========== -->
     <BalanceCard :pool="store.pool" />
 
+    <!-- ========== 来源筛选 ========== -->
+    <el-card shadow="hover" class="filter-card">
+      <div class="filter-row">
+        <span class="filter-label">来源</span>
+        <el-radio-group v-model="filterSource" size="small">
+          <el-radio-button value="">全部</el-radio-button>
+          <el-radio-button value="sugar">🍰 小确幸</el-radio-button>
+          <el-radio-button value="milestone">🎯 里程碑</el-radio-button>
+        </el-radio-group>
+      </div>
+    </el-card>
+
     <!-- ========== 奖励流水（含紧凑来源比例行） ========== -->
     <RewardTimeline
       :transactions="displayTransactions"
@@ -30,7 +42,7 @@
       :source-stats="store.sourceStats"
       @update:page="txPage = $event"
       @update:page-size="txPageSize = $event"
-      @deleted="store.refreshAll()"
+      @deleted="handleDeleted"
     />
 
     <!-- ========== 礼物清单抽屉 ========== -->
@@ -122,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRewardStore } from '../stores/rewardStore'
@@ -135,6 +147,26 @@ import GiftForm from '../components/gift/GiftForm.vue'
 import GiftExchangeModal from '../components/gift/GiftExchangeModal.vue'
 
 const store = useRewardStore()
+
+// 来源筛选
+const filterSource = ref('')
+
+watch(filterSource, () => {
+  txPage.value = 1
+  fetchFilteredTransactions()
+})
+
+function fetchFilteredTransactions() {
+  const params: Record<string, unknown> = { page: 1, page_size: 1000 }
+  if (filterSource.value) params.source_type = filterSource.value
+  store.fetchTransactions(params)
+}
+
+function handleDeleted() {
+  fetchFilteredTransactions()
+  store.fetchSourceStats()
+  store.fetchPool()
+}
 
 // 交易流水
 const txPage = ref(1)
@@ -208,9 +240,7 @@ function openRedeemDialog(gift: GiftList) {
 
 async function handleExchangeConfirm(data: { gift_id: number; actual_reward?: number }) {
   try {
-    await redeemGift(data.gift_id, {
-      ...(data.actual_reward ? { actual_reward: data.actual_reward } : {}),
-    })
+    await redeemGift(data.gift_id, (data.actual_reward ? { actual_reward: data.actual_reward } : {}))
     ElMessage.success('兑换成功！🎉')
     exchangeVisible.value = false
     exchangingGift.value = null
@@ -284,6 +314,26 @@ onMounted(() => {
 
     .header-actions { display: flex; gap: 8px; }
   }
+}
+
+// ========== 筛选卡片 ==========
+.filter-card {
+  border: none;
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+.filter-card :deep(.el-card__body) {
+  padding: 12px 16px;
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.filter-label {
+  font-size: 13px;
+  color: #606266;
+  flex-shrink: 0;
 }
 
 // ========== 抽屉样式 ==========

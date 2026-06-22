@@ -9,6 +9,7 @@ const routes: RouteRecordRaw[] = [
   // 仪表盘
   { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { title: '仪表盘' } },
   { path: '/summary', name: 'summary', component: () => import('@/modules/summary/views/SummaryDashboard.vue'), meta: { title: '汇总总览' } },
+  { path: '/summary/profile', name: 'summary-profile', component: () => import('@/modules/summary/views/PersonalProfile.vue'), meta: { title: '个人画像' } },
   { path: '/summary/quarterly', name: 'summary-quarterly', component: () => import('@/modules/summary/views/QuarterlyWorkbench.vue'), meta: { title: '季度决策' } },
 
   // 收件箱
@@ -32,6 +33,12 @@ const routes: RouteRecordRaw[] = [
     name: 'WeeklyTracking',
     component: () => import('@/modules/temporal/views/WeeklyTrackingView.vue'),
     meta: { title: '年度周度追踪' },
+  },
+  {
+    path: '/temporal/schedule',
+    name: 'schedule',
+    component: () => import('@/modules/temporal/views/ScheduleView.vue'),
+    meta: { title: '日程视图' },
   },
 
   // 目标与项目
@@ -82,6 +89,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/health/views/weight/WeightDashboard.vue'),
         meta: { title: '体重管理' },
       },
+      {
+        path: 'menstrual',
+        name: 'health-menstrual',
+        component: () => import('@/modules/health/views/MenstrualView.vue'),
+        meta: { title: '好朋友跟踪' },
+      },
     ],
   },
   { path: '/dance', name: 'dance', component: () => import('@/modules/dance/views/DanceView.vue'), meta: { title: '舞蹈记录' } },
@@ -90,6 +103,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/nourishment', name: 'nourishment', component: () => import('@/modules/sugar/views/SugarView.vue'), meta: { title: '精神花园' } },
   { path: '/books', name: 'books', component: BookView, meta: { title: '书籍阅读' } },
   { path: '/sugar', name: 'sugar', component: () => import('@/modules/sugar/views/SugarView.vue'), meta: { title: '小确幸' } },
+  { path: '/sugar/joy-types', name: 'sugar-joy-types', component: () => import('@/modules/sugar/views/JoyTypeChart.vue'), meta: { title: '快乐偏好图谱' } },
   { path: '/treasure', name: 'treasure', component: () => import('@/modules/treasure/views/TreasureHub.vue'), meta: { title: '好东西档案馆' } },
 
   // 财富管理
@@ -165,6 +179,56 @@ const routes: RouteRecordRaw[] = [
         name: 'toolkit-history',
         component: () => import('@/modules/toolkit/views/TaskHistory.vue'),
         meta: { title: '执行历史' },
+      },
+      {
+        path: 'quotes',
+        name: 'toolkit-quotes',
+        component: () => import('@/modules/toolkit/views/QuoteManager.vue'),
+        meta: { title: '摘录馆' },
+      },
+      {
+        path: 'quote-tool',
+        redirect: '/toolkit/quotes',
+      },
+      {
+        path: 'health-self-check',
+        name: 'health-self-check',
+        component: () => import('@/modules/toolkit/views/tools/HealthSelfCheck.vue'),
+        meta: { title: '身体健康自查' },
+      },
+      {
+        path: 'health-self-check-tool',
+        redirect: '/toolkit/health-self-check',
+      },
+      {
+        path: 'decision-log',
+        name: 'decision-log',
+        component: () => import('@/modules/toolkit/views/tools/DecisionLog.vue'),
+        meta: { title: '决策日志' },
+      },
+      {
+        path: 'decision-log-tool',
+        redirect: '/toolkit/decision-log',
+      },
+      {
+        path: 'free-spending',
+        name: 'free-spending',
+        component: () => import('@/modules/toolkit/views/tools/FreeSpending.vue'),
+        meta: { title: '自由支配额度' },
+      },
+      {
+        path: 'free-spending-tool',
+        redirect: '/toolkit/free-spending',
+      },
+      {
+        path: 'review-toolbox',
+        name: 'review-toolbox',
+        component: () => import('@/modules/toolkit/views/tools/ReviewToolbox.vue'),
+        meta: { title: '复盘工具箱' },
+      },
+      {
+        path: 'review-toolbox-tool',
+        redirect: '/toolkit/review-toolbox',
       },
       {
         path: ':toolKey',

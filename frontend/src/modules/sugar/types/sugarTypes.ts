@@ -8,6 +8,7 @@ export interface SugarRecord {
   category: string | null
   category_display?: string | null
   tags: string | null
+  joy_type: string
   notes: string | null
   reward_amount: number
   reward_synced: boolean
@@ -119,4 +120,39 @@ export const ENERGY_CATEGORY_CONFIG: Record<string, { label: string; icon: strin
   creative: { label: '创意', icon: '✨' },
   social: { label: '社交', icon: '💬' },
   relax: { label: '放松', icon: '🧘' },
+}
+
+// ─── 快乐类型 ───
+
+export interface JoyTypeStat {
+  joy_type: string
+  count: number
+  percentage: number
+  total_happiness: number
+  avg_happiness: number
+}
+
+export interface JoyTypeStats {
+  joy_types: JoyTypeStat[]
+  total: number
+}
+
+export const JOY_TYPE_OPTIONS = [
+  { value: '创造', label: '创造', icon: '🎨' },
+  { value: '社交', label: '社交', icon: '💬' },
+  { value: '独处', label: '独处', icon: '🧘' },
+  { value: '户外', label: '户外', icon: '🌿' },
+  { value: '美食', label: '美食', icon: '🍽️' },
+  { value: '学习', label: '学习', icon: '📚' },
+  { value: '其他', label: '其他', icon: '✨' },
+]
+
+export const JOY_TYPE_COLORS: Record<string, string> = {
+  '创造': '#8B5CF6',
+  '社交': '#3B82F6',
+  '独处': '#10B981',
+  '户外': '#F59E0B',
+  '美食': '#EF4444',
+  '学习': '#06B6D4',
+  '其他': '#9CA3AF',
 }

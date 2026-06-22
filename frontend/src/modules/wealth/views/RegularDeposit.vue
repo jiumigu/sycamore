@@ -56,6 +56,15 @@
         <el-table-column label="到期" width="90">
           <template #default="{ row }">{{ row.end_date }}</template>
         </el-table-column>
+        <el-table-column label="倒计时" width="80">
+          <template #default="{ row }">
+            <span v-if="row.flag === 2" class="text-muted">已取出</span>
+            <span v-else-if="row.flag === 1" class="text-warning">已到期</span>
+            <span v-else :class="getCountdownClass(row.end_date)">
+              {{ getCountdown(row.end_date) }}
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column label="利息" width="75" align="right">
           <template #default="{ row }">{{ maskAmount(row.interest, privacyStore.privacyMode) }}</template>
         </el-table-column>
@@ -129,6 +138,26 @@ const privacyStore = usePrivacyStore()
 function flagType(flag: number): 'success' | 'warning' | 'info' | 'danger' | '' {
   const map: Record<number, 'success' | 'warning' | 'info'> = { 0: 'success', 1: 'warning', 2: 'info' }
   return map[flag] || 'info'
+}
+
+function getCountdown(endDate: string): string {
+  if (!endDate) return '-'
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const end = new Date(endDate)
+  end.setHours(0, 0, 0, 0)
+  const diff = Math.ceil((end.getTime() - today.getTime()) / 86400000)
+  if (diff < 0) return `过期${Math.abs(diff)}天`
+  if (diff === 0) return '今天到期'
+  return `剩${diff}天`
+}
+
+function getCountdownClass(endDate: string): string {
+  const diff = Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000)
+  if (diff < 0) return 'text-danger'
+  if (diff <= 7) return 'text-warning'
+  if (diff <= 30) return 'text-info'
+  return 'text-success'
 }
 
 function handleMature(item: RegularItem | ExpiringItem) {
@@ -224,4 +253,10 @@ onMounted(() => {
   color: #9CA3AF;
   font-size: 13px;
 }
+
+.text-danger { color: #f56c6c; font-weight: 600; }
+.text-warning { color: #e6a23c; }
+.text-info { color: #409eff; }
+.text-success { color: #67c23a; }
+.text-muted { color: #ccc; }
 </style>

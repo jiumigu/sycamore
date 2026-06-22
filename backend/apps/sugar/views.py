@@ -85,6 +85,42 @@ class SugarRecordViewSet(viewsets.ModelViewSet):
         service.delete(s_id=instance.s_id)
 
     @action(detail=False, methods=['get'])
+    def joy_type_stats(self, request):
+        """获取快乐类型分布统计"""
+        qs = SugarRecord.objects.exclude(joy_type='')
+
+        params = self.request.query_params
+        year = params.get('year')
+        if year:
+            qs = qs.filter(years=int(year))
+        month = params.get('month')
+        if month:
+            qs = qs.filter(month=int(month))
+
+        stats = (
+            qs.values('joy_type')
+            .annotate(
+                count=Count('s_id'),
+                total_happiness=Sum('level_of_happiness'),
+                avg_happiness=Avg('level_of_happiness'),
+            )
+            .order_by('-count')
+        )
+
+        total = sum(s['count'] for s in stats)
+        result = []
+        for s in stats:
+            result.append({
+                'joy_type': s['joy_type'],
+                'count': s['count'],
+                'percentage': round(s['count'] / total * 100, 1) if total else 0,
+                'total_happiness': float(s['total_happiness'] or 0),
+                'avg_happiness': round(float(s['avg_happiness'] or 0), 1),
+            })
+
+        return Response({'joy_types': result, 'total': total})
+
+    @action(detail=False, methods=['get'])
     def categories(self, request):
         """获取分类统计及整体汇总"""
         qs = SugarRecord.objects

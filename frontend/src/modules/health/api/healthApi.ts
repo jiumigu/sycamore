@@ -93,3 +93,29 @@ export function getWeightBodyInfo(params?: Record<string, unknown>) {
 export function updateWeightBodyInfo(data: Record<string, unknown>) {
   return request({ url: '/health/weight/body-info/', method: 'put', data })
 }
+
+// ─── 好朋友跟踪 ───
+
+export function getMenstrualRecords(params?: Record<string, unknown>) {
+  return request({ url: '/health/menstrual/', method: 'get', params })
+}
+
+export function createMenstrualRecord(data: Record<string, unknown>) {
+  return request({ url: '/health/menstrual/', method: 'post', data })
+}
+
+export function updateMenstrualRecord(id: number, data: Record<string, unknown>) {
+  return request({ url: `/health/menstrual/${id}/`, method: 'put', data })
+}
+
+export function deleteMenstrualRecord(id: number) {
+  return request({ url: `/health/menstrual/${id}/`, method: 'delete' })
+}
+
+export function getMenstrualStats() {
+  return request({ url: '/health/menstrual/stats/', method: 'get' })
+}
+
+export function getMenstrualTrend() {
+  return request({ url: '/health/menstrual/trend/', method: 'get' })
+}

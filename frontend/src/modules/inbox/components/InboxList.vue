@@ -57,6 +57,9 @@ function handleAction(item: InboxItem, cmd: string) {
   else if (cmd === 'edit') emit('edit', item)
   else if (cmd === 'convert') emit('convert', item)
   else if (cmd === 'delete') store.deleteItem(item.id)
+  else if (cmd === 'resume') {
+    store.updateItem(item.id, { status: 'pending', hesitate_reason: '' })
+  }
 }
 </script>
 

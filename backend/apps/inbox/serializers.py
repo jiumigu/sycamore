@@ -23,6 +23,7 @@ class InboxItemSerializer(serializers.ModelSerializer):
     status_display = serializers.SerializerMethodField()
     priority_display = serializers.SerializerMethodField()
     source_display = serializers.SerializerMethodField()
+    category = serializers.CharField(allow_blank=True)
 
     class Meta:
         model = InboxItem
@@ -35,7 +36,7 @@ class InboxItemSerializer(serializers.ModelSerializer):
             'due_date', 'remind_at', 'processed_at',
             'priority', 'priority_display',
             'user_id', 'created_at', 'updated_at',
-            'completion_note',
+            'completion_note', 'hesitate_reason',
         ]
         read_only_fields = ['id', 'processed_at', 'created_at', 'updated_at', 'completion_note']
 
@@ -57,6 +58,7 @@ class InboxItemDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.SerializerMethodField()
     priority_display = serializers.SerializerMethodField()
     source_display = serializers.SerializerMethodField()
+    category = serializers.CharField(allow_blank=True)
     process_logs = InboxProcessLogSerializer(many=True, read_only=True)
 
     class Meta:
@@ -70,7 +72,7 @@ class InboxItemDetailSerializer(serializers.ModelSerializer):
             'due_date', 'remind_at', 'processed_at',
             'priority', 'priority_display',
             'user_id', 'created_at', 'updated_at',
-            'completion_note',
+            'completion_note', 'hesitate_reason',
             'process_logs',
         ]
         read_only_fields = ['id', 'processed_at', 'created_at', 'updated_at', 'completion_note']

@@ -9,8 +9,8 @@
         style="width: 200px"
         @input="handleSearch"
       />
-      <el-select v-model="store.filterCategory" placeholder="类别" size="small" clearable style="width: 100px" @change="store.search()">
-        <el-option v-for="c in CATEGORY_OPTIONS" :key="c.value" :label="`${c.icon} ${c.label}`" :value="c.value" />
+      <el-select v-model="store.filterCategory" placeholder="类别" size="small" clearable style="width: 120px" @change="store.search()">
+        <el-option v-for="c in categoryOptions" :key="c.value" :label="`${c.icon} ${c.label}`" :value="c.value" />
       </el-select>
       <el-select v-model="store.filterPriority" placeholder="优先级" size="small" clearable style="width: 90px" @change="store.search()">
         <el-option label="🔴 高" value="high" />
@@ -27,10 +27,21 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { CATEGORY_OPTIONS } from '../types/inboxTypes'
 import { useInboxStore } from '../stores/inboxStore'
 
 const store = useInboxStore()
+
+const categoryOptions = computed(() => {
+  const customCats = new Set(store.items.map(i => i.category).filter(Boolean))
+  return [
+    ...CATEGORY_OPTIONS,
+    ...[...customCats]
+      .filter(c => !CATEGORY_OPTIONS.some(o => o.value === c))
+      .map(c => ({ value: c, label: c, icon: '📌' })),
+  ]
+})
 
 const batchMode = defineModel<boolean>('batchMode', { default: false })
 

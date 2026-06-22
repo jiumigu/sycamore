@@ -15,6 +15,7 @@ class InboxItem(models.Model):
 
     STATUS_CHOICES = [
         ('pending', '待处理'),
+        ('hesitating', '犹豫中'),
         ('processed', '已处理'),
         ('done', '已完成'),
         ('archived', '已归档'),
@@ -38,7 +39,7 @@ class InboxItem(models.Model):
     description = models.TextField(blank=True, null=True, verbose_name='详细描述')
 
     category = models.CharField(
-        max_length=50, choices=CATEGORY_CHOICES, default='other', verbose_name='类别',
+        max_length=50, default='other', verbose_name='类别',
     )
     tags = models.CharField(max_length=500, blank=True, null=True, verbose_name='标签（逗号分隔）')
 
@@ -58,6 +59,7 @@ class InboxItem(models.Model):
     remind_at = models.DateTimeField(blank=True, null=True, verbose_name='提醒时间')
     processed_at = models.DateTimeField(blank=True, null=True, verbose_name='处理时间')
     completion_note = models.TextField(blank=True, default='', verbose_name='完成备注')
+    hesitate_reason = models.TextField(blank=True, default='', verbose_name='犹豫原因')
 
     priority = models.CharField(
         max_length=20, choices=PRIORITY_CHOICES, default='medium', verbose_name='优先级',
@@ -83,6 +85,12 @@ class InboxItem(models.Model):
 
     def __str__(self):
         return self.content[:50]
+
+    def get_category_display(self):
+        for val, label in self.CATEGORY_CHOICES:
+            if val == self.category:
+                return label
+        return self.category
 
 
 class InboxProcessLog(models.Model):

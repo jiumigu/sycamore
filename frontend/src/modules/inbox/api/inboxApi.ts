@@ -16,7 +16,7 @@ export function getInboxDetail(id: number) {
 }
 
 export function updateInboxItem(id: number, data: Record<string, unknown>) {
-  return request<InboxItem>({ url: `/inbox/items/${id}/`, method: 'put', data })
+  return request<InboxItem>({ url: `/inbox/items/${id}/`, method: 'patch', data })
 }
 
 export function deleteInboxItem(id: number) {

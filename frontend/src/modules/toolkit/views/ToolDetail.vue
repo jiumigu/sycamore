@@ -25,6 +25,9 @@
       <TravelRoute v-if="toolKey === 'travel-route'" />
       <EnvironmentAudit v-else-if="toolKey === 'environment-audit'" />
       <CareerEnergyAudit v-else-if="toolKey === 'career-energy-audit'" />
+      <HealthSelfCheck v-else-if="toolKey === 'health-self-check'" />
+      <FreeSpending v-else-if="toolKey === 'free-spending'" />
+      <ReviewToolbox v-else-if="toolKey === 'review-toolbox'" />
 
       <!-- 执行区 -->
       <template v-else>
@@ -202,6 +205,9 @@ import type { ToolDefinition, SchemaProperty } from '../types/toolkitTypes'
 import TravelRoute from './tools/TravelRoute.vue'
 import EnvironmentAudit from './tools/EnvironmentAudit.vue'
 import CareerEnergyAudit from './tools/CareerEnergyAudit.vue'
+import HealthSelfCheck from './tools/HealthSelfCheck.vue'
+import FreeSpending from './tools/FreeSpending.vue'
+import ReviewToolbox from './tools/ReviewToolbox.vue'
 
 const route = useRoute()
 const store = useToolkitStore()

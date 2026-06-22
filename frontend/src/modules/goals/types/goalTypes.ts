@@ -15,6 +15,8 @@ export interface Milestone {
   status: MilestoneStatus
   status_display?: string
   completed_note: string | null
+  self_review?: string
+  description?: string
   order_num: number
   target_date: string | null
   target_value: number | null
@@ -63,6 +65,8 @@ export interface Goal {
   category: GoalCategory
   category_display?: string
   tags: string[] | null
+  action_count?: number
+  milestone_count?: number
   priority: GoalPriority
   priority_display?: string
   status: GoalStatus

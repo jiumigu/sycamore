@@ -22,7 +22,7 @@
       <el-button size="small" link @click="showDetail = !showDetail">
         📎 {{ showDetail ? '收起详情' : '添加详情' }}
       </el-button>
-      <el-select v-model="category" size="small" placeholder="类别" style="width: 100px">
+      <el-select v-model="category" size="small" placeholder="类别" style="width: 100px" allow-create filterable>
         <el-option
           v-for="c in CATEGORY_OPTIONS"
           :key="c.value"

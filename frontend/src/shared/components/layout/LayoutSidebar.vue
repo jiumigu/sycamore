@@ -42,6 +42,15 @@
         </router-link>
 
         <router-link
+          to="/summary/profile"
+          class="nav-item"
+          :class="{ active: isRouteActive('/summary/profile') }"
+        >
+          <el-icon><User /></el-icon>
+          <span v-if="!isCollapsed">个人画像</span>
+        </router-link>
+
+        <router-link
           to="/inbox"
           class="nav-item"
           :class="{ active: isRouteActive('/inbox') }"
@@ -90,6 +99,16 @@
         >
           <el-icon><TrendCharts /></el-icon>
           <span v-if="!isCollapsed">周度追踪</span>
+        </router-link>
+
+        <router-link
+          to="/temporal/schedule"
+          class="nav-item"
+          :class="{ active: isRouteActive('/temporal/schedule') }"
+          :style="getModuleStyle('temporal')"
+        >
+          <el-icon><Calendar /></el-icon>
+          <span v-if="!isCollapsed">日程视图</span>
         </router-link>
       </div>
 
@@ -164,6 +183,16 @@
         >
           <el-icon><TrendCharts /></el-icon>
           <span v-if="!isCollapsed">体重管理</span>
+        </router-link>
+
+        <router-link
+          to="/health/menstrual"
+          class="nav-item"
+          :class="{ active: isRouteActive('/health/menstrual') }"
+          :style="getModuleStyle('health')"
+        >
+          <el-icon><FirstAidKit /></el-icon>
+          <span v-if="!isCollapsed">好朋友跟踪</span>
         </router-link>
 
         <router-link
@@ -304,6 +333,31 @@
           <el-icon><Timer /></el-icon>
           <span v-if="!isCollapsed">执行历史</span>
         </router-link>
+
+        <router-link
+          to="/toolkit/decision-log"
+          class="nav-item sub-item"
+          :class="{ active: isRouteActive('/toolkit/decision-log') }"
+        >
+          <el-icon><WarningFilled /></el-icon>
+          <span v-if="!isCollapsed">决策日志</span>
+        </router-link>
+        <router-link
+          to="/toolkit/free-spending"
+          class="nav-item sub-item"
+          :class="{ active: isRouteActive('/toolkit/free-spending') }"
+        >
+          <el-icon><Money /></el-icon>
+          <span v-if="!isCollapsed">自由支配额度</span>
+        </router-link>
+        <router-link
+          to="/toolkit/review-toolbox"
+          class="nav-item sub-item"
+          :class="{ active: isRouteActive('/toolkit/review-toolbox') }"
+        >
+          <el-icon><List /></el-icon>
+          <span v-if="!isCollapsed">复盘工具箱</span>
+        </router-link>
       </div>
 
     </div>
@@ -327,7 +381,7 @@ import {
   Sunny, Reading, Trophy, Present,
   Money, Cpu,
   Location, User, Tools, Food, WarningFilled,
-  Histogram, Connection, MessageBox,
+  Histogram, Connection, MessageBox, List,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

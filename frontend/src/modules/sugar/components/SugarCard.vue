@@ -24,6 +24,9 @@
             {{ happinessEmoji }} {{ record.level_of_happiness }} {{ record.reward_label }}
           </span>
         </div>
+        <div v-if="record.joy_type" class="card-joy-type">
+          <span class="joy-type-tag">{{ record.joy_type }}</span>
+        </div>
         <div v-if="record.tags" class="card-tags">
           <span v-for="tag in parsedTags" :key="tag" class="tag">{{ tag }}</span>
         </div>
@@ -193,6 +196,18 @@ function formatMoney(v: number | string | null | undefined): string {
         font-size: 12px;
         font-weight: 600;
         white-space: nowrap;
+      }
+    }
+
+    .card-joy-type {
+      margin-bottom: 6px;
+      .joy-type-tag {
+        font-size: 11px;
+        padding: 2px 8px;
+        background: #FEF3C7;
+        border-radius: 4px;
+        color: #D97706;
+        font-weight: 500;
       }
     }
 

@@ -12,6 +12,7 @@ export interface InboxItem {
   target_type: string | null
   target_id: number | null
   completion_note?: string
+  hesitate_reason?: string
   due_date: string | null
   remind_at: string | null
   processed_at: string | null
@@ -38,6 +39,7 @@ export interface InboxProcessLog {
 export interface InboxStats {
   total: number
   pending: number
+  hesitating: number
   completed: number
   processed: number
   by_category: Record<string, number>
@@ -68,6 +70,7 @@ export const PRIORITY_OPTIONS = [
 
 export const STATUS_OPTIONS = [
   { value: 'pending', label: '待处理', color: '#3B82F6' },
+  { value: 'hesitating', label: '犹豫中', color: '#F59E0B' },
   { value: 'processed', label: '已处理', color: '#8B5CF6' },
   { value: 'done', label: '已完成', color: '#10B981' },
   { value: 'archived', label: '已归档', color: '#9CA3AF' },

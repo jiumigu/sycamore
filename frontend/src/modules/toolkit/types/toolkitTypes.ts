@@ -95,3 +95,15 @@ export interface TravelRoutePreset {
   created_at: string
   updated_at: string
 }
+
+export interface FreeSpendingRecord {
+  id: number
+  user_id: number
+  liquid_assets: string
+  annual_income: string
+  debt: string
+  work_years: number
+  free_amount: string
+  notes: string
+  created_at: string
+}

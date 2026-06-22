@@ -98,16 +98,20 @@
             :goal-actions="[]"
             @toggle="handleMilestoneToggle"
             @add="$emit('edit', goal)"
-            @update-note="handleUpdateNote"
+            @edit-detail="(m: Milestone) => emit('editMilestone', goal, m)"
           />
         </div>
       </transition>
 
+      <div class="card-footer">
+        <span class="footer-item" @click.stop="emit('showMilestones', goal)">
+          🏁 {{ goal.milestone_count ?? 0 }} 里程碑
+        </span>
+        <span class="footer-item" @click.stop="emit('viewActions', goal)">
+          📋 {{ goal.action_count ?? 0 }} 行为记录
+        </span>
+      </div>
       <div class="card-actions">
-        <el-button text size="small" @click.stop="emit('viewActions', goal)">
-          <el-icon><List /></el-icon>
-          行为记录<template v-if="actionsCount > 0"> ({{ actionsCount }})</template>
-        </el-button>
         <el-button text size="small" @click.stop="emit('edit', goal)">
           <el-icon><Edit /></el-icon> 编辑
         </el-button>
@@ -141,8 +145,8 @@ const emit = defineEmits<{
   clone: [goal: Goal]
   expand: [goalId: number]
   milestoneToggle: [goal: Goal, milestone: Milestone, status: string]
+  editMilestone: [goal: Goal, milestone: Milestone]
   updateStatus: [goalId: number, status: GoalStatus]
-  updateNote: [goal: Goal, milestone: Milestone, note: string]
   toggleSelect: [goalId: number]
   viewActions: [goal: Goal]
   showMilestones: [goal: Goal]
@@ -179,10 +183,6 @@ function handleStatusChange(status: string) {
 
 function handleMilestoneToggle(m: Milestone, status: string) {
   emit('milestoneToggle', props.goal, m, status)
-}
-
-function handleUpdateNote(m: Milestone, note: string) {
-  emit('updateNote', props.goal, m, note)
 }
 </script>
 
@@ -231,6 +231,10 @@ function handleUpdateNote(m: Milestone, note: string) {
 
   .card-expanded {
     .actions-section { margin-top: 4px; }
+  }
+
+  .card-footer { display: flex; gap: 16px; padding: 8px 0 0; font-size: 12px; color: var(--el-text-color-secondary);
+    .footer-item { cursor: pointer; &:hover { color: var(--el-color-primary); } }
   }
 
   .card-actions { display: flex; justify-content: flex-end; gap: 4px; border-top: 1px solid var(--el-border-color-light); padding-top: 8px; margin-top: 8px; }

@@ -228,9 +228,7 @@ function openRedeemDialog(gift: GiftList) {
 
 async function handleExchangeConfirm(data: { gift_id: number; actual_reward?: number }) {
   try {
-    await redeemGift(data.gift_id, {
-      ...(data.actual_reward ? { actual_reward: data.actual_reward } : {}),
-    })
+    await redeemGift(data.gift_id, (data.actual_reward ? { actual_reward: data.actual_reward } : {}))
     ElMessage.success('兑换成功！🎉')
     exchangeVisible.value = false
     exchangingGift.value = null

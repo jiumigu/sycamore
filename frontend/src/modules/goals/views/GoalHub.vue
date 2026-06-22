@@ -116,7 +116,7 @@
           @expand="handleExpand"
           @milestone-toggle="handleMilestoneToggle"
           @update-status="handleUpdateStatus"
-          @update-note="handleMilestoneNote"
+          @edit-milestone="handleEditMilestone"
           @toggle-select="boardStore.toggleGoalSelection"
           @view-actions="handleViewActions"
           @show-milestones="openMilestoneDialog"
@@ -215,9 +215,9 @@
               {{ m.status_display || m.status }}
             </span>
           </div>
-          <div v-if="m.completed_note" class="milestone-notes">
-            📝 {{ m.completed_note }}
-          </div>
+          <div v-if="m.description" class="milestone-detail-desc">📋 {{ m.description }}</div>
+          <div v-if="m.completed_note" class="milestone-detail-note">✅ {{ m.completed_note }}</div>
+          <div v-if="m.self_review" class="milestone-detail-review">💭 {{ m.self_review }}</div>
         </div>
       </div>
     </div>
@@ -234,6 +234,62 @@
     <template #footer>
       <el-button @click="showDateDialog = false">取消</el-button>
       <el-button type="primary" @click="saveMilestoneDate">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 里程碑详情编辑弹窗 -->
+  <el-dialog v-model="showEditDialog" :title="editingMilestoneData?.status === 'completed' ? '✅ 里程碑完成' : '📝 编辑里程碑'" width="550px" :close-on-click-modal="false">
+    <div class="milestone-header" v-if="editingMilestoneData">
+      <p><strong>{{ editingMilestoneData.title }}</strong></p>
+      <p v-if="editingMilestoneData.target_date" class="edit-deadline">截止日期：{{ editingMilestoneData.target_date.slice(0, 10) }}</p>
+      <el-tag :type="editingMilestoneData.status === 'completed' ? 'success' : 'warning'" size="small">
+        {{ editingMilestoneData.status_display || editingMilestoneData.status }}
+      </el-tag>
+    </div>
+
+    <el-divider />
+
+    <el-form-item label="详情描述">
+      <el-input
+        v-model="editDescription"
+        type="textarea" :rows="3"
+        placeholder="里程碑的详细说明"
+        maxlength="500" show-word-limit
+      />
+    </el-form-item>
+
+    <el-form-item label="完成备注">
+      <el-input
+        v-model="editCompletionNote"
+        type="textarea" :rows="2"
+        placeholder="简单记录完成情况"
+        maxlength="200" show-word-limit
+      />
+    </el-form-item>
+
+    <el-form-item label="自我批阅">
+      <el-input
+        v-model="editSelfReview"
+        type="textarea" :rows="3"
+        placeholder="你想对完成这件事的自己说什么？"
+        maxlength="500" show-word-limit
+      />
+    </el-form-item>
+
+    <div class="quick-phrases">
+      <span class="phrase-label">快捷填入：</span>
+      <el-tag
+        v-for="phrase in quickPhrases" :key="phrase"
+        size="small" class="phrase-tag"
+        @click="editSelfReview = phrase"
+      >
+        {{ phrase }}
+      </el-tag>
+    </div>
+
+    <template #footer>
+      <el-button @click="showEditDialog = false">取消</el-button>
+      <el-button type="primary" @click="saveMilestoneDetail">保存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -406,12 +462,43 @@ async function handleMilestoneToggle(goal: Goal, milestone: Milestone, status: s
   }
 }
 
-async function handleMilestoneNote(goal: Goal, milestone: Milestone, note: string) {
+async function handleEditMilestone(goal: Goal, milestone: Milestone) {
+  editingMilestoneData.value = milestone
+  editDescription.value = milestone.description || ''
+  editCompletionNote.value = milestone.completed_note || ''
+  editSelfReview.value = milestone.self_review || ''
+  showEditDialog.value = true
+}
+
+const showEditDialog = ref(false)
+const editingMilestoneData = ref<Milestone | null>(null)
+const editDescription = ref('')
+const editCompletionNote = ref('')
+const editSelfReview = ref('')
+
+const quickPhrases = [
+  '辛苦了，这段时间不容易',
+  '做得不错，继续保持',
+  '比想象中难，但坚持下来了',
+  '下次可以提前准备',
+  '这件事让我学到了...',
+  '完成了！下一个目标是什么？',
+]
+
+async function saveMilestoneDetail() {
+  if (!editingMilestoneData.value) return
   try {
-    await goalStore.updateMilestoneStatus(milestone.id, { completed_note: note }, goal.id)
-    ElMessage.success('备注已更新')
+    const data: Record<string, unknown> = {
+      description: editDescription.value,
+      completed_note: editCompletionNote.value,
+      self_review: editSelfReview.value,
+    }
+    await goalStore.updateMilestoneStatus(editingMilestoneData.value.id, data, editingMilestoneData.value.goal)
+    showEditDialog.value = false
+    ElMessage.success('已保存')
+    refreshAll()
   } catch {
-    ElMessage.error('备注更新失败')
+    ElMessage.error('保存失败')
   }
 }
 
@@ -566,5 +653,27 @@ onMounted(() => { refreshAll() })
 
 .milestone-notes {
   margin-top: 6px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 13px; color: #666;
+}
+
+.milestone-detail-desc {
+  margin-top: 6px; padding: 8px; background: #f0f5ff; border-radius: 4px; font-size: 13px; color: #555;
+}
+.milestone-detail-note {
+  margin-top: 6px; padding: 8px; background: #f0fff4; border-radius: 4px; font-size: 13px; color: #555;
+}
+.milestone-detail-review {
+  margin-top: 6px; padding: 8px 10px; background: #fdf6ec; border-left: 3px solid #e6a23c;
+  border-radius: 4px; font-size: 13px; color: #666; font-style: italic;
+}
+
+.milestone-header {
+  p { margin: 4px 0; font-size: 14px; }
+  .edit-deadline { color: var(--el-text-color-secondary); font-size: 13px; }
+}
+
+.quick-phrases {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px;
+  .phrase-label { font-size: 12px; color: #999; }
+  .phrase-tag { cursor: pointer; }
 }
 </style>

@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from django.db import models
 from rest_framework import serializers
 
 from .models import Action, Goal, GoalReview, Milestone, OutputRecord
@@ -10,13 +11,15 @@ class MilestoneSerializer(serializers.ModelSerializer):
 
     status_display = serializers.SerializerMethodField()
     reward_amount_display = serializers.SerializerMethodField()
+    goal_title = serializers.CharField(source='goal.title', read_only=True)
+    goal_deadline = serializers.DateField(source='goal.deadline', read_only=True)
 
     class Meta:
         model = Milestone
         fields = [
-            'id', 'goal', 'title', 'status', 'status_display',
-            'completed_note', 'order_num', 'target_date',
-            'target_value', 'actual_value',
+            'id', 'goal', 'goal_title', 'goal_deadline', 'title', 'status', 'status_display',
+            'completed_note', 'description', 'order_num', 'target_date',
+            'target_value', 'actual_value', 'self_review',
             'reward_amount', 'reward_synced', 'reward_issued_at', 'reward_transaction_id',
             'reward_amount_display',
             'created_at', 'updated_at',
@@ -117,6 +120,8 @@ class GoalListSerializer(serializers.ModelSerializer):
     category_display = serializers.SerializerMethodField()
     priority_display = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
+    action_count = serializers.SerializerMethodField()
+    milestone_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Goal
@@ -126,6 +131,7 @@ class GoalListSerializer(serializers.ModelSerializer):
             'progress_percentage', 'start_date', 'deadline', 'year',
             'notes', 'reward_value', 'user_id',
             'enable_reward', 'default_reward_amount', 'total_reward_issued',
+            'action_count', 'milestone_count',
             'created_at', 'updated_at',
         ]
 
@@ -137,6 +143,16 @@ class GoalListSerializer(serializers.ModelSerializer):
 
     def get_status_display(self, obj):
         return obj.get_status_display()
+
+    def get_action_count(self, obj):
+        if hasattr(obj, 'action_count'):
+            return obj.action_count
+        return obj.actions.count()
+
+    def get_milestone_count(self, obj):
+        if hasattr(obj, 'milestone_count'):
+            return obj.milestone_count
+        return obj.milestones.count()
 
 
 class GoalDetailSerializer(serializers.ModelSerializer):
@@ -217,18 +233,14 @@ class GoalCreateUpdateSerializer(serializers.ModelSerializer):
         return goal
 
     def update(self, instance, validated_data):
-        milestones_data = validated_data.pop('milestones', None)
+        # 不处理里程碑——里程碑由独立的 API 管理
+        validated_data.pop('milestones', None)
         start_date = validated_data.get('start_date')
         if start_date:
             validated_data['year'] = start_date.year
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-
-        if milestones_data is not None:
-            instance.milestones.all().delete()
-            for idx, m in enumerate(milestones_data):
-                Milestone.objects.create(goal=instance, order_num=idx, **m)
         return instance
 
 
@@ -253,8 +265,20 @@ class QuickGoalSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255, help_text='目标名称')
     milestone_prefix = serializers.CharField(max_length=255, required=False, allow_blank=True, help_text='里程碑名称前缀')
     year = serializers.IntegerField(min_value=2000, max_value=2100)
-    frequency = serializers.ChoiceField(choices=['monthly', 'quarterly', 'weekly'], help_text='频率')
+    frequency = serializers.ChoiceField(choices=['daily', 'weekly', 'monthly', 'quarterly', 'yearly'], help_text='频率')
     reward_per_milestone = serializers.DecimalField(max_digits=10, decimal_places=2, default=0)
+    start_date = serializers.DateField(required=False, allow_null=True, help_text='开始日期')
+    end_date = serializers.DateField(required=False, allow_null=True, help_text='结束日期')
+    content_order = serializers.ChoiceField(choices=['asc', 'desc'], default='asc', help_text='内容排序：正序(第1天)或倒序(倒计时)')
+    display_order = serializers.ChoiceField(choices=['asc', 'desc'], default='asc', help_text='显示排序：日期从早到晚或从晚到早')
+
+    def validate(self, attrs):
+        if attrs['frequency'] == 'daily':
+            if not attrs.get('start_date') or not attrs.get('end_date'):
+                raise serializers.ValidationError('每天频率需要填写开始日期和结束日期')
+            if attrs['end_date'] < attrs['start_date']:
+                raise serializers.ValidationError('结束日期不能早于开始日期')
+        return attrs
 
 
 class CloneGoalSerializer(serializers.Serializer):
@@ -270,6 +294,7 @@ class MilestoneToggleSerializer(serializers.Serializer):
 
     status = serializers.ChoiceField(choices=Milestone.STATUS_CHOICES, required=False)
     completed_note = serializers.CharField(required=False, allow_blank=True)
+    self_review = serializers.CharField(required=False, allow_blank=True)
     actual_value = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
 
 
