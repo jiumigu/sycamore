@@ -94,3 +94,5 @@ backend/sycamore/.env
 analysis_notes/
 private_notes/
 .claude/
+obs_notes/
+obs_notes/
