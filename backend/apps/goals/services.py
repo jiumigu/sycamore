@@ -46,14 +46,14 @@ class GoalProgressService:
         for action in actions:
             if not action.completion_log:
                 continue
-            for entry in action.completion_log:
-                entry_date = entry.get('date')
-                if entry_date:
+            log = action.completion_log
+            if isinstance(log, dict):
+                for d_str, done in log.items():
                     try:
-                        d = date.fromisoformat(entry_date)
+                        d = date.fromisoformat(d_str)
                         if d >= since:
                             total_checkins += 1
-                            if entry.get('completed'):
+                            if done:
                                 completed_checkins += 1
                     except (ValueError, TypeError):
                         continue
@@ -374,5 +374,52 @@ class GoalCloneService:
 
         GoalProgressService.recalculate(new_goal)
         return new_goal
+
+
+def calculate_streak(completion_log: dict) -> dict:
+    """计算打卡连续天数
+
+    返回: {'current': int, 'longest': int, 'total': int}
+    """
+    from datetime import date, timedelta
+
+    checked_dates = sorted(
+        d for d, v in completion_log.items() if v
+    )
+    if not checked_dates:
+        return {'current': 0, 'longest': 0, 'total': 0}
+
+    # Current streak: count backward from today
+    today = date.today()
+    check = today
+    current = 0
+    while check.isoformat() in completion_log:
+        current += 1
+        check -= timedelta(days=1)
+    # If today not checked, try from yesterday
+    if current == 0:
+        check = today - timedelta(days=1)
+        while check.isoformat() in completion_log:
+            current += 1
+            check -= timedelta(days=1)
+
+    # Longest streak
+    longest = 0
+    run = 1
+    for i in range(1, len(checked_dates)):
+        curr = date.fromisoformat(checked_dates[i])
+        prev = date.fromisoformat(checked_dates[i - 1])
+        if (curr - prev).days == 1:
+            run += 1
+        else:
+            longest = max(longest, run)
+            run = 1
+    longest = max(longest, run)
+
+    return {
+        'current': current,
+        'longest': longest,
+        'total': len(checked_dates),
+    }
 
 

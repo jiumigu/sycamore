@@ -6,15 +6,15 @@ from apps.reward.services import RewardPoolService
 
 
 def _calculate_reward_amount(level_of_happiness) -> Decimal:
-    """根据快乐程度计算奖励金额"""
+    """根据快乐程度计算奖励金额（5-20分制）"""
     v = float(level_of_happiness)
-    if v <= 3.0:
+    if v <= 7:
         return Decimal('1')
-    elif v <= 5.0:
+    elif v <= 10:
         return Decimal('3')
-    elif v <= 7.0:
+    elif v <= 13:
         return Decimal('5')
-    elif v <= 8.5:
+    elif v <= 16:
         return Decimal('8')
     return Decimal('10')
 

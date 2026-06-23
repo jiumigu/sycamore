@@ -58,6 +58,42 @@ export interface GoalReview {
   created_at: string
 }
 
+export interface CheckinStreak {
+  current: number
+  longest: number
+  total: number
+}
+
+export interface RewardMilestone {
+  id: number
+  title: string
+  reward_amount: number
+  status: string
+  order_num: number
+}
+
+export interface CheckinMilestone {
+  id: number
+  title: string
+  status: string
+  reward_amount: number
+  description: string
+  completed_note: string
+  self_review: string
+  target_date: string | null
+  order_num: number
+}
+
+export interface CheckinStats {
+  streak: CheckinStreak
+  total_milestones: number
+  completed_milestones: number
+  progress_percentage: number
+  calendar: Record<string, boolean>
+  reward_milestones: RewardMilestone[]
+  milestones: CheckinMilestone[]
+}
+
 export interface Goal {
   id: number
   title: string
@@ -67,6 +103,7 @@ export interface Goal {
   tags: string[] | null
   action_count?: number
   milestone_count?: number
+  is_tracking_mode?: boolean
   priority: GoalPriority
   priority_display?: string
   status: GoalStatus

@@ -14,6 +14,7 @@
 - `QuickGoalService`：快速创建含批量里程碑模板的目标（月度/季度/每周模板）
 - `GoalCloneService`：复制目标及其里程碑和行为
 - `MilestoneRewardService`：里程碑完成时同步奖励池
+- `calculate_streak`：从 completion_log（`{"date": true}`）计算连续打卡天数（current/longest/total）
 
 ## API Endpoints
 
@@ -35,6 +36,8 @@
 | GET/PUT/DELETE | /actions/&lt;pk&gt;/ | 详情/更新/删除 |
 | GET | /actions/today_pending/ | 今日未完成行为 |
 | POST | /actions/batch/ | 批量创建行为 |
+| POST | /actions/&lt;pk&gt;/checkin/ | 今日打卡（更新 completion_log + 完成今日里程碑 + 发放奖励 + 重算进度） |
+| GET | /actions/&lt;pk&gt;/checkin_stats/ | 打卡统计（连续天数/里程碑进度/日历数据/完整里程碑列表含编辑字段/里程碑奖励） |
 | GET/POST | /reviews/ | 回顾列表/创建 |
 | GET/PUT/DELETE | /reviews/&lt;pk&gt;/ | 详情/更新/删除 |
 | GET/POST | /outputs/ | 良品率记录列表（?category=&quality=&difficulty= 筛选）/ 创建 |

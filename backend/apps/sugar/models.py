@@ -137,7 +137,7 @@ class SugarRecord(models.Model):
     month = models.IntegerField(blank=True, null=True, verbose_name='月份')
     title = models.CharField(max_length=100, verbose_name='小确幸标题')
     level_of_happiness = models.DecimalField(
-        max_digits=3, decimal_places=1, verbose_name='快乐程度 1.0-10.0',
+        max_digits=3, decimal_places=1, verbose_name='快乐程度 5-20',
     )
     time = models.DateField(verbose_name='发生日期')
     category = models.CharField(

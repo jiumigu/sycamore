@@ -1,7 +1,7 @@
 from collections import Counter
 
-from django.db import transaction
-from django.db.models import Avg, Count, F
+from django.db import models, transaction
+from django.db.models import Avg, Count, F, Q
 from django.utils import timezone
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
@@ -26,7 +26,13 @@ from .serializers import (
     OutputStatsSerializer,
     QuickGoalSerializer,
 )
-from .services import GoalCloneService, GoalProgressService, MilestoneRewardService, QuickGoalService
+from .services import (
+    GoalCloneService,
+    GoalProgressService,
+    MilestoneRewardService,
+    QuickGoalService,
+    calculate_streak,
+)
 
 
 class GoalPagination(PageNumberPagination):
@@ -287,6 +293,101 @@ class ActionViewSet(viewsets.ModelViewSet):
             sort_date=Coalesce('action_date', Cast('created_at', output_field=DateField()))
         ).order_by('-sort_date')
         return qs
+
+    @action(detail=True, methods=['post'])
+    def checkin(self, request, pk=None):
+        """今日打卡 — 标记完成并发放里程碑奖励"""
+        from datetime import date
+
+        action = self.get_object()
+        goal = action.goal
+        today = date.today()
+        today_str = today.isoformat()
+
+        log = action.completion_log or {}
+        already = log.get(today_str, False)
+
+        if not already:
+            log[today_str] = True
+            action.completion_log = log
+            action.save(update_fields=['completion_log'])
+
+        # Complete today's milestone if exists
+        milestone = goal.milestones.filter(target_date=today).first()
+        reward_result = None
+        if milestone and milestone.status != 'completed':
+            milestone.status = 'completed'
+            milestone.save(update_fields=['status'])
+            reward_result = MilestoneRewardService().complete_milestone(milestone)
+
+        GoalProgressService.recalculate(goal)
+        streak = calculate_streak(log)
+
+        return Response({
+            'checked': True if not already else False,
+            'already_checked': already,
+            'streak': streak,
+            'milestone_completed': milestone is not None,
+            'reward': reward_result,
+            'goal_id': goal.id,
+            'goal_progress': goal.progress_percentage,
+        })
+
+    @action(detail=True, methods=['get'])
+    def checkin_stats(self, request, pk=None):
+        """获取打卡统计数据（日历热力图 + 连续天数 + 目标里程碑奖励）"""
+        action = self.get_object()
+        goal = action.goal
+        log = action.completion_log or {}
+
+        streak = calculate_streak(log)
+
+        # Total milestones count for this goal
+        total_milestones = goal.milestones.count()
+        completed_milestones = goal.milestones.filter(status='completed').count()
+
+        # Reward milestones (milestones with reward_amount)
+        reward_milestones = goal.milestones.exclude(
+            models.Q(reward_amount__isnull=True) | models.Q(reward_amount=0)
+        ).values('id', 'title', 'reward_amount', 'status', 'order_num').order_by('order_num')
+
+        # All milestones (for behavior track card milestone list)
+        all_milestones = goal.milestones.all().order_by('order_num').values(
+            'id', 'title', 'status', 'reward_amount', 'description',
+            'completed_note', 'self_review', 'target_date', 'order_num',
+        )
+
+        return Response({
+            'streak': streak,
+            'total_milestones': total_milestones,
+            'completed_milestones': completed_milestones,
+            'progress_percentage': goal.progress_percentage,
+            'calendar': log,
+            'reward_milestones': [
+                {
+                    'id': m['id'],
+                    'title': m['title'],
+                    'reward_amount': float(m['reward_amount']),
+                    'status': m['status'],
+                    'order_num': m['order_num'],
+                }
+                for m in reward_milestones
+            ],
+            'milestones': [
+                {
+                    'id': m['id'],
+                    'title': m['title'],
+                    'status': m['status'],
+                    'reward_amount': float(m['reward_amount']) if m['reward_amount'] else 0,
+                    'description': m['description'] or '',
+                    'completed_note': m['completed_note'] or '',
+                    'self_review': m['self_review'] or '',
+                    'target_date': m['target_date'].isoformat() if m['target_date'] else None,
+                    'order_num': m['order_num'],
+                }
+                for m in all_milestones
+            ],
+        })
 
     @action(detail=False, methods=['get'])
     def today_pending(self, request):
