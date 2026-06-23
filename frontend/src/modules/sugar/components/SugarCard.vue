@@ -15,7 +15,7 @@
         <h3 class="card-title">{{ record.title }}</h3>
         <div class="card-happiness" v-if="record.level_of_happiness">
           <el-progress
-            :percentage="(record.level_of_happiness / 10) * 100"
+            :percentage="(record.level_of_happiness / 20) * 100"
             :stroke-width="8"
             :color="happinessColor"
             :show-text="false"
@@ -24,11 +24,16 @@
             {{ happinessEmoji }} {{ record.level_of_happiness }} {{ record.reward_label }}
           </span>
         </div>
-        <div v-if="record.joy_type" class="card-joy-type">
-          <span class="joy-type-tag">{{ record.joy_type }}</span>
-        </div>
-        <div v-if="record.tags" class="card-tags">
-          <span v-for="tag in parsedTags" :key="tag" class="tag">{{ tag }}</span>
+        <div v-if="record.joy_type || record.tags" class="sugar-meta">
+          <el-tag v-if="record.joy_type" size="small" class="joy-tag">{{ record.joy_type }}</el-tag>
+          <el-tag
+            v-for="tag in parsedTags"
+            :key="tag"
+            size="small"
+            type="info"
+          >
+            {{ tag }}
+          </el-tag>
         </div>
         <div v-if="expanded && record.notes" class="card-notes">
           <p>{{ record.notes }}</p>
@@ -59,19 +64,19 @@ const expanded = ref(false)
 
 const happinessColor = computed(() => {
   const v = props.record.level_of_happiness
-  if (v <= 3) return '#9CA3AF'
-  if (v <= 5) return '#60A5FA'
-  if (v <= 7) return '#34D399'
-  if (v <= 8.5) return '#FBBF24'
+  if (v <= 7) return '#9CA3AF'
+  if (v <= 10) return '#60A5FA'
+  if (v <= 13) return '#34D399'
+  if (v <= 16) return '#FBBF24'
   return '#F97316'
 })
 
 const happinessEmoji = computed(() => {
   const v = props.record.level_of_happiness
-  if (v <= 3) return '😊'
-  if (v <= 5) return '🙂'
-  if (v <= 7) return '😄'
-  if (v <= 8.5) return '🥰'
+  if (v <= 7) return '😊'
+  if (v <= 10) return '🙂'
+  if (v <= 13) return '😄'
+  if (v <= 16) return '🥰'
   return '🤩'
 })
 
@@ -199,30 +204,18 @@ function formatMoney(v: number | string | null | undefined): string {
       }
     }
 
-    .card-joy-type {
-      margin-bottom: 6px;
-      .joy-type-tag {
-        font-size: 11px;
-        padding: 2px 8px;
-        background: #FEF3C7;
-        border-radius: 4px;
-        color: #D97706;
-        font-weight: 500;
-      }
-    }
-
-    .card-tags {
+    .sugar-meta {
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       gap: 4px;
+      margin-top: 4px;
 
-      .tag {
-        font-size: 11px;
-        padding: 2px 8px;
-        background: #F9FAFB;
-        border: 1px solid #E5E7EB;
-        border-radius: 4px;
-        color: #6B7280;
+      .joy-tag {
+        border: none;
+        background: #FEF3C7;
+        color: #D97706;
+        font-weight: 500;
       }
     }
 

@@ -92,6 +92,16 @@ export function getActionList(params?: Record<string, unknown>) {
   return request({ url: '/goals/actions/', method: 'get', params })
 }
 
+/** 今日打卡 */
+export function checkinAction(actionId: number) {
+  return request({ url: `/goals/actions/${actionId}/checkin/`, method: 'post' })
+}
+
+/** 打卡统计数据 */
+export function getCheckinStats(actionId: number) {
+  return request({ url: `/goals/actions/${actionId}/checkin_stats/`, method: 'get' })
+}
+
 /** 获取今日未完成的行为 */
 export function getTodayPending() {
   return request({ url: '/goals/actions/today_pending/', method: 'get' })

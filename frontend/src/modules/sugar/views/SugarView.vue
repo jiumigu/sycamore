@@ -164,28 +164,26 @@
               {{ tag }}
             </el-tag>
 
-            <div class="custom-tags">
-              <el-tag
-                v-for="tag in customTags"
-                :key="tag"
-                closable
-                size="small"
-                type="warning"
-                @close="removeTag(tag)"
-              >
-                {{ tag }}
-              </el-tag>
-              <el-input
-                v-if="showTagInput"
-                v-model="newTag"
-                ref="tagInputRef"
-                size="small"
-                style="width:80px"
-                @keyup.enter="addTag"
-                @blur="addTag"
-              />
-              <el-button v-else size="small" @click="showTagInput = true">+ 自定义</el-button>
-            </div>
+            <el-tag
+              v-for="tag in customTags"
+              :key="tag"
+              closable
+              size="small"
+              type="warning"
+              @close="removeTag(tag)"
+            >
+              {{ tag }}
+            </el-tag>
+            <el-input
+              v-if="showTagInput"
+              v-model="newTag"
+              ref="tagInputRef"
+              size="small"
+              style="width:80px"
+              @keyup.enter="addTag"
+              @blur="addTag"
+            />
+            <el-button v-else size="small" @click="showTagInput = true">+ 自定义</el-button>
           </div>
         </el-form-item>
 
@@ -198,7 +196,7 @@
         <span class="dialog-footer">
           <el-button @click="dialogVisible = false">取消</el-button>
           <el-button type="primary" :loading="store.submitting" @click="handleSubmit">
-            保存 — 得{{ expectedReward }}元奖励
+            得{{ form.level_of_happiness }}元奖励
           </el-button>
         </span>
       </template>
@@ -286,10 +284,10 @@ const SUGGESTED_TAGS = ['惊喜', '感动', '成就', '小确幸', '美食', '�
 
 const expectedReward = computed(() => {
   const v = form.level_of_happiness
-  if (v <= 3) return '1'
-  if (v <= 5) return '3'
-  if (v <= 7) return '5'
-  if (v <= 8.5) return '8'
+  if (v <= 7) return '1'
+  if (v <= 10) return '3'
+  if (v <= 13) return '5'
+  if (v <= 16) return '8'
   return '10'
 })
 
@@ -353,7 +351,7 @@ async function handleSubmit() {
     reward_amount: form.level_of_happiness,
     time: new Date().toISOString().slice(0, 10),
     category: null,
-    joy_type: form.joy_type || null,
+    joy_type: form.joy_type || '',
     tags: form.tagList.length ? form.tagList.join(',') : null,
     notes: form.notes?.trim() || null,
   }
@@ -576,13 +574,6 @@ function formatMoney(v: number | string | null | undefined): string {
     border-color: #409eff;
     color: #409eff;
   }
-}
-
-.custom-tags {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .dialog-footer { display: flex; justify-content: flex-end; gap: 12px; }

@@ -122,6 +122,7 @@ class GoalListSerializer(serializers.ModelSerializer):
     status_display = serializers.SerializerMethodField()
     action_count = serializers.SerializerMethodField()
     milestone_count = serializers.SerializerMethodField()
+    is_tracking_mode = serializers.SerializerMethodField()
 
     class Meta:
         model = Goal
@@ -131,7 +132,7 @@ class GoalListSerializer(serializers.ModelSerializer):
             'progress_percentage', 'start_date', 'deadline', 'year',
             'notes', 'reward_value', 'user_id',
             'enable_reward', 'default_reward_amount', 'total_reward_issued',
-            'action_count', 'milestone_count',
+            'action_count', 'milestone_count', 'is_tracking_mode',
             'created_at', 'updated_at',
         ]
 
@@ -153,6 +154,11 @@ class GoalListSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'milestone_count'):
             return obj.milestone_count
         return obj.milestones.count()
+
+    def get_is_tracking_mode(self, obj):
+        """行为追踪模式：只有1个行为时切换"""
+        count = self.get_action_count(obj)
+        return count == 1
 
 
 class GoalDetailSerializer(serializers.ModelSerializer):

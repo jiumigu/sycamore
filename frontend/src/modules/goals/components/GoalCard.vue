@@ -93,13 +93,22 @@
         <div v-if="expanded" class="card-expanded">
           <el-divider />
 
-          <MilestoneBoard
-            :milestones="goal.milestones || []"
-            :goal-actions="[]"
-            @toggle="handleMilestoneToggle"
-            @add="$emit('edit', goal)"
-            @edit-detail="(m: Milestone) => emit('editMilestone', goal, m)"
-          />
+          <template v-if="goal.is_tracking_mode && trackingActionId">
+            <BehaviorTrackCard
+              :goal-id="goal.id"
+              :action-id="trackingActionId"
+              @checked="$emit('checkin', goal.id)"
+            />
+          </template>
+          <template v-else>
+            <MilestoneBoard
+              :milestones="goal.milestones || []"
+              :goal-actions="[]"
+              @toggle="handleMilestoneToggle"
+              @add="$emit('edit', goal)"
+              @edit-detail="(m: Milestone) => emit('editMilestone', goal, m)"
+            />
+          </template>
         </div>
       </transition>
 
@@ -132,11 +141,13 @@ import { Calendar, Flag, Clock, Edit, Delete, ArrowDown, List, CopyDocument } fr
 import { PRIORITY_OPTIONS, STATUS_OPTIONS } from '../types/goalTypes'
 import type { Goal, GoalStatus, Milestone } from '../types/goalTypes'
 import MilestoneBoard from './MilestoneBoard.vue'
+import BehaviorTrackCard from './BehaviorTrackCard.vue'
 
 const props = defineProps<{
   goal: Goal
   isSelected: boolean
   actionsCount: number
+  trackingActionId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -150,6 +161,7 @@ const emit = defineEmits<{
   toggleSelect: [goalId: number]
   viewActions: [goal: Goal]
   showMilestones: [goal: Goal]
+  checkin: [goalId: number]
 }>()
 
 const expanded = ref(false)

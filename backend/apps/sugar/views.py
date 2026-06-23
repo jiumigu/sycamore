@@ -75,10 +75,36 @@ class SugarRecordViewSet(viewsets.ModelViewSet):
         serializer.instance = record
 
     def perform_update(self, serializer):
-        service = SugarRecordService()
-        record = serializer.instance
-        kwargs = {k: v for k, v in serializer.validated_data.items()}
-        service.update(s_id=record.s_id, **kwargs)
+        instance = serializer.instance
+        old_amount = instance.reward_amount or 0
+        new_amount = serializer.validated_data.get('level_of_happiness')
+
+        if new_amount is not None and new_amount != old_amount:
+            serializer.save(reward_amount=new_amount)
+
+            from django.db import transaction
+            from apps.reward.models import RewardPool, RewardTransaction
+
+            with transaction.atomic():
+                pool = RewardPool.objects.select_for_update().first()
+                if pool:
+                    delta = new_amount - old_amount
+                    pool.balance += delta
+                    if delta > 0:
+                        pool.total_earned += delta
+                    pool.save()
+
+                    RewardTransaction.objects.create(
+                        source_id=instance.s_id,
+                        source_type='sugar',
+                        amount=delta,
+                        transaction_type='sugar_update',
+                        balance_before=pool.balance - delta,
+                        balance_after=pool.balance,
+                        description=f'小确幸快乐程度变化：{instance.title}，奖励 {old_amount}→{new_amount}',
+                    )
+        else:
+            serializer.save()
 
     def perform_destroy(self, instance):
         service = SugarRecordService()

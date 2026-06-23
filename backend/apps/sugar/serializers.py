@@ -26,21 +26,21 @@ class SugarRecordSerializer(serializers.ModelSerializer):
         return obj.get_category_display() if obj.category else None
 
     def validate_level_of_happiness(self, value):
-        if value < 1 or value > 10:
-            raise serializers.ValidationError('快乐程度必须在 1.0 ~ 10.0 之间')
+        if value < 5 or value > 20:
+            raise serializers.ValidationError('快乐程度必须在 5 ~ 20 之间')
         return value
 
 
 def _reward_label(level) -> str:
-    """根据快乐程度返回标签"""
+    """根据快乐程度返回标签（5-20分制）"""
     v = float(level)
-    if v <= 3.0:
+    if v <= 7:
         return '小开心'
-    elif v <= 5.0:
+    elif v <= 10:
         return '开心'
-    elif v <= 7.0:
+    elif v <= 13:
         return '很高兴'
-    elif v <= 8.5:
+    elif v <= 16:
         return '超开心'
     return '幸福爆炸'
 

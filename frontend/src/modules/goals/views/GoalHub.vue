@@ -110,6 +110,7 @@
           :goal="goal"
           :is-selected="boardStore.selectedGoalIds.includes(goal.id)"
           :actions-count="boardStore.getActionsCount(goal.id)"
+          :tracking-action-id="getTrackingActionId(goal)"
           @edit="openDetailEdit"
           @delete="handleDelete"
           @clone="handleClone"
@@ -120,6 +121,7 @@
           @toggle-select="boardStore.toggleGoalSelection"
           @view-actions="handleViewActions"
           @show-milestones="openMilestoneDialog"
+          @checkin="handleCheckin"
         />
       </template>
       <el-empty v-if="!goalStore.goalList.length && !goalStore.loading" description="暂无目标" :image-size="120" />
@@ -447,6 +449,7 @@ async function handleExpand(goalId: number) {
     const item = goalStore.goalList.find(g => g.id === goalId)
     if (item) {
       item.milestones = detail.milestones
+      item.actions = detail.actions
     }
   } catch {
     // 静默失败
@@ -509,6 +512,15 @@ async function handleUpdateStatus(goalId: number, status: GoalStatus) {
   } catch {
     ElMessage.error('状态更新失败')
   }
+}
+
+function getTrackingActionId(goal: Goal): number | null {
+  if (!goal.is_tracking_mode || !goal.actions?.length) return null
+  return goal.actions[0].id ?? null
+}
+
+function handleCheckin(goalId: number) {
+  handleExpand(goalId)
 }
 
 function onActionsCreated() {
