@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, Quote, ReviewRecord, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, Quote, ReviewRecord, TravelRoutePreset
 
 
 class CityCoordinateSerializer(serializers.ModelSerializer):
@@ -101,6 +101,13 @@ class FreeSpendingCalculatorSerializer(serializers.ModelSerializer):
         model = FreeSpendingCalculator
         fields = '__all__'
         read_only_fields = ['id', 'created_at']
+
+
+class HourlyWageRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HourlyWageRecord
+        fields = '__all__'
+        read_only_fields = ['id', 'work_days_per_month', 'work_hours_per_day', 'total_hours_per_month', 'hourly_wage', 'created_at']
 
 
 class ReviewRecordSerializer(serializers.ModelSerializer):

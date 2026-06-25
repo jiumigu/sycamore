@@ -13,7 +13,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 from .registry import ToolRegistry
 from .serializers import (
     CareerEnergyAuditSerializer,
@@ -24,6 +24,7 @@ from .serializers import (
     ExecuteToolSerializer,
     FreeSpendingCalculatorSerializer,
     HealthSelfCheckSerializer,
+    HourlyWageRecordSerializer,
     QuoteSerializer,
     ReviewRecordSerializer,
     ToolInfoSerializer,
@@ -556,6 +557,36 @@ class FreeSpendingCalculatorViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user_id=1)
+
+
+class HourlyWageViewSet(viewsets.ModelViewSet):
+    """时薪计算 CRUD"""
+
+    permission_classes = [AllowAny]
+    queryset = HourlyWageRecord.objects.all()
+    serializer_class = HourlyWageRecordSerializer
+
+    def get_queryset(self):
+        return HourlyWageRecord.objects.filter(user_id=1)
+
+    def perform_create(self, serializer):
+        from .services import calculate_hourly_wage
+        data = serializer.validated_data
+        result = calculate_hourly_wage(
+            monthly_salary=float(data['monthly_salary']),
+            rest_type=data.get('rest_type', '双休'),
+            work_start=data.get('work_start', '09:00'),
+            work_end=data.get('work_end', '18:00'),
+            lunch_break=data.get('lunch_break', 60),
+            commute_minutes=data.get('commute_minutes', 0),
+            calc_mode=data.get('calc_mode', 'formal'),
+            freelance_time_mode=data.get('freelance_time_mode', 'fixed'),
+            freelance_days=data.get('freelance_days'),
+            freelance_hours_per_day=data.get('freelance_hours_per_day'),
+            weekly_hours=data.get('weekly_hours', []),
+            freelance_weeks=data.get('freelance_weeks', 4),
+        )
+        serializer.save(user_id=1, **result)
 
 
 class ReviewRecordViewSet(viewsets.ModelViewSet):

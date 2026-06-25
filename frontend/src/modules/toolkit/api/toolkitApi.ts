@@ -126,6 +126,20 @@ export function deleteReviewRecord(id: number) {
   return request({ url: `/toolkit/review-records/${id}/`, method: 'delete' })
 }
 
+// ────────── 时薪计算 ──────────
+
+export function getHourlyWageList(params?: Record<string, unknown>) {
+  return request({ url: '/toolkit/hourly-wage/', method: 'get', params })
+}
+
+export function createHourlyWage(data: Record<string, unknown>) {
+  return request({ url: '/toolkit/hourly-wage/', method: 'post', data })
+}
+
+export function deleteHourlyWage(id: number) {
+  return request({ url: `/toolkit/hourly-wage/${id}/`, method: 'delete' })
+}
+
 // ────────── 自由支配额度计算 ──────────
 
 export function getFreeSpendingList(params?: Record<string, unknown>) {

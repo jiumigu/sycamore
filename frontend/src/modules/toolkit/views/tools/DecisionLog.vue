@@ -1,5 +1,10 @@
 <template>
   <div class="decision-log">
+    <div class="back-bar">
+      <el-button text @click="$router.push('/toolkit')">
+        <el-icon><ArrowLeft /></el-icon> 返回工具集
+      </el-button>
+    </div>
     <div class="page-header">
       <div class="header-left">
         <h2>📋 决策日志</h2>
@@ -192,6 +197,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import {
   getDecisionLogs, createDecisionLog, updateDecisionLog,
   type DecisionLog,
@@ -484,4 +490,5 @@ onMounted(fetchData)
   font-size: 14px;
   font-weight: 600;
 }
+.back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
 </style>

@@ -221,6 +221,16 @@ const routes: RouteRecordRaw[] = [
         redirect: '/toolkit/free-spending',
       },
       {
+        path: 'hourly-wage',
+        name: 'hourly-wage',
+        component: () => import('@/modules/toolkit/views/tools/HourlyWage.vue'),
+        meta: { title: '时薪计算器' },
+      },
+      {
+        path: 'hourly-wage-tool',
+        redirect: '/toolkit/hourly-wage',
+      },
+      {
         path: 'review-toolbox',
         name: 'review-toolbox',
         component: () => import('@/modules/toolkit/views/tools/ReviewToolbox.vue'),

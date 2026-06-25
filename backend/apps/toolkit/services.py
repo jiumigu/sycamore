@@ -84,6 +84,98 @@ def update_career_audit_decision(instance: CareerEnergyAudit) -> None:
     instance.body_score = bs
 
 
+# ─── 时薪计算 ────────────────────────────────────
+
+
+def calculate_hourly_wage(
+    monthly_salary,
+    rest_type='双休',
+    work_start='09:00',
+    work_end='18:00',
+    lunch_break=60,
+    commute_minutes=0,
+    calc_mode='formal',
+    freelance_time_mode='fixed',
+    freelance_days=None,
+    freelance_hours_per_day=None,
+    weekly_hours=None,
+    freelance_weeks=4,
+):
+    """计算实际时薪（含通勤时间）"""
+    if calc_mode == 'freelance':
+        return _calc_freelance(
+            monthly_salary=monthly_salary,
+            time_mode=freelance_time_mode,
+            days=freelance_days,
+            hours_per_day=freelance_hours_per_day,
+            weekly_hours=weekly_hours or [],
+            weeks=freelance_weeks,
+            commute_minutes=commute_minutes,
+        )
+
+    # 正式职业：原有逻辑
+    # 月工作天数
+    if rest_type == '双休':
+        work_days = 21.75
+    elif rest_type == '单休':
+        work_days = 26
+    elif rest_type == '大小周':
+        work_days = 24
+    else:  # 不休
+        work_days = 30
+
+    # 日工作小时（扣除午休）
+    start_h, start_m = map(int, work_start.split(':'))
+    end_h, end_m = map(int, work_end.split(':'))
+    work_minutes = (end_h * 60 + end_m) - (start_h * 60 + start_m) - lunch_break
+    work_hours = work_minutes / 60
+
+    # 日通勤时间（往返）
+    commute_hours = commute_minutes * 2 / 60
+
+    # 月总投入小时 = 工作小时 + 通勤小时
+    total_hours = work_days * (work_hours + commute_hours)
+
+    # 时薪 = 月薪 / 总投入小时
+    hourly_wage = round(float(monthly_salary) / total_hours, 2) if total_hours > 0 else 0
+
+    return {
+        'work_days_per_month': round(work_days, 1),
+        'work_hours_per_day': round(work_hours, 1),
+        'total_hours_per_month': round(total_hours, 1),
+        'hourly_wage': hourly_wage,
+    }
+
+
+def _calc_freelance(monthly_salary, time_mode, days, hours_per_day, weekly_hours, weeks, commute_minutes):
+    """自由职业时薪计算"""
+    commute_hours_per_day = commute_minutes * 2 / 60
+
+    if time_mode == 'flexible':
+        # 弹性工时：每周各天工作时长 × 每月周数
+        week_total = sum(h for h in weekly_hours if h)
+        active_days = sum(1 for h in weekly_hours if h)  # 有工作的天数
+        work_days = active_days * weeks
+        work_hours_per_day = week_total / active_days if active_days > 0 else 0
+        total_hours = week_total * weeks + commute_hours_per_day * work_days
+    else:
+        # 固定时长：月工作天数 × 日均工作时长
+        d = days or 22
+        h = float(hours_per_day or 8)
+        work_days = d
+        work_hours_per_day = h
+        total_hours = d * h + commute_hours_per_day * d
+
+    hourly_wage = round(float(monthly_salary) / total_hours, 2) if total_hours > 0 else 0
+
+    return {
+        'work_days_per_month': round(work_days, 1),
+        'work_hours_per_day': round(work_hours_per_day, 1),
+        'total_hours_per_month': round(total_hours, 1),
+        'hourly_wage': hourly_wage,
+    }
+
+
 # ─── 身体健康自查评分 ──────────────────────────────
 
 _SCORE_MAP = {

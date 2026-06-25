@@ -136,7 +136,7 @@ onMounted(async () => {
 .task-history {
   padding: 20px; background: #F5F7FA; min-height: 100vh;
 
-  .back-bar { margin-bottom: 16px; }
+  .back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
 
   .page-header {
     display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
