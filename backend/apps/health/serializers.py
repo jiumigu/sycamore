@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from .constants import CONVERSION_RATES
-from .models import HealthRecord, MenstrualRecord, UserBodyInfo, WeightGoal, WeightMilestone, WeightRecord
+from .models import HealthRecord, MenstrualRecord, UserBodyInfo, WeightGoal, WeightGoalAdjustment, WeightMilestone, WeightRecord
 
 
 class HealthRecordSerializer(serializers.ModelSerializer):
@@ -108,6 +108,15 @@ class WeightGoalSerializer(serializers.ModelSerializer):
 
     def get_monthly_target_jin(self, obj):
         return obj.monthly_target_jin
+
+
+class WeightGoalAdjustmentSerializer(serializers.ModelSerializer):
+    """目标调整记录序列化器"""
+
+    class Meta:
+        model = WeightGoalAdjustment
+        fields = '__all__'
+        read_only_fields = ['id', 'adjusted_at']
 
 
 class WeightMilestoneSerializer(serializers.ModelSerializer):

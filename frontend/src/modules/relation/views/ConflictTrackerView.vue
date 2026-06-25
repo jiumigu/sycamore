@@ -91,6 +91,14 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="解决方式" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.is_resolved && row.resolution_note" class="resolution-preview">
+              ✅ {{ row.resolution_note }}
+            </span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="80" align="center">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>

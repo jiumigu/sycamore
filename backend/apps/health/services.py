@@ -13,7 +13,7 @@ from .constants import (
     HEALTH_TOTAL_MILESTONES,
     HTYPE_LABELS,
 )
-from .models import HealthRecord, WeightGoal, WeightMilestone, WeightRecord, UserBodyInfo
+from .models import HealthRecord, WeightGoal, WeightGoalAdjustment, WeightMilestone, WeightRecord, UserBodyInfo
 
 
 class HealthStatsService:
@@ -509,7 +509,11 @@ class WeightService:
 
     @staticmethod
     def create_goal(user_id: int = 1, **data) -> WeightGoal:
-        """创建减重目标并生成月度里程碑"""
+        """创建减重目标并生成月度里程碑，检测目标变更并记录调整"""
+        # 读取旧目标（用于调整记录）
+        old_goal = WeightGoal.objects.filter(user_id=user_id, is_active=True).first()
+        old_target_jin = round(float(old_goal.target_weight_kg) * 2, 1) if old_goal else None
+
         # 清理旧的活跃目标
         WeightGoal.objects.filter(user_id=user_id, is_active=True).update(is_active=False)
 
@@ -561,6 +565,18 @@ class WeightService:
             )
             current_start = target
 
+        # 记录目标调整（如果有旧目标且值不同）
+        new_target_jin = round(target_kg * 2, 1)
+        if old_target_jin is not None and old_target_jin != new_target_jin:
+            WeightGoalAdjustment.objects.create(
+                user_id=user_id,
+                goal=goal,
+                before_value=old_target_jin,
+                after_value=new_target_jin,
+                change_amount=round(new_target_jin - old_target_jin, 1),
+                reason=data.get('adjust_reason', ''),
+            )
+
         return goal
 
     @staticmethod
@@ -577,6 +593,20 @@ class WeightService:
         target = goal.target_weight_kg
         start = goal.start_weight_kg
 
+        # 0. 如果当前里程碑已达成但 current_month 未推进（旧数据修复），自动推进到下一个未达成的月份
+        current_ms = WeightMilestone.objects.filter(
+            goal=goal, month_number=goal.current_month,
+        ).first()
+        if current_ms and current_ms.is_achieved:
+            next_unachieved = WeightMilestone.objects.filter(
+                goal=goal, month_number__gt=goal.current_month, is_achieved=False,
+            ).order_by('month_number').first()
+            if next_unachieved:
+                goal.current_month = next_unachieved.month_number
+                goal.current_month_start_weight = next_unachieved.start_weight_kg
+                goal.current_month_target = next_unachieved.target_weight_kg
+                goal.save(update_fields=['current_month', 'current_month_start_weight', 'current_month_target'])
+
         # 1. 检查当月里程碑
         month_milestone = WeightMilestone.objects.filter(
             goal=goal, month_number=goal.current_month, is_achieved=False,
@@ -592,6 +622,14 @@ class WeightService:
                 month_milestone.end_weight_kg = current
                 month_milestone.achieved_at = latest.record_date
                 month_milestone.save()
+
+                # 推进到下一个月
+                next_start = month_milestone.target_weight_kg
+                monthly_kg = float(goal.monthly_target_kg)
+                goal.current_month += 1
+                goal.current_month_start_weight = next_start
+                goal.current_month_target = round(next_start - monthly_kg, 2)
+                goal.save(update_fields=['current_month', 'current_month_start_weight', 'current_month_target'])
 
                 # 月度达成后检查总目标
                 if (start > target and current <= target) or (start < target and current >= target):

@@ -3,11 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import HealthRecord, MenstrualRecord, WeightGoal, WeightMilestone, WeightRecord, UserBodyInfo
+from .models import HealthRecord, MenstrualRecord, WeightGoal, WeightGoalAdjustment, WeightMilestone, WeightRecord, UserBodyInfo
 from .serializers import (
     HealthRecordSerializer,
     MenstrualRecordSerializer,
     UserBodyInfoSerializer,
+    WeightGoalAdjustmentSerializer,
     WeightGoalSerializer,
     WeightMilestoneSerializer,
     WeightRecordSerializer,
@@ -166,6 +167,19 @@ class WeightViewSet(viewsets.ModelViewSet):
             return Response([])
         qs = WeightMilestone.objects.filter(goal=goal).order_by('month_number')
         serializer = WeightMilestoneSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    # ─── 目标调整记录 ───
+
+    @action(detail=False, methods=['get'])
+    def adjustments(self, request):
+        """获取当前活跃目标的调整记录"""
+        user_id = int(request.query_params.get('user_id', 1))
+        goal = WeightGoal.objects.filter(user_id=user_id, is_active=True).first()
+        if not goal:
+            return Response([])
+        qs = WeightGoalAdjustment.objects.filter(goal=goal).order_by('-adjusted_at')
+        serializer = WeightGoalAdjustmentSerializer(qs, many=True)
         return Response(serializer.data)
 
     # ─── 身体信息 ───

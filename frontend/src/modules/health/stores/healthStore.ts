@@ -3,8 +3,8 @@ import { ref } from 'vue'
 import * as healthApi from '../api/healthApi'
 import type {
   CalendarItem, DailyTrendItem, HealthRecord, HealthSummary, MilestoneList,
-  MilestoneTimelineItem, TypeStatItem, UserBodyInfo, WeightGoal, WeightMilestone,
-  WeightRecord, WeightStats, WeightTrend, YearlyComparisonItem,
+  MilestoneTimelineItem, TypeStatItem, UserBodyInfo, WeightGoal, WeightGoalAdjustment,
+  WeightMilestone, WeightRecord, WeightStats, WeightTrend, YearlyComparisonItem,
 } from '../types/healthTypes'
 
 export const useHealthStore = defineStore('health', () => {
@@ -111,6 +111,7 @@ export const useWeightStore = defineStore('weight', () => {
   const goal = ref<WeightGoal | null>(null)
   const milestones = ref<WeightMilestone[]>([])
   const bodyInfo = ref<UserBodyInfo | null>(null)
+  const adjustments = ref<WeightGoalAdjustment[]>([])
   const loading = ref(false)
 
   async function fetchStats() {
@@ -146,6 +147,12 @@ export const useWeightStore = defineStore('weight', () => {
   async function fetchBodyInfo() {
     const res = await healthApi.getWeightBodyInfo({ user_id: 1 })
     bodyInfo.value = res.data
+    return res.data
+  }
+
+  async function fetchAdjustments() {
+    const res = await healthApi.getWeightAdjustments({ user_id: 1 })
+    adjustments.value = res.data
     return res.data
   }
 
@@ -195,14 +202,15 @@ export const useWeightStore = defineStore('weight', () => {
       fetchGoal(),
       fetchMilestones(),
       fetchBodyInfo(),
+      fetchAdjustments(),
       fetchRecords(),
     ])
   }
 
   return {
-    records, stats, trend, goal, milestones, bodyInfo, loading,
+    records, stats, trend, goal, milestones, bodyInfo, adjustments, loading,
     fetchStats, fetchTrend, fetchGoal, createGoal,
-    fetchMilestones, fetchBodyInfo, updateBodyInfo,
+    fetchMilestones, fetchBodyInfo, updateBodyInfo, fetchAdjustments,
     fetchRecords, createRecord, updateRecord, deleteRecord, loadAll,
   }
 })

@@ -94,6 +94,10 @@ export function updateWeightBodyInfo(data: Record<string, unknown>) {
   return request({ url: '/health/weight/body-info/', method: 'put', data })
 }
 
+export function getWeightAdjustments(params?: Record<string, unknown>) {
+  return request({ url: '/health/weight/adjustments/', method: 'get', params })
+}
+
 // ─── 好朋友跟踪 ───
 
 export function getMenstrualRecords(params?: Record<string, unknown>) {

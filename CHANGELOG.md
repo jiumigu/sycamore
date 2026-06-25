@@ -1,5 +1,30 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-06-25] v3.14.0 - 体重管理增强 + 布局修复
+
+### ✨ 新增
+
+- **体重目标调整记录**：`WeightGoalAdjustment` 模型追踪每次目标变更（调整前/后值、变更量、原因），API 端返回活跃目标的所有调整流水，前端 目标调整记录 时间线卡片展示（before→after + 变更标签 + 原因）
+- **体重月度进度自动推进**：`check_weight_goal_status` 在里程碑达成后自动递增 `goal.current_month` 并更新 `current_month_start_weight`/`current_month_target`，兼容旧数据修复（自动扫描已达成未推进的月份）
+- **体重趋势图 markLine 目标线**：目标体重以虚线 markLine 标注在图表中（"目标 105斤"标签），替代独立的 ECharts 目标线 series，legend 更简洁
+
+### 🔧 优化
+
+- **体重趋势图 Y 轴动态适应**：从固定 `min: 90` 改为基于目标体重和历史数据自动计算下限（`Math.floor(target - 5)`），消除下方大段留白，体重波动更明显
+- **月度进度阶段列表去重**：修复展开全部时的渲染重复问题——`visibleMilestones` 始终只返回当前月份，其他阶段由 `el-collapse-transition` 独占渲染，消除 8 条重复
+
+### 🐛 修复
+
+- **月度进度卡片高度撑开异常**：移除 `.progress-section` 的 `height: 100%`，添加 `overflow: visible` 防止卡片被 BMI 列拉伸
+- **进度卡片与趋势图间距缺失**：`.section-row` 从仅 `margin-top` 改为上下各 16px，添加 `overflow: visible` 防止裁剪
+- **el-collapse-transition 动画裁剪内容**：添加 `:deep(.el-collapse-transition) { overflow: visible }` 确保展开动画不遮挡后续元素
+
+### 📝 文档
+
+- 更新 `CHANGELOG.md`：本次变更记录
+
+---
+
 ## [2026-06-23] v3.13.0 - 目标行为追踪 + 小确幸修复
 
 ### ✨ 新增

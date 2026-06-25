@@ -160,6 +160,16 @@ export interface WeightMilestone {
   goal: number
 }
 
+export interface WeightGoalAdjustment {
+  id: number
+  goal: number
+  before_value: string
+  after_value: string
+  change_amount: string
+  reason: string
+  adjusted_at: string
+}
+
 export interface WeightStats {
   current_weight_kg: number | null
   current_weight_jin: number | null

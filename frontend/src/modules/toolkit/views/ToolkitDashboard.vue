@@ -31,13 +31,40 @@
     </div>
 
     <!-- 工具网格 -->
-    <div v-loading="store.loading" class="tool-grid">
-      <div v-for="tool in filteredTools" :key="tool.tool_key" class="tool-card" @click="$router.push(`/toolkit/${tool.tool_key}`)">
-        <div class="tool-icon">{{ tool.icon }}</div>
-        <div class="tool-name">{{ tool.name }}</div>
-        <div class="tool-desc">{{ tool.description }}</div>
-        <el-button size="small" type="primary" round class="tool-btn">使用</el-button>
+    <div v-loading="store.loading">
+      <!-- 环境侦查分组 -->
+      <div v-if="envTools.length" class="tool-group">
+        <div class="group-header">
+          <span class="group-icon">🔍</span>
+          <span class="group-name">环境侦查</span>
+          <span class="group-desc">找到让精神资产增值的环境</span>
+        </div>
+        <div class="tool-grid">
+          <div v-for="tool in envTools" :key="tool.tool_key" class="tool-card" @click="$router.push(`/toolkit/${tool.tool_key}`)">
+            <div class="tool-icon">{{ tool.icon }}</div>
+            <div class="tool-name">{{ tool.name }}</div>
+            <div class="tool-desc">{{ tool.description }}</div>
+            <el-button size="small" type="primary" round class="tool-btn">使用</el-button>
+          </div>
+        </div>
       </div>
+
+      <!-- 其他工具分组 -->
+      <div v-if="otherTools.length" class="tool-group">
+        <div class="group-header">
+          <span class="group-icon">🧰</span>
+          <span class="group-name">其他工具</span>
+        </div>
+        <div class="tool-grid">
+          <div v-for="tool in otherTools" :key="tool.tool_key" class="tool-card" @click="$router.push(`/toolkit/${tool.tool_key}`)">
+            <div class="tool-icon">{{ tool.icon }}</div>
+            <div class="tool-name">{{ tool.name }}</div>
+            <div class="tool-desc">{{ tool.description }}</div>
+            <el-button size="small" type="primary" round class="tool-btn">使用</el-button>
+          </div>
+        </div>
+      </div>
+
       <el-empty v-if="!store.loading && filteredTools.length === 0" description="暂无工具" />
     </div>
   </div>
@@ -58,6 +85,8 @@ const categoryList = computed(() => {
   return [all, ...store.categories]
 })
 
+const ENV_TOOL_KEYS = ['career-energy-audit', 'environment-audit', 'decision-log']
+
 const filteredTools = computed(() => {
   let list = store.tools
   if (activeCategory.value) {
@@ -69,6 +98,9 @@ const filteredTools = computed(() => {
   }
   return list
 })
+
+const envTools = computed(() => filteredTools.value.filter(t => ENV_TOOL_KEYS.includes(t.tool_key)))
+const otherTools = computed(() => filteredTools.value.filter(t => !ENV_TOOL_KEYS.includes(t.tool_key)))
 
 function switchCategory(cat: string) {
   activeCategory.value = cat
@@ -113,9 +145,20 @@ onMounted(async () => {
     }
   }
 
+  .tool-group {
+    margin-bottom: 28px;
+
+    .group-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+      .group-icon { font-size: 20px; }
+      .group-name { font-size: 16px; font-weight: 600; color: #333; }
+      .group-desc { font-size: 13px; color: #999; }
+    }
+  }
+
   .tool-grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;
-    min-height: 200px;
+    min-height: 100px;
 
     .tool-card {
       background: #fff; border: 1px solid #f0f0f0; border-radius: 12px;

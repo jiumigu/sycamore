@@ -46,10 +46,10 @@
     <el-card v-if="result !== null" shadow="hover" class="result-card">
       <template #header><span class="card-title">📊 计算结果</span></template>
       <div class="formula">
-        ({{ fmt(form.liquid_assets) }} + {{ fmt(form.annual_income) }} × {{ form.work_years }}) ÷ 10000
+        (¥{{ fmt(form.liquid_assets) }} + ¥{{ fmt(form.annual_income) }} × {{ form.work_years }}) ÷ 10000
       </div>
       <div v-if="form.debt > 0" class="formula-small">
-        扣除债务：({{ fmt(form.liquid_assets) }} − {{ fmt(form.debt) }} + {{ fmt(form.annual_income) }} × {{ form.work_years }}) ÷ 10000
+        扣除债务：(¥{{ fmt(form.liquid_assets) }} − ¥{{ fmt(form.debt) }} + ¥{{ fmt(form.annual_income) }} × {{ form.work_years }}) ÷ 10000
       </div>
       <div class="result-value">¥{{ result }}</div>
       <div class="result-desc">每次消费 ≤ ¥{{ result }}，无需纠结，自由支配。</div>
@@ -115,7 +115,7 @@ const history = ref<FreeSpendingRecord[]>([])
 
 function fmt(val: number | string) {
   const n = typeof val === 'string' ? parseFloat(val) : val
-  return `¥${n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 async function fetchHistory() {

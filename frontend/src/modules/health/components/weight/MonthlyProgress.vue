@@ -1,6 +1,11 @@
 <template>
   <div class="progress-section">
-    <div class="section-title">📅 月度进度追踪</div>
+    <div class="section-header">
+      <span class="section-title">📅 月度进度追踪</span>
+      <el-button v-if="milestones.length > 0" size="small" text @click="showAllPhases = !showAllPhases">
+        {{ showAllPhases ? '收起' : '查看全部' }}
+      </el-button>
+    </div>
 
     <div class="progress-overview" v-if="stats">
       <div class="overview-item">
@@ -21,7 +26,7 @@
       </div>
     </div>
 
-    <!-- 环形进度 + 月度进度条 -->
+    <!-- 环形进度 + 月度进度 -->
     <div class="progress-body" v-if="milestones && milestones.length > 0">
       <div class="ring-wrapper">
         <svg viewBox="0 0 120 120" class="progress-ring">
@@ -39,8 +44,10 @@
       </div>
 
       <div class="milestones-list">
+        <!-- 当前阶段（始终显示） -->
         <div
-          v-for="m in milestones" :key="m.month_number"
+          v-for="m in visibleMilestones"
+          :key="m.month_number"
           class="milestone-row"
           :class="{ achieved: m.is_achieved, active: !m.is_achieved && m.month_number === currentMonth }"
         >
@@ -57,6 +64,31 @@
             <span v-else class="tag-pending">⏳ 未开始</span>
           </div>
         </div>
+
+        <!-- 其他阶段（折叠） -->
+        <el-collapse-transition>
+          <div v-show="showAllPhases" v-if="collapsedMilestones.length">
+            <div
+              v-for="m in collapsedMilestones"
+              :key="m.month_number"
+              class="milestone-row"
+              :class="{ achieved: m.is_achieved }"
+            >
+              <div class="milestone-month">
+                <span class="month-badge" :class="badgeClass(m)">第{{ m.month_number }}月</span>
+              </div>
+              <div class="milestone-info">
+                <span>{{ displayWeight(m.start_weight_kg) }}斤 → {{ displayWeight(m.target_weight_kg) }}斤</span>
+                <span class="milestone-target">目标-{{ formatDiff(m.start_weight_kg, m.target_weight_kg) }}斤</span>
+              </div>
+              <div class="milestone-status">
+                <span v-if="m.is_achieved" class="tag-done">✅ 已完成</span>
+                <span v-else-if="m.month_number === currentMonth" class="tag-doing">🔄 进行中</span>
+                <span v-else class="tag-pending">⏳ 未开始</span>
+              </div>
+            </div>
+          </div>
+        </el-collapse-transition>
       </div>
     </div>
     <el-empty v-else-if="!loading" description="还没有设定减重目标" :image-size="80" />
@@ -64,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import type { WeightMilestone, WeightStats } from '../../types/healthTypes'
 
 const props = defineProps<{
@@ -73,6 +105,28 @@ const props = defineProps<{
   currentMonth: number
   loading?: boolean
 }>()
+
+const showAllPhases = ref(false)
+
+const dedupedMilestones = computed(() => {
+  const map = new Map<number, WeightMilestone>()
+  for (const m of props.milestones) {
+    map.set(m.month_number, m)
+  }
+  return [...map.values()].sort((a, b) => a.month_number - b.month_number)
+})
+
+const currentMilestone = computed(() =>
+  dedupedMilestones.value.find(m => m.month_number === props.currentMonth)
+)
+
+const collapsedMilestones = computed(() =>
+  dedupedMilestones.value.filter(m => m.month_number !== props.currentMonth)
+)
+
+const visibleMilestones = computed(() =>
+  currentMilestone.value ? [currentMilestone.value] : []
+)
 
 const circumference = 2 * Math.PI * 52
 const ringOffset = computed(() => {
@@ -115,15 +169,16 @@ const formatDiff = (start: string | null, end: string | null) => {
 </script>
 
 <style scoped>
-.progress-section { background: #fff; border: 1px solid #E5E7EB; border-radius: 12px; padding: 20px; }
-.section-title { font-size: 16px; font-weight: 600; color: #1F2937; margin-bottom: 16px; }
-.progress-overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.progress-section { background: #fff; border: 1px solid #E5E7EB; border-radius: 12px; padding: 16px; overflow: visible; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.section-title { font-size: 15px; font-weight: 600; color: #1F2937; }
+.progress-overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
 .overview-item { text-align: center; padding: 8px; }
 .overview-label { display: block; font-size: 12px; color: #6B7280; margin-bottom: 4px; }
 .overview-value { font-size: 20px; font-weight: 700; color: #1F2937; }
-.progress-body { display: flex; gap: 24px; align-items: flex-start; }
-.ring-wrapper { flex-shrink: 0; width: 120px; }
-.progress-ring { width: 120px; height: 120px; }
+.progress-body { display: flex; gap: 16px; align-items: flex-start; }
+.ring-wrapper { flex-shrink: 0; width: 100px; margin: 0 auto; }
+.progress-ring { width: 100px; height: 100px; }
 .ring-label { font-size: 10px; fill: #6B7280; }
 .ring-value { font-size: 16px; font-weight: 700; fill: #1F2937; }
 .milestones-list { flex: 1; display: flex; flex-direction: column; gap: 8px; }
@@ -143,4 +198,6 @@ const formatDiff = (start: string | null, end: string | null) => {
 .tag-pending { color: #9CA3AF; }
 .text-green { color: #10B981; }
 .text-orange { color: #F59E0B; }
+.milestones-list { overflow: visible; }
+:deep(.el-collapse-transition) { overflow: visible; }
 </style>

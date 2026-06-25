@@ -232,3 +232,24 @@ class MenstrualRecord(models.Model):
 
     def __str__(self):
         return f'{self.start_date} 周期{self.cycle_days}天'
+
+
+class WeightGoalAdjustment(models.Model):
+    """体重目标调整记录"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    goal = models.ForeignKey(WeightGoal, on_delete=models.CASCADE, related_name='adjustments', verbose_name='关联目标')
+    before_value = models.DecimalField(max_digits=5, decimal_places=1, verbose_name='变更前目标(斤)')
+    after_value = models.DecimalField(max_digits=5, decimal_places=1, verbose_name='变更后目标(斤)')
+    change_amount = models.DecimalField(max_digits=5, decimal_places=1, verbose_name='调整值(斤)')
+    reason = models.TextField(blank=True, default='', verbose_name='调整原因')
+    adjusted_at = models.DateTimeField(auto_now_add=True, verbose_name='调整时间')
+
+    class Meta:
+        db_table = 'health_weight_goal_adjustment'
+        ordering = ['-adjusted_at']
+        verbose_name = '目标调整记录'
+        verbose_name_plural = '目标调整记录'
+
+    def __str__(self):
+        return f'{self.before_value}斤 → {self.after_value}斤 ({self.change_amount}斤)'

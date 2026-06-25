@@ -9,7 +9,7 @@ export function createConflict(data: Record<string, unknown>) {
 }
 
 export function updateConflict(id: number, data: Record<string, unknown>) {
-  return request({ url: `/relation/conflicts/${id}/`, method: 'put', data })
+  return request({ url: `/relation/conflicts/${id}/`, method: 'patch', data })
 }
 
 export function deleteConflict(id: number) {

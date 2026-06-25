@@ -16,6 +16,7 @@ urlpatterns = [
     path('weight/goal/', views.WeightViewSet.as_view({'get': 'goal', 'post': 'goal'}), name='weight-goal'),
     path('weight/milestones/', views.WeightViewSet.as_view({'get': 'milestones'}), name='weight-milestones'),
     path('weight/body-info/', views.WeightViewSet.as_view({'get': 'body_info', 'put': 'body_info'}), name='weight-body-info'),
+    path('weight/adjustments/', views.WeightViewSet.as_view({'get': 'adjustments'}), name='weight-adjustments'),
     path('menstrual/stats/', views.MenstrualViewSet.as_view({'get': 'stats'}), name='menstrual-stats'),
     path('menstrual/trend/', views.MenstrualViewSet.as_view({'get': 'trend'}), name='menstrual-trend'),
 ]
