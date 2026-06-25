@@ -47,6 +47,29 @@
       <!-- 趋势图 -->
       <WeightTrendChart :trend="store.trend" :stats="store.stats" :loading="store.loading" />
 
+      <!-- 目标调整记录 -->
+      <el-card v-if="store.adjustments.length" class="adjustment-card">
+        <template #header>
+          <div class="card-header">
+            <span>📝 目标调整记录</span>
+          </div>
+        </template>
+        <el-timeline>
+          <el-timeline-item
+            v-for="adj in store.adjustments"
+            :key="adj.id"
+            :timestamp="adj.adjusted_at"
+            :color="Number(adj.change_amount) > 0 ? '#f56c6c' : '#67c23a'"
+          >
+            {{ adj.before_value }}斤 → {{ adj.after_value }}斤
+            <el-tag :type="Number(adj.change_amount) > 0 ? 'danger' : 'success'" size="small">
+              {{ Number(adj.change_amount) > 0 ? '+' : '' }}{{ adj.change_amount }}斤
+            </el-tag>
+            <div v-if="adj.reason" class="adjust-reason">{{ adj.reason }}</div>
+          </el-timeline-item>
+        </el-timeline>
+      </el-card>
+
       <!-- 今日记录 + 历史记录 -->
       <el-row :gutter="16" class="section-row">
         <el-col :span="24">
@@ -83,7 +106,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useWeightStore } from '../../stores/healthStore'
-import type { WeightRecord } from '../../types/healthTypes'
+import type { WeightGoalAdjustment, WeightRecord } from '../../types/healthTypes'
 import WeightStatsCards from '../../components/weight/WeightStatsCards.vue'
 import BMIStatus from '../../components/weight/BMIStatus.vue'
 import MonthlyProgress from '../../components/weight/MonthlyProgress.vue'
@@ -186,5 +209,11 @@ onMounted(() => {
 .page-subtitle { margin: 4px 0 0; font-size: 14px; color: #6B7280; }
 .header-actions { display: flex; gap: 8px; }
 .loading-state { padding: 40px; }
-.section-row { margin-top: 16px !important; }
+.section-row { margin: 16px 0 !important; display: flex; overflow: visible; }
+.section-row :deep(.el-col) { display: flex; overflow: visible; }
+.section-row .el-col > * { width: 100%; overflow: visible; }
+.adjustment-card { margin-top: 16px; }
+.adjustment-card :deep(.el-card__body) { padding: 16px 20px; }
+.adjustment-card :deep(.el-timeline) { padding-left: 0; }
+.adjust-reason { font-size: 12px; color: #999; margin-top: 4px; }
 </style>

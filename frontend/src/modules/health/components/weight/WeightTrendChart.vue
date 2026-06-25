@@ -28,30 +28,37 @@ const option = computed(() => {
   const weights = records.map(r => (r.weight_kg * 2))  // kg → 斤
   const targetLine = (props.trend.target_weight_kg ?? props.stats?.target_weight_kg) * 2
 
+  const weights_jin = weights  // 斤
+  const minWeight = weights_jin.length > 0 ? Math.min(...weights_jin) : (targetLine ?? 100)
+  const maxWeight = weights_jin.length > 0 ? Math.max(...weights_jin) : (targetLine ?? 100) + 10
+
   const series: echarts.EChartsOption['series'] = [
     {
       name: '实际体重',
       type: 'line',
-      data: weights,
+      data: weights_jin,
       smooth: true,
       symbol: 'circle',
       symbolSize: 6,
       lineStyle: { color: '#3B82F6', width: 2 },
       itemStyle: { color: '#3B82F6' },
       areaStyle: { color: 'rgba(59,130,246,0.08)' },
+      ...(targetLine ? {
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          label: {
+            formatter: '目标 {c}斤',
+            position: 'start',
+            fontSize: 11,
+            color: '#EF4444',
+          },
+          lineStyle: { color: '#EF4444', width: 2, type: 'dashed' },
+          data: [{ yAxis: targetLine }],
+        },
+      } : {}),
     },
   ]
-
-  if (targetLine) {
-    series.push({
-      name: '最终目标',
-      type: 'line',
-      data: dates.map(() => targetLine),
-      lineStyle: { color: '#EF4444', width: 2, type: 'dashed' },
-      symbol: 'none',
-      itemStyle: { color: '#EF4444' },
-    })
-  }
 
   // 里程碑标记
   if (props.trend.milestones?.length) {
@@ -106,7 +113,7 @@ const option = computed(() => {
         return html
       },
     },
-    legend: { data: ['实际体重', '最终目标'], bottom: 0, icon: 'circle', itemWidth: 8 },
+    legend: { data: ['实际体重'], bottom: 0, icon: 'circle', itemWidth: 8 },
     grid: { left: 50, right: 20, top: 20, bottom: 40 },
     xAxis: {
       type: 'category',
@@ -116,7 +123,8 @@ const option = computed(() => {
     },
     yAxis: {
       type: 'value',
-      min: 90,
+      min: Math.floor(Math.min(targetLine ?? minWeight, minWeight) - 5),
+      max: Math.ceil(maxWeight + 5),
       name: '斤',
       nameTextStyle: { color: '#9CA3AF', fontSize: 11 },
       axisLine: { show: false },
