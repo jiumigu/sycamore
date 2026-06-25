@@ -12,6 +12,7 @@ router.register(r'career-energy-audits', views.CareerEnergyAuditViewSet, basenam
 router.register(r'decision-logs', views.DecisionLogViewSet, basename='decision-log')
 router.register(r'health-self-checks', views.HealthSelfCheckViewSet, basename='health-self-check')
 router.register(r'free-spending', views.FreeSpendingCalculatorViewSet, basename='free-spending')
+router.register(r'hourly-wage', views.HourlyWageViewSet, basename='hourly-wage')
 router.register(r'review-records', views.ReviewRecordViewSet, basename='review-record')
 router.register(r'quotes', views.QuoteViewSet, basename='quote')
 

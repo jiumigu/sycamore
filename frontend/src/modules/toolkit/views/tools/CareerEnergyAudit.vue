@@ -374,6 +374,7 @@ onMounted(fetchHistory)
 <style scoped>
 .career-audit {
   width: 100%;
+  padding: 20px;
 }
 .page-title {
   font-size: 22px; font-weight: 700; margin: 0 0 4px;

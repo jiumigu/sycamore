@@ -676,7 +676,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.travel-route { padding: 4px; }
+.travel-route { padding: 20px; }
 
 .dest-row { display: flex; gap: 8px; margin-bottom: 8px; }
 

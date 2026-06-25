@@ -1,5 +1,10 @@
 <template>
   <div class="review-toolbox">
+    <div class="back-bar">
+      <el-button text @click="$router.push('/toolkit')">
+        <el-icon><ArrowLeft /></el-icon> 返回工具集
+      </el-button>
+    </div>
     <!-- 类型切换 TAB -->
     <el-tabs v-model="activeType" @tab-change="handleTypeChange">
       <el-tab-pane v-for="tab in reviewTabs" :key="tab.value" :label="tab.label" :name="tab.value" />
@@ -256,6 +261,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getReviewRecords, createReviewRecord, updateReviewRecord, deleteReviewRecord } from '../../api/toolkitApi'
 
@@ -435,6 +441,7 @@ onMounted(fetchRecords)
 
 <style scoped>
 .review-toolbox { padding: 20px; background: var(--el-bg-color-page); min-height: 100vh; }
+.back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
 .content-area { margin-top: 16px; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .record-count { font-size: 13px; color: var(--el-text-color-secondary); }

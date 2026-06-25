@@ -252,6 +252,7 @@ onMounted(fetchHistory)
 <style scoped>
 .env-audit {
   margin: 0 auto;
+  padding: 20px;
 }
 .subtitle {
   font-size: 13px;

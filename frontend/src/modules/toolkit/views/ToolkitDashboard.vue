@@ -1,6 +1,5 @@
 <template>
   <div class="toolkit-dashboard">
-    <!-- 页面标题 -->
     <div class="page-header">
       <div class="header-left">
         <h1 class="page-title">🛠️ 工具集</h1>
@@ -16,56 +15,34 @@
       </div>
     </div>
 
-    <!-- 分类标签（卡片式） -->
-    <div class="category-tabs">
-      <div
-        v-for="cat in categoryList"
-        :key="cat.key"
-        class="category-tab"
-        :class="{ active: activeCategory === cat.key }"
-        @click="switchCategory(cat.key)"
-      >
-        <span class="cat-label">{{ cat.label }}</span>
-        <span class="cat-count">{{ cat.count }}</span>
-      </div>
+    <!-- 筛选标签 -->
+    <div class="filter-tabs">
+      <el-radio-group v-model="activeFilter" size="small">
+        <el-radio-button value="">全部</el-radio-button>
+        <el-radio-button value="环境侦查">🔍 环境侦查</el-radio-button>
+        <el-radio-button value="图片处理">🖼️ 图片处理</el-radio-button>
+        <el-radio-button value="财务">💰 财务</el-radio-button>
+        <el-radio-button value="文字">📝 文字</el-radio-button>
+        <el-radio-button value="健康">🩺 健康</el-radio-button>
+        <el-radio-button value="其他">🧰 其他</el-radio-button>
+      </el-radio-group>
     </div>
 
-    <!-- 工具网格 -->
-    <div v-loading="store.loading">
-      <!-- 环境侦查分组 -->
-      <div v-if="envTools.length" class="tool-group">
-        <div class="group-header">
-          <span class="group-icon">🔍</span>
-          <span class="group-name">环境侦查</span>
-          <span class="group-desc">找到让精神资产增值的环境</span>
-        </div>
-        <div class="tool-grid">
-          <div v-for="tool in envTools" :key="tool.tool_key" class="tool-card" @click="$router.push(`/toolkit/${tool.tool_key}`)">
-            <div class="tool-icon">{{ tool.icon }}</div>
-            <div class="tool-name">{{ tool.name }}</div>
-            <div class="tool-desc">{{ tool.description }}</div>
-            <el-button size="small" type="primary" round class="tool-btn">使用</el-button>
-          </div>
-        </div>
-      </div>
+    <!-- 工具卡片网格 -->
+    <div v-loading="store.loading" class="tool-grid">
+      <el-card
+        v-for="tool in filteredTools"
+        :key="tool.tool_key"
+        class="tool-card"
+        shadow="hover"
+        @click="$router.push(`/toolkit/${tool.tool_key}`)"
+      >
+        <div class="tool-icon">{{ tool.icon }}</div>
+        <div class="tool-name">{{ tool.name }}</div>
+        <div class="tool-desc">{{ tool.description }}</div>
+      </el-card>
 
-      <!-- 其他工具分组 -->
-      <div v-if="otherTools.length" class="tool-group">
-        <div class="group-header">
-          <span class="group-icon">🧰</span>
-          <span class="group-name">其他工具</span>
-        </div>
-        <div class="tool-grid">
-          <div v-for="tool in otherTools" :key="tool.tool_key" class="tool-card" @click="$router.push(`/toolkit/${tool.tool_key}`)">
-            <div class="tool-icon">{{ tool.icon }}</div>
-            <div class="tool-name">{{ tool.name }}</div>
-            <div class="tool-desc">{{ tool.description }}</div>
-            <el-button size="small" type="primary" round class="tool-btn">使用</el-button>
-          </div>
-        </div>
-      </div>
-
-      <el-empty v-if="!store.loading && filteredTools.length === 0" description="暂无工具" />
+      <el-empty v-if="!store.loading && filteredTools.length === 0" description="该分类下暂无工具" />
     </div>
   </div>
 </template>
@@ -74,23 +51,32 @@
 import { ref, computed, onMounted } from 'vue'
 import { Search, Timer } from '@element-plus/icons-vue'
 import { useToolkitStore } from '../stores/toolkitStore'
-import { CATEGORY_LABELS } from '../types/toolkitTypes'
 
 const store = useToolkitStore()
 const searchText = ref('')
-const activeCategory = ref('')
+const activeFilter = ref('')
 
-const categoryList = computed(() => {
-  const all = { key: '', label: '全部', count: store.tools.length }
-  return [all, ...store.categories]
-})
+// 工具分类映射（按 tool_key）
+const toolCategoryMap: Record<string, string> = {
+  'career-energy-audit': '环境侦查',
+  'environment-audit': '环境侦查',
+  'decision-log': '环境侦查',
+  'img2gif': '图片处理',
+  'trad2simp': '文字',
+  'free-spending': '财务',
+  'hourly-wage': '财务',
+  'quote-tool': '文字',
+  'health-self-check': '健康',
+}
 
-const ENV_TOOL_KEYS = ['career-energy-audit', 'environment-audit', 'decision-log']
+function getToolCategory(tool: { tool_key: string }): string {
+  return toolCategoryMap[tool.tool_key] || '其他'
+}
 
 const filteredTools = computed(() => {
   let list = store.tools
-  if (activeCategory.value) {
-    list = list.filter(t => t.category === activeCategory.value)
+  if (activeFilter.value) {
+    list = list.filter(t => getToolCategory(t) === activeFilter.value)
   }
   if (searchText.value.trim()) {
     const q = searchText.value.trim().toLowerCase()
@@ -98,13 +84,6 @@ const filteredTools = computed(() => {
   }
   return list
 })
-
-const envTools = computed(() => filteredTools.value.filter(t => ENV_TOOL_KEYS.includes(t.tool_key)))
-const otherTools = computed(() => filteredTools.value.filter(t => !ENV_TOOL_KEYS.includes(t.tool_key)))
-
-function switchCategory(cat: string) {
-  activeCategory.value = cat
-}
 
 function onSearch() {
   /* no-op: computed reactivity handles it */
@@ -115,7 +94,7 @@ onMounted(async () => {
 })
 </script>
 
-<style scoped lang="scss">
+<style scoped>
 .toolkit-dashboard {
   padding: 20px; background: #F5F7FA; min-height: 100vh;
 
@@ -127,51 +106,40 @@ onMounted(async () => {
     .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   }
 
-  .category-tabs {
-    display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;
-    .category-tab {
-      display: flex; align-items: center; gap: 6px;
-      padding: 8px 16px; border-radius: 20px; cursor: pointer;
-      background: #fff; border: 1px solid #e5e7eb;
-      font-size: 13px; color: #6B7280; transition: all 0.2s;
-      &:hover { border-color: #A78BFA; color: #7C3AED; }
-      &.active { background: #7C3AED; border-color: #7C3AED; color: #fff;
-        .cat-count { background: rgba(255,255,255,0.2); color: #fff; }
-      }
-      .cat-count {
-        font-size: 11px; padding: 1px 7px; border-radius: 10px;
-        background: #f3f4f6; color: #9CA3AF;
-      }
-    }
-  }
-
-  .tool-group {
-    margin-bottom: 28px;
-
-    .group-header {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
-      .group-icon { font-size: 20px; }
-      .group-name { font-size: 16px; font-weight: 600; color: #333; }
-      .group-desc { font-size: 13px; color: #999; }
-    }
+  .filter-tabs {
+    margin-bottom: 16px;
   }
 
   .tool-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;
-    min-height: 100px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
 
-    .tool-card {
-      background: #fff; border: 1px solid #f0f0f0; border-radius: 12px;
-      padding: 24px 20px; cursor: pointer;
-      display: flex; flex-direction: column; align-items: center; text-align: center;
-      transition: all 0.25s;
-      &:hover { border-color: #c4b5fd; box-shadow: 0 4px 16px rgba(139,92,246,0.1); transform: translateY(-3px); }
+    @media (max-width: 1200px) { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 768px) { grid-template-columns: repeat(2, 1fr); }
+  }
 
-      .tool-icon { font-size: 36px; margin-bottom: 12px; }
-      .tool-name { font-size: 16px; font-weight: 600; color: #1F2937; margin-bottom: 6px; }
-      .tool-desc { font-size: 13px; color: #9CA3AF; line-height: 1.5; margin-bottom: 16px; flex: 1; }
-      .tool-btn { flex-shrink: 0; }
+  .tool-card {
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    margin: 0;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
     }
+
+    :deep(.el-card__body) {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 24px 20px;
+    }
+
+    .tool-icon { font-size: 32px; margin-bottom: 8px; }
+    .tool-name { font-size: 15px; font-weight: 600; color: #1F2937; margin-bottom: 4px; }
+    .tool-desc { font-size: 12px; color: #9CA3AF; line-height: 1.4; }
   }
 }
 </style>

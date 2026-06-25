@@ -96,6 +96,30 @@ export interface TravelRoutePreset {
   updated_at: string
 }
 
+export interface HourlyWageRecord {
+  id: number
+  user_id: number
+  name: string
+  monthly_salary: string
+  rest_type: string
+  work_start: string
+  work_end: string
+  lunch_break: number
+  commute_minutes: number
+  calc_mode: string
+  freelance_time_mode: string
+  freelance_days: number | null
+  freelance_hours_per_day: number | null
+  weekly_hours: number[]
+  freelance_weeks: number
+  work_days_per_month: string
+  work_hours_per_day: string
+  total_hours_per_month: string
+  hourly_wage: string
+  notes: string
+  created_at: string
+}
+
 export interface FreeSpendingRecord {
   id: number
   user_id: number

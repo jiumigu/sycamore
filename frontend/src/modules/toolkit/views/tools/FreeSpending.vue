@@ -1,5 +1,10 @@
 <template>
   <div class="free-spending">
+    <div class="back-bar">
+      <el-button text @click="$router.push('/toolkit')">
+        <el-icon><ArrowLeft /></el-icon> 返回工具集
+      </el-button>
+    </div>
     <el-card class="calc-card">
       <template #header>
         <div class="card-header">
@@ -96,6 +101,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFreeSpendingList, createFreeSpending, deleteFreeSpending } from '../../api/toolkitApi'
 import type { FreeSpendingRecord } from '../../types/toolkitTypes'
@@ -171,7 +177,7 @@ onMounted(fetchHistory)
 </script>
 
 <style scoped>
-.free-spending { max-width: 720px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.free-spending { margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .card-header { display: flex; align-items: center; gap: 10px; }
 .card-title { font-size: 14px; font-weight: 600; }
 .subtitle { font-size: 13px; color: var(--el-text-color-secondary); margin: -8px 0 4px; }
@@ -186,4 +192,5 @@ onMounted(fetchHistory)
 .result-desc { font-size: 14px; color: var(--el-text-color-primary); margin-bottom: 4px; }
 .result-tip { text-align: left; }
 .history-card :deep(.el-card__body) { padding: 12px 16px 16px; }
+.back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
 </style>

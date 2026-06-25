@@ -373,6 +373,69 @@ class FreeSpendingCalculator(models.Model):
         return f'¥{self.free_amount} ({self.created_at})'
 
 
+class HourlyWageRecord(models.Model):
+    """时薪计算记录"""
+
+    CALC_MODE_CHOICES = [
+        ('formal', '🏢 正式职业'),
+        ('freelance', '🧑‍💻 自由职业'),
+    ]
+    FREELANCE_TIME_MODE_CHOICES = [
+        ('fixed', '固定时长'),
+        ('flexible', '弹性工时'),
+    ]
+
+    user_id = models.IntegerField(default=1)
+    name = models.CharField(max_length=200, blank=True, default='', verbose_name='记录名称')
+
+    # 计算模式
+    calc_mode = models.CharField(
+        max_length=20, default='formal', choices=CALC_MODE_CHOICES, verbose_name='计算模式',
+    )
+
+    # 正式职业字段
+    rest_type = models.CharField(max_length=20, default='双休', verbose_name='休息类型', choices=[
+        ('双休', '双休'), ('单休', '单休'), ('大小周', '大小周'), ('不休', '不休'),
+    ])
+    work_start = models.CharField(max_length=5, default='09:00', verbose_name='上班时间')
+    work_end = models.CharField(max_length=5, default='18:00', verbose_name='下班时间')
+    lunch_break = models.IntegerField(default=60, verbose_name='午休时长(分钟)')
+
+    # 自由职业字段
+    freelance_time_mode = models.CharField(
+        max_length=10, default='fixed', choices=FREELANCE_TIME_MODE_CHOICES,
+        verbose_name='工时模式',
+    )
+    freelance_days = models.IntegerField(null=True, blank=True, verbose_name='月工作天数')
+    freelance_hours_per_day = models.DecimalField(
+        null=True, blank=True, max_digits=3, decimal_places=1, verbose_name='日均工作时长',
+    )
+    weekly_hours = models.JSONField(default=list, verbose_name='每周各天工作时长')
+    freelance_weeks = models.IntegerField(default=4, verbose_name='每月周数')
+
+    # 通用字段
+    monthly_salary = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='月薪(元)')
+
+    # 通勤
+    commute_minutes = models.IntegerField(default=0, verbose_name='单程通勤(分钟)')
+
+    # 计算结果
+    work_days_per_month = models.DecimalField(max_digits=5, decimal_places=1, verbose_name='月工作天数')
+    work_hours_per_day = models.DecimalField(max_digits=4, decimal_places=1, verbose_name='日工作小时')
+    total_hours_per_month = models.DecimalField(max_digits=6, decimal_places=1, verbose_name='月总投入小时')
+    hourly_wage = models.DecimalField(max_digits=8, decimal_places=2, verbose_name='时薪(元/时)')
+
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'toolkit_hourly_wage'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.name or "时薪计算"} ¥{self.hourly_wage}/h'
+
+
 class ReviewRecord(models.Model):
     """复盘记录"""
 

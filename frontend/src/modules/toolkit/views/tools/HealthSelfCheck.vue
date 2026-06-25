@@ -1,5 +1,10 @@
 <template>
   <div class="health-check">
+    <div class="back-bar">
+      <el-button text @click="$router.push('/toolkit')">
+        <el-icon><ArrowLeft /></el-icon> 返回工具集
+      </el-button>
+    </div>
     <h2 class="page-title">🩺 身体健康自查</h2>
     <p class="subtitle">8 大系统 · 31 项指标，定期追踪身体信号。</p>
 
@@ -145,6 +150,7 @@ import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import { SYSTEM_GROUPS, FIELD_DEFS, NUMERIC_FIELDS } from '../../types/healthCheckTypes'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import * as healthCheckApi from '../../api/healthCheckApi'
 import type { HealthSelfCheck } from '../../types/healthCheckTypes'
 
@@ -308,6 +314,7 @@ onMounted(fetchHistory)
 <style scoped>
 .health-check {
   width: 100%;
+  padding: 20px;
 }
 .page-title { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
 .subtitle { font-size: 13px; color: #9CA3AF; margin: 0 0 20px; }
@@ -411,4 +418,5 @@ onMounted(fetchHistory)
   color: #1F2937;
   white-space: pre-wrap;
 }
+.back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
 </style>

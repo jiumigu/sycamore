@@ -5,7 +5,6 @@
         <el-icon><ArrowLeft /></el-icon> 返回工具集
       </el-button>
     </div>
-
     <div v-loading="loading">
       <!-- 工具信息 -->
       <el-card class="section-card" v-if="tool">
@@ -375,7 +374,7 @@ onMounted(async () => {
 .tool-detail {
   padding: 20px; background: #F5F7FA; min-height: 100vh;
 
-  .back-bar { margin-bottom: 16px; }
+  .back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
 
   .section-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 18px;
     :deep(.el-card__header) { padding: 14px 20px; font-size: 14px; font-weight: 500; border-bottom: 1px solid #f2f2f2; }

@@ -1,5 +1,10 @@
 <template>
   <div class="quote-page">
+    <div class="back-bar">
+      <el-button text @click="$router.push('/toolkit')">
+        <el-icon><ArrowLeft /></el-icon> 返回工具集
+      </el-button>
+    </div>
     <div class="page-header">
       <div class="header-left">
         <h2>💬 摘录管理</h2>
@@ -113,7 +118,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { ArrowLeft, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { LANGUAGE_OPTIONS } from '../types/quoteTypes'
 import type { Quote } from '../types/quoteTypes'
@@ -248,4 +253,5 @@ onMounted(() => { fetchStats(); fetchQuotes() })
 .tag-item { margin: 0 2px; }
 
 .quote-actions { margin-left: auto; display: flex; gap: 4px; }
+.back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
 </style>
