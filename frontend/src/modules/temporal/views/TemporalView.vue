@@ -7,10 +7,6 @@
         <el-tag type="primary" class="module-tag">时间感知</el-tag>
       </div>
       <div class="header-actions">
-        <el-button type="primary" @click="openCreateDialog">
-          <el-icon><Plus /></el-icon>
-          新增日记
-        </el-button>
         <el-button @click="handleRefresh">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -137,9 +133,15 @@
           <el-icon><Delete /></el-icon>
           批量删除
         </el-button>
-        <el-button @click="resetSearch" class="reset-btn">
-          <el-icon><RefreshRight /></el-icon>重置
-        </el-button>
+        <div class="filter-actions">
+          <el-button type="primary" @click="openCreateDialog">
+            <el-icon><Plus /></el-icon>
+            新增日记
+          </el-button>
+          <el-button @click="resetSearch" class="reset-btn">
+            <el-icon><RefreshRight /></el-icon>重置
+          </el-button>
+        </div>
       </div>
     </el-card>
 
@@ -689,13 +691,20 @@ onMounted(() => {
 // ── 筛选栏 ──
 .filter-bar {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
 
   .search-input { width: 200px; }
   .filter-select { width: 120px; }
-  .reset-btn { margin-left: 4px; }
+
+  .filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
 }
 
 // ── 数据表格 ──

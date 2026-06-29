@@ -92,9 +92,9 @@ export function getActionList(params?: Record<string, unknown>) {
   return request({ url: '/goals/actions/', method: 'get', params })
 }
 
-/** 今日打卡 */
-export function checkinAction(actionId: number) {
-  return request({ url: `/goals/actions/${actionId}/checkin/`, method: 'post' })
+/** 打卡（今日或指定日期） */
+export function checkinAction(actionId: number, date?: string) {
+  return request({ url: `/goals/actions/${actionId}/checkin/`, method: 'post', data: date ? { date } : {} })
 }
 
 /** 打卡统计数据 */

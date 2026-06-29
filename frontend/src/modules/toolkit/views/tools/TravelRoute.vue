@@ -1,95 +1,49 @@
 <template>
   <div class="travel-route">
     <el-row :gutter="16">
-      <el-col :span="7">
-        <!-- 已保存路线 -->
-        <el-card class="preset-card" shadow="never">
+      <!-- 左侧：已保存路线 -->
+      <el-col :span="6">
+        <el-card class="preset-list-card" shadow="never">
           <template #header>
             <div class="preset-header">
               <span>📋 已保存路线</span>
-              <el-button @click="saveAsPreset" size="small" type="primary" plain>+ 新建路线</el-button>
+              <el-button size="small" type="primary" @click="openCreateDialog">+ 新建</el-button>
             </div>
           </template>
-          <div v-if="presets.length === 0" class="preset-empty">暂无保存的路线</div>
-          <div v-for="p in presets" :key="p.id" class="preset-item" @click="loadPreset(p)">
-            <div class="preset-info">
-              <span class="preset-name">{{ p.name }}</span>
-              <span class="preset-summary">{{ p.origin }} → {{ p.destinations.join('→') }}</span>
-            </div>
-            <div class="preset-actions" @click.stop>
-              <el-button @click="editPreset(p)" size="small" circle>✏️</el-button>
-              <el-button @click="removePreset(p.id)" size="small" type="danger" circle>🗑️</el-button>
-            </div>
-          </div>
-        </el-card>
 
-        <el-card class="input-card" shadow="never">
-          <el-form label-width="70px">
-            <el-form-item label="出发地">
-              <el-autocomplete
-                v-model="origin"
-                :fetch-suggestions="queryCities"
-                :trigger-on-focus="false"
-                placeholder="如：福州"
-                clearable
-                @select="onOriginSelect"
-              />
-            </el-form-item>
-            <el-form-item label="目的地">
-              <div v-for="(d, i) in destinations" :key="i" class="dest-row">
-                <el-autocomplete
-                  v-model="destinations[i]"
-                  :fetch-suggestions="queryCities"
-                  :trigger-on-focus="false"
-                  :placeholder="`第${i + 1}站`"
-                  clearable
-                  style="flex:1"
-                  @select="(item: any) => onDestSelect(i, item)"
-                />
-                <el-button @click="removeDest(i)" type="danger" size="small" circle>✕</el-button>
+          <div v-if="presets.length > 0" class="preset-list">
+            <div
+              v-for="preset in presets"
+              :key="preset.id"
+              class="preset-item"
+              :class="{ active: selectedPreset?.id === preset.id }"
+              @click="loadPreset(preset)"
+            >
+              <div class="preset-info">
+                <span class="preset-name">{{ preset.name }}</span>
+                <span class="preset-route">{{ preset.origin }} → {{ preset.destinations.join(' → ') }}</span>
               </div>
-              <el-button @click="addDest" size="small">+ 添加目的地</el-button>
-            </el-form-item>
-            <el-form-item>
-              <el-button @click="saveAsPreset" size="small">💾 保存为预设路线</el-button>
-              <el-button type="primary" @click="startJourney" :loading="loadingCities">🚂 出发</el-button>
-              <el-button @click="reset">重置</el-button>
-            </el-form-item>
-          </el-form>
-        </el-card>
-
-        <!-- 站点列表 -->
-        <el-card v-if="started" class="stop-list-card" shadow="never">
-          <template #header><span>📍 行程站点</span></template>
-          <div v-for="(s, i) in stops" :key="i" class="stop-item" :class="{
-            'stop-passed': i < currentStop,
-            'stop-current': i === currentStop,
-            'stop-future': i > currentStop,
-          }">
-            <span class="stop-index">
-              <span v-if="i < currentStop" class="stop-check">✅</span>
-              <span v-else-if="i === currentStop" class="stop-train">🚂</span>
-              <span v-else class="stop-dot">●</span>
-            </span>
-            <span class="stop-name">{{ s }}</span>
-            <span v-if="hasCity(s)" class="stop-coord">✓ 已定位</span>
-            <span v-else class="stop-coord warn">⚠ 无坐标</span>
+              <div class="preset-actions" @click.stop>
+                <el-button size="small" text @click="editPreset(preset)">✏️</el-button>
+                <el-button size="small" text type="danger" @click="deletePreset(preset.id)">🗑️</el-button>
+              </div>
+            </div>
           </div>
+          <el-empty v-else description="暂无路线" :image-size="60" />
         </el-card>
       </el-col>
 
-      <el-col :span="17">
+      <!-- 右侧：地图 -->
+      <el-col :span="18">
         <el-card v-if="started" class="map-card" shadow="never">
-          <div ref="chartRef" class="map-container" />
+          <div ref="chartRef" class="route-map" />
+
           <div class="controls">
-            <el-button @click="prevStop" :disabled="currentStop === 0">⏮ 上一站</el-button>
-            <span class="current-info">
-              <template v-if="currentStop < stops.length">{{ stops[currentStop] }} 🚂</template>
-              <template v-else>终点 🏁</template>
-            </span>
-            <el-button @click="nextStop" :disabled="currentStop >= stops.length - 1 || isAnimating">下一站 ⏭</el-button>
+            <el-button @click="prevStop" :disabled="currentStop === 0">⏮</el-button>
+            <span class="current-info">{{ currentStop < stops.length ? stops[currentStop] : '终点' }} 🚂</span>
+            <el-button @click="nextStop" :disabled="currentStop >= stops.length - 1 || isAnimating">⏭</el-button>
             <el-button @click="autoPlay" :type="playing ? 'warning' : 'primary'">
-              {{ playing ? '⏸ 暂停' : '▶ 自动播放' }}
+              {{ playing ? '⏸' : '▶' }}
             </el-button>
           </div>
         </el-card>
@@ -97,7 +51,7 @@
         <el-card v-else class="placeholder-card" shadow="never">
           <div class="placeholder-content">
             <div class="placeholder-icon">🚂</div>
-            <p class="placeholder-text">输入出发地和目的地，点击「出发」在地图上查看路线</p>
+            <p class="placeholder-text">选择左侧路线或点击「新建」创建路线</p>
           </div>
         </el-card>
       </el-col>
@@ -115,30 +69,23 @@
           </el-select>
         </el-form-item>
         <el-form-item label="目的地">
-          <div class="destination-list">
-            <draggable
-              v-model="presetForm.destinations"
-              item-key="index"
-              handle=".drag-handle"
-              :animation="200"
-            >
-              <template #item="{ element, index }">
-                <div class="destination-item">
-                  <span class="drag-handle">⋮⋮</span>
-                  <span class="dest-order">{{ index + 1 }}</span>
-                  <el-autocomplete
-                    v-model="presetForm.destinations[index]"
-                    :fetch-suggestions="dialogQueryCities"
-                    :trigger-on-focus="false"
-                    placeholder="搜索城市"
-                    style="flex:1"
-                    clearable
-                  />
-                  <el-button @click="removePresetDest(index)" circle size="small" type="danger">✕</el-button>
-                </div>
-              </template>
-            </draggable>
-          </div>
+          <draggable v-model="presetForm.destinations" item-key="index" handle=".drag-handle" :animation="200">
+            <template #item="{ element, index }">
+              <div class="destination-item">
+                <span class="drag-handle">⋮⋮</span>
+                <span class="dest-order">{{ index + 1 }}</span>
+                <el-autocomplete
+                  v-model="presetForm.destinations[index]"
+                  :fetch-suggestions="queryCities"
+                  :trigger-on-focus="false"
+                  placeholder="搜索城市"
+                  style="flex:1"
+                  clearable
+                />
+                <el-button @click="removePresetDest(index)" circle size="small" type="danger">✕</el-button>
+              </div>
+            </template>
+          </draggable>
           <el-button @click="addPresetDest" size="small" style="margin-top:8px">+ 添加目的地</el-button>
         </el-form-item>
         <el-form-item label="描述">
@@ -154,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import betterEchartsMaps from 'better-echarts-maps/dist/china.js'
@@ -163,8 +110,8 @@ import draggable from 'vuedraggable'
 import * as api from '../../api/toolkitApi'
 import type { CityCoordinate, TravelRoutePreset } from '../../types/toolkitTypes'
 
-const origin = ref('福州')
-const destinations = ref(['泉州', '厦门', '漳州'])
+const origin = ref('')
+const destinations = ref<string[]>([])
 const started = ref(false)
 const currentStop = ref(0)
 const playing = ref(false)
@@ -180,6 +127,7 @@ let autoPlayTimeout: number | null = null
 
 // 路线预设
 const presets = ref<TravelRoutePreset[]>([])
+const selectedPreset = ref<TravelRoutePreset | null>(null)
 const showPresetDialog = ref(false)
 const editingPreset = ref<TravelRoutePreset | null>(null)
 const savingPreset = ref(false)
@@ -223,17 +171,19 @@ async function loadPresets() {
 }
 
 function loadPreset(p: TravelRoutePreset) {
+  selectedPreset.value = p
   origin.value = p.origin
   destinations.value = [...p.destinations]
   startJourney()
 }
 
-function saveAsPreset() {
+function openCreateDialog() {
   editingPreset.value = null
+  selectedPreset.value = null
   presetForm.value = {
     name: '',
-    origin: origin.value,
-    destinations: destinations.value.filter(d => d.trim()),
+    origin: '',
+    destinations: [''],
     description: '',
   }
   showPresetDialog.value = true
@@ -241,7 +191,7 @@ function saveAsPreset() {
 
 async function savePreset() {
   const data = { ...presetForm.value }
-  if (!data.name.trim() || !data.origin.trim() || data.destinations.filter(d => d.trim()).length === 0) {
+  if (!data.name.trim() || !data.origin.trim() || data.destinations.filter((d: string) => d.trim()).length === 0) {
     ElMessage.warning('请填写路线名称、出发地和目的地')
     return
   }
@@ -275,10 +225,13 @@ function editPreset(p: TravelRoutePreset) {
   showPresetDialog.value = true
 }
 
-async function removePreset(id: number) {
+async function deletePreset(id: number) {
   try {
     await ElMessageBox.confirm('确定删除该路线？', '确认删除', { type: 'warning' })
     await api.deleteTravelRoute(id)
+    if (selectedPreset.value?.id === id) {
+      reset()
+    }
     ElMessage.success('已删除')
     await loadPresets()
   } catch {
@@ -300,7 +253,7 @@ function hasCity(name: string): boolean {
 
 function queryCities(query: string, cb: (results: any[]) => void) {
   if (!query.trim()) {
-    cb([])
+    cb(cityList.value.slice(0, 10).map(c => ({ value: c.name, ...c })))
     return
   }
   const q = query.trim()
@@ -311,33 +264,9 @@ function queryCities(query: string, cb: (results: any[]) => void) {
   cb(results)
 }
 
-function dialogQueryCities(query: string, cb: (results: any[]) => void) {
-  if (!query.trim()) {
-    cb(cityList.value.slice(0, 10).map(c => ({ value: c.name, ...c })))
-    return
-  }
-  queryCities(query, cb)
-}
-
-function onOriginSelect(item: any) {
-  origin.value = item.value
-}
-
-function onDestSelect(i: number, item: any) {
-  destinations.value[i] = item.value
-}
-
 function getCoords(name: string): [number, number] {
   const c = cityMap.value[name]
   return c ? [c.lng, c.lat] : [118.3, 25.5]
-}
-
-function addDest() {
-  destinations.value.push('')
-}
-
-function removeDest(i: number) {
-  destinations.value.splice(i, 1)
 }
 
 function calcCenter(): [number, number] {
@@ -398,6 +327,7 @@ function reset() {
   currentStop.value = 0
   trainProgress.value = 0
   playing.value = false
+  selectedPreset.value = null
   chart?.dispose()
   chart = null
 }
@@ -676,52 +606,49 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.travel-route { padding: 20px; }
+.travel-route { padding: 16px; }
 
-.dest-row { display: flex; gap: 8px; margin-bottom: 8px; }
-
-.input-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-
-.preset-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 12px; }
-.preset-header { display: flex; justify-content: space-between; align-items: center; }
-.preset-empty { color: #9ca3af; font-size: 13px; text-align: center; padding: 12px 0; }
-.preset-item {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 10px; cursor: pointer; border-radius: 6px; transition: background 0.15s;
+.preset-list-card {
+  height: calc(100vh - 120px);
+  overflow-y: auto;
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
-.preset-item:hover { background: #f3f4f6; }
-.preset-info { display: flex; flex-direction: column; overflow: hidden; flex: 1; }
-.preset-name { font-size: 13px; font-weight: 600; color: #1f2937; }
-.preset-summary { font-size: 11px; color: #9ca3af; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-header { display: flex; justify-content: space-between; align-items: center; }
+
+.preset-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.preset-item:hover { background: #f5f7fa; }
+.preset-item.active { border-color: #409eff; background: #ecf5ff; }
+.preset-info { overflow: hidden; flex: 1; }
+.preset-name { font-weight: 500; font-size: 14px; color: #1f2937; }
+.preset-route { font-size: 12px; color: #999; display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preset-actions { display: flex; gap: 4px; flex-shrink: 0; }
 
-.map-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-.map-container { width: 100%; height: 600px; border-radius: 8px; }
-
-.stop-list-card { margin-top: 16px; border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-.stop-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 0; border-bottom: 1px solid #f3f4f6;
-  font-size: 14px;
+.map-card {
+  height: calc(100vh - 120px);
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
-.stop-item:last-child { border-bottom: none; }
-.stop-index { width: 28px; text-align: center; font-size: 16px; }
-.stop-name { flex: 1; font-weight: 500; color: #1f2937; }
-.stop-coord { font-size: 11px; color: #52c41a; }
-.stop-coord.warn { color: #f59e0b; }
-.stop-passed .stop-name { color: #52c41a; }
-.stop-current .stop-name { color: #ff9800; font-weight: 700; }
-.stop-future .stop-name { color: #9ca3af; }
-.stop-dot { color: #d1d5db; }
-.stop-train { font-size: 18px; }
-.stop-check { font-size: 14px; }
+.route-map { width: 100%; height: calc(100% - 50px); border-radius: 8px; }
 
 .controls {
   display: flex;
-  align-items: center;
   justify-content: center;
-  gap: 16px;
-  margin-top: 16px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
 }
 
 .current-info {
@@ -731,7 +658,18 @@ onUnmounted(() => {
   text-align: center;
 }
 
-.placeholder-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); min-height: 500px; display: flex; align-items: center; justify-content: center; }
+.placeholder-card {
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  height: calc(100vh - 120px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.placeholder-content { text-align: center; }
+.placeholder-icon { font-size: 64px; margin-bottom: 16px; }
+.placeholder-text { font-size: 15px; color: #9CA3AF; margin: 0; }
 
 .destination-item {
   display: flex;
@@ -761,7 +699,4 @@ onUnmounted(() => {
   font-weight: 600;
   flex-shrink: 0;
 }
-.placeholder-content { text-align: center; }
-.placeholder-icon { font-size: 64px; margin-bottom: 16px; }
-.placeholder-text { font-size: 15px; color: #9CA3AF; margin: 0; }
 </style>
