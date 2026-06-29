@@ -129,9 +129,18 @@ function handleEditBalanceInfo(row: MonthlyListItem) {
 }
 
 function handleSaveBalanceInfo(data: BalanceInfoFormData) {
+  const payload = {
+    yearmon: data.yearmon,
+    wageincome: data.income || 0,
+    otherincome: 0,
+    outmoney: data.expense || 0,
+    mbalance: data.balance ?? 0,
+    total: data.deposit ?? 0,
+    remarks: data.notes || '',
+  }
   const promise = isCreating.value
-    ? store.saveBalanceList(data)
-    : store.updateBalanceList(data)
+    ? store.saveBalanceList(payload)
+    : store.updateBalanceList(payload)
   promise.then(() => {
     editModalVisible.value = false
     editingData.value = null

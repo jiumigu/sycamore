@@ -19,7 +19,7 @@ def _parse_balance_list(bi: WealthBalanceList) -> dict:
     """将 WealthBalanceList 记录转为统一字段名"""
     income_val = (bi.wageincome or 0) + (bi.otherincome or 0)
     expense_val = bi.outmoney or 0
-    balance_val = bi.mbalance or 0
+    balance_val = round(income_val - expense_val, 2)
     deposit_val = bi.total
     deposit_balance_val = bi.balance
     savings_rate = round(balance_val / income_val * 100, 1) if income_val > 0 else 0
@@ -214,9 +214,9 @@ def get_monthly_list(user_id: int, page: int = 1, page_size: int = 12) -> dict:
     for bi in page_bis:
         income_val = (bi.wageincome or 0) + (bi.otherincome or 0)
         expense_val = bi.outmoney or 0
-        balance_val = bi.mbalance or 0
+        balance_val = round(income_val - expense_val, 2)
         deposit_val = bi.total
-        savings_rate = round((income_val - expense_val) / income_val * 100, 1) if income_val > 0 else 0
+        savings_rate = round(balance_val / income_val * 100, 1) if income_val > 0 else 0
 
         items.append({
             'yearmon': bi.yearmon,
@@ -303,7 +303,6 @@ def generate_balance_info(user_id: int, year: int, month: int) -> WealthBalanceL
 
     if bi:
         # 更新现有记录
-        bi.age = float(year - 1995)  # approximate age from birth year
         bi.wageincome = bills['income']
         bi.otherincome = 0
         bi.outmoney = bills['expense']

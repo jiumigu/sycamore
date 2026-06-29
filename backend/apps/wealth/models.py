@@ -101,7 +101,6 @@ class WealthCashFlow(models.Model):
 class WealthBalanceList(models.Model):
     """月度收支复盘表 — 每月收支统计+存款汇总"""
 
-    age = models.FloatField(verbose_name='年龄')
     yearmon = models.CharField(primary_key=True, max_length=10, verbose_name='年月')
     wageincome = models.FloatField(db_column='wageIncome', blank=True, null=True, verbose_name='工资收入')
     otherincome = models.FloatField(db_column='otherIncome', blank=True, null=True, verbose_name='其他收入')

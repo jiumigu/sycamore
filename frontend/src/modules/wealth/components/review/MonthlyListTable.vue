@@ -18,7 +18,7 @@
       <el-table-column prop="balance" label="结余" min-width="130" align="right">
         <template #default="{ row }">
           <span :class="['money-value', row.balance >= 0 ? 'text-income' : 'text-expense']">
-            ￥{{ fmt(row.balance) }}
+            {{ row.balance >= 0 ? '￥' : '-￥' }}{{ fmt(Math.abs(row.balance)) }}
           </span>
         </template>
       </el-table-column>

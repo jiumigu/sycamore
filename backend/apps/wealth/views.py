@@ -458,16 +458,10 @@ class BalanceListView(APIView):
 
         from .models import WealthBalanceList
         existing = WealthBalanceList.objects.filter(yearmon=yearmon).first()
-        if existing:
-            serializer = BalanceInfoSerializer(existing, data=request.data, partial=True)
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(serializer.data)
-        else:
-            serializer = BalanceInfoSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        serializer = BalanceInfoSerializer(existing, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED if not existing else status.HTTP_200_OK)
 
     def put(self, request):
         yearmon = request.data.get('yearmon')

@@ -212,10 +212,17 @@ class BalanceInfoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WealthBalanceList
-        fields = ['yearmon', 'age', 'wageincome', 'otherincome', 'outmoney', 'mbalance',
+        fields = ['yearmon', 'wageincome', 'otherincome', 'outmoney', 'mbalance',
                    'balance', 'accumulationfund', 'total', 'remarks', 'distance',
                    'borrow', 'lend', 'realnum', 'user_id', 'btime',
                    'income', 'expense', 'notes']
+        extra_kwargs = {
+            'wageincome': {'required': False, 'default': 0},
+            'otherincome': {'required': False, 'default': 0},
+            'outmoney': {'required': False, 'default': 0},
+            'mbalance': {'required': False, 'default': 0},
+            'remarks': {'required': False, 'allow_blank': True},
+        }
 
     def get_income(self, obj) -> float:
         return (obj.wageincome or 0) + (obj.otherincome or 0)
