@@ -1,5 +1,41 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-06-29] v3.18.0 - 月度复盘负数结余 + 盘点排序修复
+
+### 🐛 修复
+
+- **月度复盘结余负数截断**：后端 `get_monthly_list` 和 `_parse_balance_list` 的 `balance` 从依赖 `bi.mbalance` 改为 `income - expense` 实时计算，确保与 `savings_rate` 数据源一致，不再出现 balance=¥0 但 rate=-110.8% 的矛盾
+- **月度复盘列表结余符号丢失**：前端 `formatAmount` 内部使用 `Math.abs` 导致负数符号丢失，改为模板层条件渲染 `￥` / `-￥`，负数显示红色
+- **月度复盘结余率负数颜色**：`ReviewHeader` 结余率 `valueClass` 从写死 `text-info` 改为动态判断，负值时显示红色
+- **月度复盘手动录入 400 错误**：前端 `handleSaveBalanceInfo` 未将弹窗字段映射为模型字段（`income→wageincome` 等），后端创建新记录时未传 `age` 等必填字段。修复：前端添加字段映射、后端统一使用 `partial=True`、序列化器增加 `extra_kwargs` 默认值
+- **`wealth_balance_list` 表 `age` 字段 NOT NULL 约束冲突**：手动录入新记录时未传 `age` 导致数据库报错。删除 `age` 列（ALTER TABLE DROP COLUMN），同步清理模型、序列化器和服务的引用
+- **盘点历史排序错误**：`cashflow_service.py` 排序字段从 `-yearmon` 改为 `-btime`，按复盘时间倒序而非年月，确保同月多次盘点的顺序正确
+
+### 🔧 优化
+
+- **MonthlyReviewSerializer extra_kwargs**：`wageincome`/`outmoney`/`mbalance` 等字段设置 `required=False` + `default=0`，避免新建记录时因缺少字段报错
+
+---
+
+## [2026-06-29] v3.17.0 - 打卡补签 + 旅行路线重构 + 详情弹窗优化
+
+### ✨ 新增
+
+- **打卡日历补签**：日历格子可点击过去未打卡日期，弹出确认弹窗后补打卡。后端 `checkin` 端点新增 `date` 参数支持指定日期，`calculate_streak` 自动重新计算连续天数
+- **旅行路线推演重构**：左侧仅保留已保存路线列表（25%），输入区移至弹窗，地图扩大至 75%。新建/编辑通过统一弹窗完成，支持拖拽排序目的地，选中态高亮
+
+### 🔧 优化
+
+- **好恶物详情弹窗**：加宽至 700px，`white-space: pre-wrap` 保留换行，`close-on-click-modal=false` 防止误关，`el-descriptions` 表格替换为分区卡片布局
+- **日记流按钮位置调整**：新增日记按钮从右上角移到筛选栏重置按钮左侧，筛选栏样式改为 `space-between` 两端对齐
+
+### 🐛 修复
+
+- **未来日期打卡拒绝**：后端校验 `checkin_date > date.today()` 时返回 400 错误
+- **已打卡日期重复触发**：日历格子已打卡状态点击提示"该日期已打卡"而非再次弹出确认
+
+---
+
 ## [2026-06-26] v3.16.0 - 好恶物档案馆增强 + 体重图修复
 
 ### ✨ 新增

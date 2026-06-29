@@ -104,7 +104,7 @@ const cards = computed(() => {
       displayValue: (r?.savings_rate ?? 0).toFixed(1) + '%',
       unit: '%',
       change: null,
-      valueClass: 'text-info',
+      valueClass: (r?.savings_rate ?? 0) >= 0 ? 'text-info' : 'text-expense',
       changeClass: '',
       icon: DataAnalysis,
       bg: '#fff7e6', color: '#fa8c16',

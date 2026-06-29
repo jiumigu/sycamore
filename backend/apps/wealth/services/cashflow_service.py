@@ -117,7 +117,7 @@ def get_asset_trend(user_id: int = 1, months: int = 12) -> list[dict]:
 def get_snapshot_list(page: int = 1, page_size: int = 12) -> dict:
     """获取盘点历史列表（分页）"""
     offset = (page - 1) * page_size
-    qs = WealthCashFlow.objects.filter(yearmon__isnull=False).order_by('-yearmon')
+    qs = WealthCashFlow.objects.filter(yearmon__isnull=False).order_by('-btime')
     total = qs.count()
     items = list(qs[offset:offset + page_size])
 
