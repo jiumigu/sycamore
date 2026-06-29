@@ -107,8 +107,9 @@
               v-for="(info, dayIdx) in days"
               :key="dayIdx"
               class="day-cell"
-              :class="{ checked: info.checked, future: info.future, today: info.today }"
+              :class="{ checked: info.checked, future: info.future, today: info.today, unchecked: !info.checked && !info.future }"
               :title="info.date"
+              @click="handleDayClick(info)"
             >
               {{ info.dayNum }}
             </div>
@@ -117,6 +118,22 @@
       </div>
       <template #footer>
         <el-button @click="showCalendar = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 补打卡确认弹窗 -->
+    <el-dialog v-model="showCheckinDialog" title="确认打卡" width="350px" append-to-body>
+      <div class="checkin-content">
+        <p v-if="isPastDate">
+          确认<strong>补打 {{ checkingDate }}</strong> 的卡吗？
+        </p>
+        <p v-else>
+          确认今天（{{ checkingDate }}）打卡吗？
+        </p>
+      </div>
+      <template #footer>
+        <el-button @click="showCheckinDialog = false">取消</el-button>
+        <el-button type="primary" :loading="confirmingCheckin" @click="confirmCheckin">确认打卡</el-button>
       </template>
     </el-dialog>
   </div>
@@ -145,6 +162,11 @@ const stats = ref<CheckinStats | null>(null)
 const alreadyChecked = ref(false)
 
 const milestones = computed(() => stats.value?.milestones ?? [])
+
+const showCheckinDialog = ref(false)
+const checkingDate = ref('')
+const isPastDate = ref(false)
+const confirmingCheckin = ref(false)
 
 const showEditDialog = ref(false)
 const editingMilestone = ref<CheckinMilestone | null>(null)
@@ -257,6 +279,35 @@ async function handleCheckin() {
   }
 }
 
+function handleDayClick(info: { dayNum: number; date: string; checked: boolean; future: boolean; today: boolean }) {
+  if (info.future) return
+
+  if (info.checked) {
+    ElMessage.info('该日期已打卡')
+    return
+  }
+
+  checkingDate.value = info.date
+  isPastDate.value = info.date < new Date().toISOString().slice(0, 10)
+  showCheckinDialog.value = true
+}
+
+async function confirmCheckin() {
+  if (!props.actionId || !checkingDate.value) return
+  confirmingCheckin.value = true
+  try {
+    await checkinAction(props.actionId, checkingDate.value)
+    ElMessage.success(isPastDate.value ? '补打卡成功' : '打卡成功')
+    showCheckinDialog.value = false
+    await loadStats()
+    emit('checked')
+  } catch {
+    ElMessage.error('打卡失败')
+  } finally {
+    confirmingCheckin.value = false
+  }
+}
+
 function openEditDialog(m: CheckinMilestone) {
   editingMilestone.value = m
   editForm.description = m.description
@@ -352,6 +403,8 @@ onMounted(loadStats)
         border-radius: 4px;
         background: var(--el-fill-color-light);
         color: var(--el-text-color-secondary);
+        cursor: pointer;
+        user-select: none;
 
         &.checked {
           background: var(--el-color-success);
@@ -364,6 +417,13 @@ onMounted(loadStats)
 
         &.future {
           opacity: 0.3;
+          cursor: not-allowed;
+        }
+
+        &.unchecked {
+          background: #f5f5f5;
+          color: #333;
+          &:hover { background: #ecf5ff; }
         }
       }
     }

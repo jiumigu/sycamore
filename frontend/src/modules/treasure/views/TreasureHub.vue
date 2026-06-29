@@ -63,6 +63,7 @@
         :thing="thing"
         @edit="openEdit"
         @delete="handleDelete"
+        @click-card="openDetail"
       />
       <el-empty v-if="!store.thingList.length && !store.loading" description="还没有记录，快添加一个吧" :image-size="120" />
     </div>
@@ -120,6 +121,65 @@
         <el-button type="primary" :loading="submitting" @click="handleSubmit">保存</el-button>
       </template>
     </el-dialog>
+
+      <!-- 详情弹窗 -->
+      <el-dialog
+        v-model="showDetailDialog"
+        title="详情"
+        width="700px"
+        :close-on-click-modal="false"
+        destroy-on-close
+      >
+        <template v-if="viewingItem">
+          <div class="detail-meta">
+            <el-tag :type="viewingItem.record_type === '歹' ? 'danger' : 'success'" size="small">
+              {{ viewingItem.record_type === '歹' ? '👎 歹物' : '👍 好物' }}
+            </el-tag>
+            <span class="detail-category">{{ viewingItem.category_display || viewingItem.category }}</span>
+            <span class="detail-rating" v-if="viewingItem.record_type === '好'">
+              <el-rate v-model="viewingItem.rating" :max="5" disabled show-score size="small" />
+            </span>
+          </div>
+
+          <div v-if="viewingItem.record_type === '好'" class="detail-section">
+            <div class="detail-label">👍 为什么好</div>
+            <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.why_good }}</div>
+          </div>
+
+          <template v-if="viewingItem.record_type === '歹'">
+            <div class="detail-section">
+              <div class="detail-label bad">👎 踩坑原因</div>
+              <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.avoid_reason }}</div>
+            </div>
+            <div v-if="viewingItem.consequence" class="detail-section">
+              <div class="detail-label bad">😵 实际后果</div>
+              <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.consequence }}</div>
+            </div>
+          </template>
+
+          <div v-if="viewingItem.scene" class="detail-section">
+            <div class="detail-label">📍 场景</div>
+            <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.scene }}</div>
+          </div>
+
+          <div v-if="viewingItem.record_type === '好' && viewingItem.where_to_find" class="detail-section">
+            <div class="detail-label">📍 在哪能找到</div>
+            <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.where_to_find }}</div>
+          </div>
+
+          <div v-if="viewingItem.tags" class="detail-tags">
+            <el-tag v-for="tag in getTags(viewingItem.tags)" :key="tag" size="small" type="info">{{ tag }}</el-tag>
+          </div>
+
+          <div class="detail-footer">
+            <span v-if="viewingItem.record_type === '好'">
+              <el-tag v-if="viewingItem.still_available" size="small" type="success">✅ 还能找到</el-tag>
+              <el-tag v-else size="small" type="danger">❌ 已找不到</el-tag>
+            </span>
+            <span class="detail-time">{{ viewingItem.created_at }}</span>
+          </div>
+        </template>
+      </el-dialog>
   </div>
 </template>
 
@@ -138,6 +198,8 @@ const filterType = ref('')
 const filterCategory = ref('')
 const showBadReminder = ref(true)
 const dialogVisible = ref(false)
+const showDetailDialog = ref(false)
+const viewingItem = ref<GoodThing | null>(null)
 const editingId = ref<number | null>(null)
 const submitting = ref(false)
 const formRef = ref()
@@ -190,6 +252,11 @@ function handleAddNew(type: string) {
   editingId.value = null
   resetForm(type)
   dialogVisible.value = true
+}
+
+function openDetail(thing: GoodThing) {
+  viewingItem.value = thing
+  showDetailDialog.value = true
 }
 
 function openEdit(thing: GoodThing) {
@@ -267,6 +334,10 @@ function refreshData() {
   fetchData()
 }
 
+function getTags(tags: string) {
+  return tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : []
+}
+
 onMounted(() => { fetchData() })
 </script>
 
@@ -303,4 +374,53 @@ onMounted(() => { fetchData() })
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 14px;
 }
+
+.detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.detail-category { font-size: 14px; color: #666; }
+
+.detail-section { margin-bottom: 16px; }
+
+.detail-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 6px;
+
+  &.bad { color: #cf1322; }
+}
+
+.detail-text {
+  font-size: 14px;
+  color: #555;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  background: #f9fafb;
+  padding: 12px;
+  border-radius: 6px;
+  border-left: 3px solid #409eff;
+}
+
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.detail-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.detail-time { font-size: 12px; color: #999; }
 </style>

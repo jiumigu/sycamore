@@ -296,24 +296,32 @@ class ActionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def checkin(self, request, pk=None):
-        """今日打卡 — 标记完成并发放里程碑奖励"""
+        """打卡 — 标记完成并发放里程碑奖励，支持指定日期补打卡"""
         from datetime import date
 
         action = self.get_object()
         goal = action.goal
-        today = date.today()
-        today_str = today.isoformat()
+
+        checkin_date = request.data.get('date')
+        if checkin_date:
+            checkin_date = date.fromisoformat(checkin_date)
+            if checkin_date > date.today():
+                return Response({'error': '不能为未来日期打卡'}, status=400)
+        else:
+            checkin_date = date.today()
+
+        date_str = checkin_date.isoformat()
 
         log = action.completion_log or {}
-        already = log.get(today_str, False)
+        already = log.get(date_str, False)
 
         if not already:
-            log[today_str] = True
+            log[date_str] = True
             action.completion_log = log
             action.save(update_fields=['completion_log'])
 
-        # Complete today's milestone if exists
-        milestone = goal.milestones.filter(target_date=today).first()
+        # Complete milestone matching the checkin date, if any
+        milestone = goal.milestones.filter(target_date=checkin_date).first()
         reward_result = None
         if milestone and milestone.status != 'completed':
             milestone.status = 'completed'
@@ -324,7 +332,7 @@ class ActionViewSet(viewsets.ModelViewSet):
         streak = calculate_streak(log)
 
         return Response({
-            'checked': True if not already else False,
+            'checked': not already,
             'already_checked': already,
             'streak': streak,
             'milestone_completed': milestone is not None,

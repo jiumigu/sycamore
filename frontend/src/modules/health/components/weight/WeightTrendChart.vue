@@ -26,11 +26,16 @@ const option = computed(() => {
   const records = props.trend.records || []
   const dates = records.map(r => r.date)
   const weights = records.map(r => (r.weight_kg * 2))  // kg → 斤
-  const targetLine = (props.trend.target_weight_kg ?? props.stats?.target_weight_kg) * 2
-
   const weights_jin = weights  // 斤
-  const minWeight = weights_jin.length > 0 ? Math.min(...weights_jin) : (targetLine ?? 100)
-  const maxWeight = weights_jin.length > 0 ? Math.max(...weights_jin) : (targetLine ?? 100) + 10
+
+  // 当前阶段目标：第一个未达成的里程碑，或最后一个
+  const currentMilestone = props.trend.milestones?.find(m => !m.is_achieved)
+    ?? props.trend.milestones?.[props.trend.milestones.length - 1]
+  const monthlyTarget = currentMilestone ? currentMilestone.target_weight_kg * 2 : null
+  const finalTarget = ((props.trend?.target_weight_kg ?? props.stats?.target_weight_kg ?? 0) as number) * 2
+
+  const minWeight = weights_jin.length > 0 ? Math.min(...weights_jin) : (finalTarget ?? 100)
+  const maxWeight = weights_jin.length > 0 ? Math.max(...weights_jin) : (finalTarget ?? 100) + 10
 
   const series: echarts.EChartsOption['series'] = [
     {
@@ -43,59 +48,22 @@ const option = computed(() => {
       lineStyle: { color: '#3B82F6', width: 2 },
       itemStyle: { color: '#3B82F6' },
       areaStyle: { color: 'rgba(59,130,246,0.08)' },
-      ...(targetLine ? {
+      ...(monthlyTarget ? {
         markLine: {
           silent: true,
           symbol: 'none',
           label: {
-            formatter: '目标 {c}斤',
+            formatter: `本月目标 ${monthlyTarget}斤`,
             position: 'start',
             fontSize: 11,
             color: '#EF4444',
           },
           lineStyle: { color: '#EF4444', width: 2, type: 'dashed' },
-          data: [{ yAxis: targetLine }],
+          data: [{ yAxis: monthlyTarget }],
         },
       } : {}),
     },
   ]
-
-  // 里程碑标记
-  if (props.trend.milestones?.length) {
-    const milestoneMark = props.trend.milestones.map(m => ({
-      name: `第${m.month}月`,
-      value: m.target_weight_kg * 2,
-      xAxis: dates.length > 0 ? dates[Math.min(m.month * 30, dates.length - 1)] : '',
-    }))
-    series.push({
-      name: '月度目标',
-      type: 'scatter',
-      data: dates.map((d, i) => {
-        const ms = props.trend?.milestones?.find(m => {
-          const idx = Math.min(m.month * 30, dates.length - 1)
-          return i === idx
-        })
-        return ms ? ms.target_weight_kg * 2 : null
-      }),
-      symbol: 'diamond',
-      symbolSize: 12,
-      itemStyle: { color: '#F59E0B' },
-      label: {
-        show: true,
-        formatter: (p: any) => {
-          const idx = (p as any).dataIndex as number
-          const ms = props.trend?.milestones?.find((_, i) => {
-            const mi = Math.min((i + 1) * 30, dates.length - 1)
-            return idx === mi
-          })
-          return ms ? `第${ms.month}月目标` : ''
-        },
-        position: 'top',
-        fontSize: 11,
-        color: '#F59E0B',
-      },
-    })
-  }
 
   return {
     tooltip: {
@@ -123,7 +91,7 @@ const option = computed(() => {
     },
     yAxis: {
       type: 'value',
-      min: Math.floor(Math.min(targetLine ?? minWeight, minWeight) - 5),
+      min: Math.floor(Math.min(finalTarget ?? minWeight, minWeight) - 5),
       max: Math.ceil(maxWeight + 5),
       name: '斤',
       nameTextStyle: { color: '#9CA3AF', fontSize: 11 },
