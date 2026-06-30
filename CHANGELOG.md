@@ -1,5 +1,18 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-06-30] v3.19.0 - 开源准备（Docker + README + LICENSE）
+
+### ✨ 新增
+
+- **Docker 容器化部署**：`docker-compose.yml` 编排 mysql:8.0 + backend + frontend 三服务，`backend/Dockerfile` 两阶段构建（python:3.14-slim），`frontend/Dockerfile` 两阶段构建（node:22-alpine 编译 → nginx:alpine 静态托管），`nginx.conf` SPA fallback + `/api/`/`/media/`/`/static/` 反向代理
+- **开源配套文件**：`.env.example` 环境变量模板、`.dockerignore` 排除非必要文件、`LICENSE` MIT 协议、`README.md` 完整使用说明
+
+### 🔧 优化
+
+- **README.md** 重写：补充 Docker 部署流程、功能模块表格、设计理念，保留完整项目目录结构，GitHub 链接指向 jiumigu
+
+---
+
 ## [2026-06-29] v3.18.0 - 月度复盘负数结余 + 盘点排序修复
 
 ### 🐛 修复
