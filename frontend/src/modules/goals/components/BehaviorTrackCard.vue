@@ -46,7 +46,7 @@
         :class="{ completed: m.status === 'completed' }"
       >
         <div class="milestone-left">
-          <span class="status-icon" :class="m.status === 'completed' ? 'done' : 'todo'">
+          <span class="status-icon" :class="m.status === 'completed' ? 'done' : 'todo'" @click.stop="toggleMilestoneStatus(m)">
             {{ m.status === 'completed' ? '✅' : '○' }}
           </span>
         </div>
@@ -142,8 +142,9 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Select, Calendar } from '@element-plus/icons-vue'
-import { checkinAction, getCheckinStats, patchMilestone } from '../api/goalApi'
+import { checkinAction, getCheckinStats, patchMilestone, toggleMilestone } from '../api/goalApi'
 import type { CheckinStats, CheckinMilestone } from '../types/goalTypes'
 
 const props = defineProps<{
@@ -335,6 +336,26 @@ async function saveMilestoneEdit() {
   }
 }
 
+async function toggleMilestoneStatus(m: CheckinMilestone) {
+  const wasCompleted = m.status === 'completed'
+  const action = wasCompleted ? '重置' : '完成'
+  try {
+    await ElMessageBox.confirm(
+      `确定${action}里程碑「${m.title}」吗？`,
+      '确认',
+      { confirmButtonText: action, cancelButtonText: '取消', type: 'warning' },
+    )
+    await toggleMilestone(props.goalId, m.id, {
+      status: wasCompleted ? 'pending' : 'completed',
+    })
+    ElMessage.success(`里程碑已${action}`)
+    emit('checked')
+    await loadStats()
+  } catch {
+    // cancelled
+  }
+}
+
 onMounted(loadStats)
 </script>
 
@@ -456,6 +477,9 @@ onMounted(loadStats)
 
     .status-icon {
       font-size: 16px;
+      cursor: pointer;
+      transition: transform 0.15s;
+      &:hover { transform: scale(1.2); }
       &.done { color: #67c23a; }
       &.todo { color: #ccc; }
     }

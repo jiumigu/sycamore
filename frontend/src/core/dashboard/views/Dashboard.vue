@@ -183,6 +183,30 @@
         </template>
       </el-skeleton>
     </el-card>
+
+    <!-- 每日金句 -->
+    <el-card shadow="never" class="section-card">
+      <template #header>
+        <div class="card-header">
+          <span>📖 每日金句</span>
+          <el-button size="small" text @click="refreshQuote">🔄 换一句</el-button>
+        </div>
+      </template>
+      <div class="quote-body" v-if="dailyQuote">
+        <div v-if="dailyQuote.is_paragraph" class="quote-title">
+          {{ dailyQuote.short_title || dailyQuote.content.slice(0, 50) + '...' }}
+        </div>
+        <div v-else class="quote-content">{{ dailyQuote.content }}</div>
+        <div class="quote-author" v-if="dailyQuote.author">— {{ dailyQuote.author }}</div>
+        <el-tag size="small">{{ dailyQuote.language }}</el-tag>
+      </div>
+      <el-empty v-else description="暂无金句" :image-size="60" />
+    </el-card>
+    <el-dialog v-model="showQuoteFull" title="金句详情" width="500px">
+      <div class="full-quote-content">{{ dailyQuote?.content }}</div>
+      <div v-if="dailyQuote?.author" class="full-quote-author">— {{ dailyQuote.author }}</div>
+      <div v-if="dailyQuote?.source" class="full-quote-source">📎 {{ dailyQuote.source }}</div>
+    </el-dialog>
   </div>
 </template>
 
@@ -196,7 +220,9 @@ import { getDueReminders } from '@/modules/relation/api/relationshipApi'
 import { getYearlyOverview } from '@/modules/summary/api/summaryApi'
 import { getWeekCount } from '@/modules/temporal/api/temporalApi'
 import { getRandomRetro } from '@/modules/summary/api/summaryApi'
+import { getRandomQuote } from '@/modules/toolkit/api/quoteApi'
 import type { InboxItem } from '@/modules/inbox/types/inboxTypes'
+import type { Quote } from '@/modules/toolkit/types/quoteTypes'
 
 interface AlertItem {
   type: 'danger' | 'warning'
@@ -245,6 +271,8 @@ const pendingItems = ref<InboxItem[]>([])
 const alerts = reactive<AlertItem[]>([])
 const progress = ref<ProgressData | null>(null)
 const retroItem = ref<RetroItem | null>(null)
+const dailyQuote = ref<Quote | null>(null)
+const showQuoteFull = ref(false)
 
 // ─── 独立加载状态 ───
 const loadingGoals = ref(true)
@@ -371,6 +399,15 @@ async function fetchRandomRetro() {
   }
 }
 
+async function refreshQuote() {
+  try {
+    const res = await getRandomQuote()
+    dailyQuote.value = res.data as Quote
+  } catch {
+    dailyQuote.value = null
+  }
+}
+
 async function refreshAll() {
   await Promise.all([
     fetchGoalStats(),
@@ -379,6 +416,7 @@ async function refreshAll() {
     fetchProgress(),
     fetchDiaryCount(),
     fetchRandomRetro(),
+    refreshQuote(),
   ])
 }
 
@@ -390,6 +428,7 @@ onMounted(() => {
   fetchAlerts()
   fetchProgress()
   fetchRandomRetro()
+  refreshQuote()
 })
 </script>
 
@@ -575,5 +614,44 @@ onMounted(() => {
   .mid-row .el-col {
     margin-bottom: 16px;
   }
+}
+
+.quote-body {
+  padding: 4px 0;
+}
+.quote-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  line-height: 1.5;
+}
+.quote-content {
+  font-size: 14px;
+  color: #1F2937;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.quote-author {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #6B7280;
+  font-style: italic;
+}
+.full-quote-content {
+  font-size: 16px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  margin-bottom: 12px;
+}
+.full-quote-author {
+  font-size: 14px;
+  color: #6B7280;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.full-quote-source {
+  font-size: 13px;
+  color: #9CA3AF;
 }
 </style>

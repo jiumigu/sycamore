@@ -135,35 +135,39 @@
         </div>
       </template>
 
-      <el-table v-loading="store.loading" :data="store.records" style="width: 100%" empty-text="暂无记录">
-        <el-table-column label="质量" width="80">
-          <template #default="{ row }">
-            <el-tag :type="qualityTagType(row.quality)" size="small">{{ row.quality_display }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="title" label="事项" min-width="160" show-overflow-tooltip />
-        <el-table-column label="类别" width="70">
-          <template #default="{ row }">{{ row.category_display }}</template>
-        </el-table-column>
-        <el-table-column label="难度" width="60" align="center">
-          <template #default="{ row }">{{ row.difficulty }}</template>
-        </el-table-column>
-        <el-table-column label="失败类型" width="90" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.fail_type_display || '-' }}</template>
-        </el-table-column>
-        <el-table-column label="经验教训" min-width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.lesson_learned || '-' }}</template>
-        </el-table-column>
-        <el-table-column label="日期" width="90">
-          <template #default="{ row }">{{ row.occurred_at || row.created_at?.slice(0, 10) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="110" align="center" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="output-table">
+        <el-table :table-layout="'auto'" v-loading="store.loading" :data="store.records" style="width: 100%" empty-text="暂无记录">
+          <el-table-column label="质量" width="80">
+            <template #default="{ row }">
+              <el-tag :type="qualityTagType(row.quality)" size="small">{{ row.quality_display }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="title" label="事项" min-width="160" show-overflow-tooltip />
+          <el-table-column label="类别" width="70">
+            <template #default="{ row }">{{ row.category_display }}</template>
+          </el-table-column>
+          <el-table-column label="难度" width="60" align="center">
+            <template #default="{ row }">{{ row.difficulty }}</template>
+          </el-table-column>
+          <el-table-column label="失败类型" width="90" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.fail_type_display || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="经验教训" min-width="160" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.lesson_learned || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="日期" width="110">
+            <template #default="{ row }">
+              <span style="white-space: nowrap;">{{ row.occurred_at || row.created_at?.slice(0, 10) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" fixed="right" align="center">
+            <template #default="{ row }">
+              <el-button size="small" @click="handleEdit(row)">编辑</el-button>
+              <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
     </el-card>
 
     <OutputForm v-model:visible="formVisible" :record="editingRecord" @saved="formVisible = false" />
@@ -255,12 +259,19 @@ function handleEdit(row: OutputRecord) {
 
 async function handleDelete(row: OutputRecord) {
   try {
-    await ElMessageBox.confirm('确定删除这条记录吗？', '确认删除', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      `确定删除「${row.title}」吗？此操作不可恢复。`,
+      '确认删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
     await store.deleteRecord(row.id)
+    ElMessage.success('已删除')
+    store.fetchRecords()
   } catch {
     // cancelled
   }
@@ -273,7 +284,7 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .output-page {
-  max-width: 1100px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -477,5 +488,15 @@ onMounted(() => {
 .records-card {
   border: none;
   border-radius: 10px;
+}
+
+.output-table {
+  width: 100%;
+  overflow-x: auto;
+
+  :deep(.el-table__fixed-right) {
+    right: 0;
+    overflow: visible;
+  }
 }
 </style>

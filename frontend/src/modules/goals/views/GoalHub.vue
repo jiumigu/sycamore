@@ -21,74 +21,36 @@
       </div>
     </div>
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="16" class="stats-row">
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: #e6f7ff"><el-icon color="#1890ff"><Flag /></el-icon></div>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats?.total_goals || 0 }}</div>
-              <div class="stat-label">总目标数</div>
-            </div>
-          </div>
+    <!-- 统计卡片（动态，点击筛选） -->
+    <div class="stats-row">
+      <div class="status-cards">
+        <el-card
+          class="stat-card"
+          :class="{ active: activeStatus === '' }"
+          shadow="hover"
+          @click="filterByStatus('')"
+        >
+          <div class="stat-label">📊 总目标数</div>
+          <div class="stat-value">{{ statusStats.total }}</div>
         </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: #f6ffed"><el-icon color="#52c41a"><Check /></el-icon></div>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats?.completed_goals || 0 }}</div>
-              <div class="stat-label">已完成</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: #fff7e6"><el-icon color="#fa8c16"><Clock /></el-icon></div>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats?.in_progress_goals || 0 }}</div>
-              <div class="stat-label">进行中</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: #fff1f0"><el-icon color="#f5222d"><Warning /></el-icon></div>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats?.overdue_goals || 0 }}</div>
-              <div class="stat-label">已超期</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
 
-    <!-- 状态筛选标签 -->
-    <el-card class="section-card filter-tabs-card">
-      <el-radio-group v-model="filterStatus" @change="fetchData" class="status-tabs">
-        <el-radio-button value="">全部</el-radio-button>
-        <el-radio-button value="in-progress">进行中</el-radio-button>
-        <el-radio-button value="planning">计划中</el-radio-button>
-        <el-radio-button value="paused">已暂停</el-radio-button>
-        <el-radio-button value="completed">已完成</el-radio-button>
-        <el-radio-button value="abandoned">已放弃</el-radio-button>
-        <el-radio-button value="archived">已归档</el-radio-button>
-      </el-radio-group>
-    </el-card>
+        <el-card
+          v-for="s in displayStatuses" :key="s.value"
+          class="stat-card"
+          :class="{ active: activeStatus === s.value }"
+          shadow="hover"
+          @click="filterByStatus(s.value)"
+        >
+          <div class="stat-label">{{ s.icon }} {{ s.label }}</div>
+          <div class="stat-value">{{ s.count }}</div>
+        </el-card>
+      </div>
+    </div>
 
     <!-- 筛选栏 -->
     <el-card class="section-card">
       <div class="filter-bar">
         <el-input v-model="searchKeyword" placeholder="搜索目标..." clearable class="search-input" @input="fetchData" />
-        <el-select v-model="filterCategory" placeholder="类型" clearable @change="fetchData" class="filter-select">
-          <el-option v-for="c in CATEGORY_OPTIONS" :key="c.value" :label="c.label" :value="c.value" />
-        </el-select>
         <el-select v-model="filterPriority" placeholder="优先级" clearable @change="fetchData" class="filter-select">
           <el-option v-for="p in PRIORITY_OPTIONS" :key="p.value" :label="p.label" :value="p.value" />
         </el-select>
@@ -299,11 +261,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Flag, Check, Clock, Warning, RefreshRight, Lightning, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Refresh, RefreshRight, Lightning, CopyDocument } from '@element-plus/icons-vue'
 import { useGoalStore } from '../stores/goalStore'
 import { useGoalBoardStore } from '../stores/goalBoardStore'
 import * as goalApi from '../api/goalApi'
-import { CATEGORY_OPTIONS, PRIORITY_OPTIONS } from '../types/goalTypes'
+import { PRIORITY_OPTIONS } from '../types/goalTypes'
 import type { Goal, GoalStatus, Milestone } from '../types/goalTypes'
 import GoalCard from '../components/GoalCard.vue'
 import GoalDetail from './GoalDetail.vue'
@@ -315,11 +277,36 @@ const goalStore = useGoalStore()
 const boardStore = useGoalBoardStore()
 
 const searchKeyword = ref('')
-const filterCategory = ref('')
-const filterStatus = ref('in-progress')
+const activeStatus = ref('in-progress')
 const filterPriority = ref('')
 const dialogVisible = ref(false)
 const editingId = ref<number | undefined>(undefined)
+
+const statusConfig = [
+  { value: 'in-progress', label: '进行中', icon: '🔄' },
+  { value: 'planning', label: '计划中', icon: '📋' },
+  { value: 'paused', label: '已暂停', icon: '⏸️' },
+  { value: 'completed', label: '已完成', icon: '✅' },
+  { value: 'abandoned', label: '已放弃', icon: '❌' },
+  { value: 'archived', label: '已归档', icon: '📦' },
+]
+
+const statusStats = reactive({ total: 0, stats: {} as Record<string, number> })
+
+const displayStatuses = computed(() => {
+  return statusConfig
+    .filter(s => (statusStats.stats[s.value] || 0) > 0)
+    .map(s => ({ ...s, count: statusStats.stats[s.value] }))
+})
+
+function filterByStatus(status: string) {
+  if (activeStatus.value === status && status !== 'in-progress') {
+    activeStatus.value = ''
+  } else {
+    activeStatus.value = status
+  }
+  fetchData()
+}
 
 const showCreateAction = ref(false)
 const createDialogMilestones = ref<Milestone[]>([])
@@ -328,8 +315,6 @@ const showActionDrawer = ref(false)
 const actionDrawerGoalId = ref(0)
 const actionDrawerGoalTitle = ref('')
 const actionDrawerMilestones = ref<Milestone[]>([])
-
-const stats = computed(() => goalStore.stats)
 
 /** 打开新增行为弹窗前先加载选中目标的里程碑 */
 const showQuickDialog = ref(false)
@@ -405,23 +390,32 @@ async function handleViewActions(goal: Goal) {
 
 async function fetchData() {
   const params: Record<string, unknown> = {}
-  if (filterCategory.value) params.category = filterCategory.value
-  if (filterStatus.value) params.status = filterStatus.value
+  if (activeStatus.value) params.status = activeStatus.value
   if (filterPriority.value) params.priority = filterPriority.value
   if (searchKeyword.value) params.search = searchKeyword.value
   await goalStore.fetchGoalList(params)
 }
 
+async function fetchStatusStats() {
+  try {
+    const res = await goalApi.getStatusStats()
+    statusStats.total = res.data.total
+    statusStats.stats = res.data.stats
+  } catch {
+    // noop
+  }
+}
+
 async function refreshAll() {
   await Promise.all([
     fetchData(),
+    fetchStatusStats(),
     goalStore.fetchStats(),
   ])
 }
 
 function resetFilters() {
   searchKeyword.value = ''
-  filterCategory.value = ''
   filterPriority.value = ''
   fetchData()
 }
@@ -623,18 +617,75 @@ onMounted(() => { refreshAll() })
   .header-actions { display: flex; gap: 12px; }
 }
 .stats-row { margin-bottom: 16px; }
-.stat-card :deep(.el-card__body) { padding: 16px; }
-.stat-content { display: flex; align-items: center; gap: 14px;
-  .stat-icon { width: 44px; height: 44px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
-  .stat-info {
-    .stat-value { font-size: 22px; font-weight: 600; line-height: 1; color: var(--el-text-color-primary); margin-bottom: 3px; }
-    .stat-label { font-size: 13px; color: var(--el-text-color-regular); }
+
+.status-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.stat-card {
+  flex: 1;
+  min-width: 110px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+
+  &.active {
+    border-color: #409eff;
+    background: #ecf5ff;
+  }
+
+  :deep(.el-card__body) {
+    padding: 16px;
+    text-align: center;
+  }
+
+  .stat-value {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--el-text-color-primary);
+    margin-bottom: 3px;
+  }
+
+  .stat-label {
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+    margin-bottom: 6px;
   }
 }
 .section-card { margin-bottom: 16px; }
-.filter-tabs-card { padding: 0; }
-.filter-tabs-card :deep(.el-card__body) { padding: 12px 16px; }
-.status-tabs { width: 100%; display: flex; flex-wrap: wrap; gap: 4px; }
+
+.status-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+
+  .status-card {
+    flex: 1;
+    min-width: 100px;
+    padding: 12px 16px;
+    background: #fff;
+    border: 2px solid #eee;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+
+    &:hover { border-color: #409eff; }
+
+    &.active {
+      background: #409eff;
+      border-color: #409eff;
+      .card-value, .card-label { color: #fff; }
+    }
+
+    .card-value { font-size: 24px; font-weight: 700; color: #333; }
+    .card-label { font-size: 13px; color: #666; margin-top: 4px; }
+  }
+}
 
 .filter-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
   .search-input { width: 200px; }
