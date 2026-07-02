@@ -173,6 +173,16 @@ class GoalViewSet(viewsets.ModelViewSet):
         }
         return Response(GoalStatsSerializer(data).data)
 
+    @action(detail=False, methods=['get'])
+    def status_stats(self, request):
+        """各状态的目标数量统计"""
+        stats = Goal.objects.values('status').annotate(count=Count('id'))
+        result = {
+            'total': Goal.objects.count(),
+            'stats': {s['status']: s['count'] for s in stats},
+        }
+        return Response(result)
+
     @action(detail=True, methods=['post'])
     def toggle_milestone(self, request, pk=None):
         """切换里程碑状态（完成时自动发放奖励）"""
