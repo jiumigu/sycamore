@@ -146,8 +146,9 @@ class SugarRecord(models.Model):
     joy_type = models.CharField(
         max_length=20, blank=True, default='', verbose_name='快乐类型',
         choices=[
-            ('创造', '🎨 创造'), ('社交', '💬 社交'), ('独处', '🧘 独处'),
-            ('户外', '🌿 户外'), ('美食', '🍽️ 美食'), ('学习', '📚 学习'), ('其他', '✨ 其他'),
+            ('感官型', '🌿 感官型'), ('秩序型', '📋 秩序型'),
+            ('联结型', '💬 联结型'), ('意外型', '🎁 意外型'),
+            ('独处型', '🧘 独处型'),
         ],
     )
     tags = models.CharField(max_length=255, blank=True, null=True, verbose_name='标签，逗号分隔')

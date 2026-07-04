@@ -78,6 +78,12 @@
             <el-icon><Clock /></el-icon>
             {{ goal.year }}年
           </span>
+          <span v-if="goal.parent_goal_name" class="meta-item parent-badge">
+            📎 {{ goal.parent_goal_name }}
+          </span>
+          <span v-if="goal.sub_goals_count && goal.sub_goals_count > 0" class="meta-item">
+            📁 {{ goal.sub_goals_count }}个子目标
+          </span>
         </div>
 
         <div v-if="goal.tags?.length" class="card-tags">
@@ -235,6 +241,7 @@ function handleMilestoneToggle(m: Milestone, status: string) {
 
   .card-meta { display: flex; gap: 10px; margin-bottom: 6px; font-size: 12px; color: var(--el-text-color-secondary);
     .meta-item { display: flex; align-items: center; gap: 3px; .el-icon { font-size: 12px; } }
+    .parent-badge { color: #8e44ad; font-weight: 500; }
   }
 
   .card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;

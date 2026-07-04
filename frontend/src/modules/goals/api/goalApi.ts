@@ -76,6 +76,10 @@ export function cloneGoal(id: number, data: Record<string, unknown>) {
   return request({ url: `/goals/goals/${id}/clone/`, method: 'post', data })
 }
 
+export function getSubGoals(id: number) {
+  return request({ url: `/goals/goals/${id}/sub_goals/`, method: 'get' })
+}
+
 export function createAction(data: Record<string, unknown>) {
   return request({ url: '/goals/actions/', method: 'post', data })
 }

@@ -15,10 +15,21 @@ class GoalProgressService:
     def recalculate(goal):
         """重新计算目标综合进度
 
-        进度 = 已完成里程碑数 / 总里程碑数 × 100
+        有子目标时：进度 = 子目标平均进度
+        无子目标时：进度 = 已完成里程碑数 / 总里程碑数 × 100
         """
-        milestone_progress = GoalProgressService._milestone_progress(goal)
+        subs = goal.sub_goals.exclude(status='archived').exclude(status='abandoned')
+        if subs.exists():
+            total = sum(s.progress_percentage for s in subs)
+            goal.progress_percentage = min(round(total / subs.count()), 100)
+            goal.save(update_fields=['progress_percentage'])
+            # 如果自己有父目标，向上冒泡
+            if goal.parent_goal_id:
+                parent = goal.parent_goal
+                GoalProgressService.recalculate(parent)
+            return
 
+        milestone_progress = GoalProgressService._milestone_progress(goal)
         goal.progress_percentage = min(milestone_progress, 100)
         goal.save(update_fields=['progress_percentage'])
 

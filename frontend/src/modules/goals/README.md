@@ -3,7 +3,7 @@
 ## Views
 | 文件 | 职责 |
 |------|------|
-| `GoalHub.vue` | 目标总览（Tab 切换 + 看板视图 + 筛选 + 快速创建） |
+| `GoalHub.vue` | 目标总览（Tab 切换 + 看板视图 + 筛选 + 快速创建 + 子目标弹窗） |
 
 ## Components
 | 文件 | 职责 |
@@ -11,7 +11,7 @@
 | `GoalCard.vue` | 目标卡片（进度条 / 里程碑 / 行为追踪 / 操作菜单） |
 | `BehaviorTrackCard.vue` | 行为追踪打卡卡（连续天数 / 进度条 / 打卡按钮 / 日历热力图 / 里程碑列表含编辑弹窗） |
 | `GoalForm.vue` | 创建/编辑弹窗 |
-| `GoalDetail.vue` | 目标详情弹窗（含里程碑网格 + 行为时间线 + 回顾） |
+| `GoalDetail.vue` | 目标详情弹窗（含里程碑网格 + 行为时间线 + 回顾 + 父目标选择器） |
 | `MilestoneForm.vue` | 里程碑表单 |
 | `ActionList.vue` | 行为列表 |
 | `QuickGoalDialog.vue` | 快速创建弹窗（含模板选择） |

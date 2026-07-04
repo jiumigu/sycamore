@@ -24,4 +24,5 @@ urlpatterns = [
     path('task/<int:execution_id>/', views.TaskStatusView.as_view(), name='toolkit-task-status'),
     path('history/', views.HistoryListView.as_view(), name='toolkit-history'),
     path('register/', views.RegisterToolsView.as_view(), name='toolkit-register'),
+    path('tags/', views.TagManagerView.as_view(), name='toolkit-tags'),
 ] + router.urls

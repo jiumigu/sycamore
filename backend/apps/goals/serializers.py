@@ -123,6 +123,8 @@ class GoalListSerializer(serializers.ModelSerializer):
     action_count = serializers.SerializerMethodField()
     milestone_count = serializers.SerializerMethodField()
     is_tracking_mode = serializers.SerializerMethodField()
+    sub_goals_count = serializers.SerializerMethodField()
+    parent_goal_name = serializers.CharField(source='parent_goal.title', read_only=True, default='')
 
     class Meta:
         model = Goal
@@ -133,6 +135,7 @@ class GoalListSerializer(serializers.ModelSerializer):
             'notes', 'reward_value', 'user_id',
             'enable_reward', 'default_reward_amount', 'total_reward_issued',
             'action_count', 'milestone_count', 'is_tracking_mode',
+            'parent_goal', 'parent_goal_name', 'sub_goals_count',
             'created_at', 'updated_at',
         ]
 
@@ -160,6 +163,9 @@ class GoalListSerializer(serializers.ModelSerializer):
         count = self.get_action_count(obj)
         return count == 1
 
+    def get_sub_goals_count(self, obj):
+        return obj.sub_goals.count()
+
 
 class GoalDetailSerializer(serializers.ModelSerializer):
     """详情用序列化器——嵌套里程碑和行为"""
@@ -170,6 +176,8 @@ class GoalDetailSerializer(serializers.ModelSerializer):
     milestones = MilestoneSerializer(many=True, read_only=True)
     actions = ActionSerializer(many=True, read_only=True)
     reviews = GoalReviewSerializer(many=True, read_only=True)
+    sub_goals = GoalListSerializer(many=True, read_only=True)
+    parent_goal_name = serializers.CharField(source='parent_goal.title', read_only=True, default='')
 
     class Meta:
         model = Goal
@@ -181,6 +189,7 @@ class GoalDetailSerializer(serializers.ModelSerializer):
             'enable_reward', 'default_reward_amount', 'total_reward_issued',
             'decision_quality', 'mental_models_used', 'inversion_check',
             'first_principles', 'circle_check', 'happiness_impact', 'peace_impact',
+            'parent_goal', 'parent_goal_name', 'sub_goals',
             'milestones', 'actions', 'reviews',
             'created_at', 'updated_at',
         ]
@@ -207,6 +216,7 @@ class GoalCreateUpdateSerializer(serializers.ModelSerializer):
             'status',
             'start_date', 'deadline', 'notes', 'reward_value',
             'enable_reward', 'default_reward_amount',
+            'parent_goal',
             'milestones',
         ]
 
@@ -228,6 +238,18 @@ class GoalCreateUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('标签数量不能超过10个')
         return value
 
+    def validate_parent_goal(self, value):
+        if value and self.instance:
+            # 检查循环引用：向上遍历，确保 value 不是 self.instance 的后代
+            current = value
+            seen = {self.instance.pk}
+            while current:
+                if current.pk in seen:
+                    raise serializers.ValidationError('不允许循环引用父目标')
+                seen.add(current.pk)
+                current = current.parent_goal
+        return value
+
     def create(self, validated_data):
         milestones_data = validated_data.pop('milestones', [])
         start_date = validated_data.get('start_date')
@@ -239,14 +261,31 @@ class GoalCreateUpdateSerializer(serializers.ModelSerializer):
         return goal
 
     def update(self, instance, validated_data):
-        # 不处理里程碑——里程碑由独立的 API 管理
-        validated_data.pop('milestones', None)
+        milestones_data = validated_data.pop('milestones', None)
         start_date = validated_data.get('start_date')
         if start_date:
             validated_data['year'] = start_date.year
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+
+        if milestones_data is not None:
+            existing_ids = set(instance.milestones.values_list('id', flat=True))
+            sent_ids = set()
+            max_order = 0
+            for m_data in milestones_data:
+                m_id = m_data.pop('id', None)
+                if m_id and m_id in existing_ids:
+                    Milestone.objects.filter(id=m_id, goal=instance).update(**m_data)
+                    sent_ids.add(m_id)
+                else:
+                    m = Milestone.objects.create(goal=instance, order_num=max_order, **m_data)
+                    sent_ids.add(m.id)
+                max_order += 1
+            to_delete = existing_ids - sent_ids
+            if to_delete:
+                Milestone.objects.filter(id__in=to_delete, goal=instance).delete()
+
         return instance
 
 

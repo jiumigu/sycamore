@@ -144,6 +144,16 @@
           </el-col>
         </el-row>
 
+        <el-form-item label="发生日期">
+          <el-date-picker
+            v-model="form.event_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="默认当天"
+            style="width:100%"
+          />
+        </el-form-item>
+
         <el-form-item label="快乐类型" prop="joy_type">
           <el-select v-model="form.joy_type" placeholder="选填" clearable style="width:100%">
             <el-option v-for="j in JOY_TYPE_OPTIONS" :key="j.value" :label="`${j.icon} ${j.label}`" :value="j.value" />
@@ -251,6 +261,7 @@ const form = reactive({
   joy_type: '',
   tagList: [] as string[],
   notes: '',
+  event_date: '',
 })
 
 const showTagInput = ref(false)
@@ -336,6 +347,7 @@ function openEdit(record: SugarRecord) {
   form.joy_type = record.joy_type || ''
   form.tagList = record.tags ? record.tags.split(',').map(t => t.trim()).filter(Boolean) : []
   form.notes = record.notes || ''
+  form.event_date = record.time?.slice(0, 10) || ''
   dialogVisible.value = true
   nextTick(() => formRef.value?.clearValidate())
 }
@@ -349,7 +361,7 @@ async function handleSubmit() {
     title: form.content.trim(),
     level_of_happiness: form.level_of_happiness,
     reward_amount: form.level_of_happiness,
-    time: new Date().toISOString().slice(0, 10),
+    time: form.event_date || new Date().toISOString().slice(0, 10),
     category: null,
     joy_type: form.joy_type || '',
     tags: form.tagList.length ? form.tagList.join(',') : null,

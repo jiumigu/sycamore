@@ -360,6 +360,20 @@
         </router-link>
       </div>
 
+      <!-- ========== 系统运维 ========== -->
+      <div class="nav-section">
+        <div class="section-title" v-if="!isCollapsed">系统运维</div>
+
+        <router-link
+          to="/admin/tag-manager"
+          class="nav-item"
+          :class="{ active: isRouteActive('/admin/tag-manager') }"
+        >
+          <el-icon><PriceTag /></el-icon>
+          <span v-if="!isCollapsed">标签管理器</span>
+        </router-link>
+      </div>
+
     </div>
 
     <!-- 折叠提示 -->
@@ -380,7 +394,7 @@ import {
   FirstAidKit, Star,
   Sunny, Reading, Trophy, Present,
   Money, Cpu,
-  Location, User, Tools, Food, WarningFilled,
+  Location, User, Tools, Food, WarningFilled, PriceTag,
   Histogram, Connection, MessageBox, List,
 } from '@element-plus/icons-vue'
 

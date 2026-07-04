@@ -249,6 +249,14 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
+  // 系统运维
+  {
+    path: '/admin/tag-manager',
+    name: 'TagManager',
+    component: () => import('@/modules/toolkit/views/tools/TagManager.vue'),
+    meta: { title: '标签管理器' },
+  },
+
   // 连接与足迹
   { path: '/food', name: 'food', component: () => import('@/modules/food/views/FoodMapView.vue'), meta: { title: '美食地图' } },
   { path: '/travel', name: 'travel', component: () => import('@/modules/travel/views/TravelDashboard.vue'), meta: { title: '旅行记录' } },
