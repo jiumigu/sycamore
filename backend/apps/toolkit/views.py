@@ -14,6 +14,9 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+
+from apps.sugar.models import SugarRecord
+from apps.treasure.models import GoodThing
 from .registry import ToolRegistry
 from .serializers import (
     CareerEnergyAuditSerializer,
@@ -607,3 +610,107 @@ class ReviewRecordViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user_id=1)
+
+
+class TagManagerView(views.APIView):
+    """标签聚合与管理"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        tags = {}
+
+        for q in Quote.objects.exclude(tags='').exclude(tags__isnull=True):
+            for tag in q.tags.split(','):
+                tag = tag.strip()
+                if tag:
+                    if tag not in tags:
+                        tags[tag] = {'count': 0, 'modules': set()}
+                    tags[tag]['count'] += 1
+                    tags[tag]['modules'].add('📖 摘录馆')
+
+        for s in SugarRecord.objects.exclude(tags='').exclude(tags__isnull=True):
+            for tag in s.tags.split(','):
+                tag = tag.strip()
+                if tag:
+                    if tag not in tags:
+                        tags[tag] = {'count': 0, 'modules': set()}
+                    tags[tag]['count'] += 1
+                    tags[tag]['modules'].add('🍰 小确幸')
+
+        for t in GoodThing.objects.exclude(tags='').exclude(tags__isnull=True):
+            for tag in t.tags.split(','):
+                tag = tag.strip()
+                if tag:
+                    if tag not in tags:
+                        tags[tag] = {'count': 0, 'modules': set()}
+                    tags[tag]['count'] += 1
+                    tags[tag]['modules'].add('💎 好东西')
+
+        sorted_tags = sorted(tags.items(), key=lambda x: -x[1]['count'])
+
+        return Response({
+            'tags': [
+                {'name': name, 'count': data['count'], 'modules': list(data['modules'])}
+                for name, data in sorted_tags
+            ],
+            'total': len(sorted_tags),
+        })
+
+    def post(self, request):
+        action = request.data.get('action')
+        old_tag = request.data.get('old_tag', '').strip()
+        new_tag = request.data.get('new_tag', '').strip()
+
+        if action in ('merge', 'rename'):
+            if not old_tag or not new_tag or old_tag == new_tag:
+                return Response({'error': '参数无效'}, status=400)
+
+            affected = 0
+
+            for q in Quote.objects.filter(tags__icontains=old_tag):
+                tags_list = [t.strip() for t in q.tags.split(',')]
+                if old_tag in tags_list:
+                    tags_list = [new_tag if t == old_tag else t for t in tags_list]
+                    # 去重保持顺序
+                    seen = set()
+                    deduped = []
+                    for t in tags_list:
+                        if t not in seen:
+                            seen.add(t)
+                            deduped.append(t)
+                    q.tags = ','.join(deduped)
+                    q.save()
+                    affected += 1
+
+            for s in SugarRecord.objects.filter(tags__icontains=old_tag):
+                tags_list = [t.strip() for t in (s.tags or '').split(',')]
+                if old_tag in tags_list:
+                    tags_list = [new_tag if t == old_tag else t for t in tags_list]
+                    seen = set()
+                    deduped = []
+                    for t in tags_list:
+                        if t not in seen:
+                            seen.add(t)
+                            deduped.append(t)
+                    s.tags = ','.join(deduped)
+                    s.save()
+                    affected += 1
+
+            for t in GoodThing.objects.filter(tags__icontains=old_tag):
+                tags_list = [tg.strip() for tg in (t.tags or '').split(',')]
+                if old_tag in tags_list:
+                    tags_list = [new_tag if tg == old_tag else tg for tg in tags_list]
+                    seen = set()
+                    deduped = []
+                    for tg in tags_list:
+                        if tg not in seen:
+                            seen.add(tg)
+                            deduped.append(tg)
+                    t.tags = ','.join(deduped)
+                    t.save()
+                    affected += 1
+
+            return Response({'success': True, 'affected': affected})
+
+        return Response({'error': '未知操作'}, status=400)

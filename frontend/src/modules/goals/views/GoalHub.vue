@@ -134,12 +134,36 @@
     @updated="onActionsUpdated"
   />
 
+  <!-- 子目标列表 -->
+  <el-dialog v-model="showSubGoalsDialog" title="📁 子目标" width="600px">
+    <div v-if="subGoalsList.length > 0" class="sub-goals-list">
+      <div v-for="sub in subGoalsList" :key="sub.id" class="sub-goal-item">
+        <div class="sub-goal-info">
+          <span class="sub-goal-title">{{ sub.title }}</span>
+          <span class="sub-goal-progress">{{ sub.progress_percentage }}%</span>
+        </div>
+        <el-progress :percentage="sub.progress_percentage" :stroke-width="6" />
+        <div class="sub-goal-meta">
+          <span>{{ sub.category_display || sub.category }}</span>
+          <span v-if="sub.deadline">截止：{{ sub.deadline.slice(0, 10) }}</span>
+        </div>
+      </div>
+    </div>
+    <el-empty v-else description="暂无子目标" />
+    <template #footer>
+      <el-button @click="showSubGoalsDialog = false">关闭</el-button>
+    </template>
+  </el-dialog>
+
   <!-- 里程碑详情弹窗 -->
   <el-dialog v-model="showMilestoneDialog" :title="milestoneGoal?.title" width="680px">
     <div class="goal-summary">
       <span>进度：{{ milestoneGoal?.progress_percentage }}%</span>
       <span>里程碑：{{ milestoneCompletedCount }}/{{ milestoneTotalCount }}</span>
       <span>状态：{{ milestoneGoal?.status_display || milestoneGoal?.status }}</span>
+      <span v-if="milestoneGoal?.sub_goals_count && milestoneGoal.sub_goals_count > 0" class="clickable" @click="openSubGoals(milestoneGoal!)">
+        📁 {{ milestoneGoal.sub_goals_count }}个子目标 →
+      </span>
     </div>
 
     <el-divider />
@@ -525,9 +549,13 @@ function onActionsUpdated() {
   // 抽屉内操作后自动刷新缓存
 }
 
+const showSubGoalsDialog = ref(false)
+const subGoalsList = ref<Goal[]>([])
+
 const showMilestoneDialog = ref(false)
 const milestoneGoal = ref<Goal | null>(null)
 const milestones = ref<Milestone[]>([])
+const subGoalsForGoal = ref<Goal[]>([])
 const newMilestoneTitle = ref('')
 const newMilestoneDate = ref('')
 
@@ -537,6 +565,16 @@ const editingMilestoneDate = ref('')
 
 const milestoneCompletedCount = computed(() => milestones.value.filter(m => m.status === 'completed').length)
 const milestoneTotalCount = computed(() => milestones.value.length)
+
+async function openSubGoals(goal: Goal) {
+  try {
+    const res = await goalApi.getSubGoals(goal.id)
+    subGoalsList.value = res.data || []
+  } catch {
+    subGoalsList.value = []
+  }
+  showSubGoalsDialog.value = true
+}
 
 async function openMilestoneDialog(goal: Goal) {
   milestoneGoal.value = goal
@@ -697,7 +735,16 @@ onMounted(() => { refreshAll() })
 
 .goal-summary { display: flex; gap: 24px; font-size: 14px; color: #555;
   span { background: #f5f7fa; padding: 4px 12px; border-radius: 4px; }
+  .clickable { cursor: pointer; &:hover { color: #409eff; background: #ecf5ff; } }
 }
+
+.sub-goals-list { display: flex; flex-direction: column; gap: 12px; }
+.sub-goal-item { padding: 12px; border: 1px solid #eee; border-radius: 8px; }
+.sub-goal-info { display: flex; justify-content: space-between; margin-bottom: 6px;
+  .sub-goal-title { font-weight: 500; font-size: 14px; }
+  .sub-goal-progress { font-weight: 600; color: #409eff; }
+}
+.sub-goal-meta { display: flex; gap: 16px; font-size: 12px; color: #999; margin-top: 6px; }
 
 .add-milestone { display: flex; gap: 8px; align-items: center; }
 

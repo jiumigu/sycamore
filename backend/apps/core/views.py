@@ -1,8 +1,10 @@
+import logging
 import os
 import subprocess
 from datetime import date, datetime
 
 from django.conf import settings
+from django.db.models import Q
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
@@ -10,6 +12,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Notification, UserProfile
+
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseBackupView(APIView):
@@ -135,3 +140,116 @@ class ProfileView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=400)
+
+
+class GlobalSearchView(APIView):
+    """全局搜索 — 跨模块检索，按模块分组"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        query = request.GET.get('q', '').strip()
+        if not query or len(query) < 2:
+            return Response({'results': []})
+
+        results = []
+
+        # 1. 摘录馆
+        try:
+            from apps.toolkit.models import Quote
+            for q in Quote.objects.filter(
+                Q(content__icontains=query) |
+                Q(short_title__icontains=query) |
+                Q(tags__icontains=query) |
+                Q(author__icontains=query)
+            )[:5]:
+                results.append({
+                    'module': 'quote', 'module_name': '📖 摘录馆',
+                    'id': q.id, 'title': q.short_title or q.content[:50],
+                    'content': q.content[:100], 'date': q.created_at.strftime('%Y-%m-%d'),
+                })
+        except Exception as e:
+            logger.warning('全局搜索模块「摘录馆」失败: %s', e)
+
+        # 2. 日记流
+        try:
+            from apps.temporal.models import OneDayPage
+            for d in OneDayPage.objects.filter(
+                Q(title__icontains=query) | Q(remark__icontains=query)
+            )[:5]:
+                results.append({
+                    'module': 'diary', 'module_name': '📝 日记流',
+                    'id': d.oid, 'title': d.title or '无标题',
+                    'content': (d.remark or '')[:100], 'date': d.begin_date.isoformat(),
+                })
+        except Exception as e:
+            logger.warning('全局搜索模块「日记流」失败: %s', e)
+
+        # 3. 小确幸
+        try:
+            from apps.sugar.models import SugarRecord
+            for s in SugarRecord.objects.filter(
+                Q(title__icontains=query) | Q(joy_type__icontains=query)
+            )[:5]:
+                results.append({
+                    'module': 'sugar', 'module_name': '🍰 小确幸',
+                    'id': s.s_id, 'title': s.title[:50],
+                    'content': s.title[:100], 'date': s.time.isoformat(),
+                })
+        except Exception as e:
+            logger.warning('全局搜索模块「小确幸」失败: %s', e)
+
+        # 4. 好东西档案馆
+        try:
+            from apps.treasure.models import GoodThing
+            for t in GoodThing.objects.filter(
+                Q(name__icontains=query) |
+                Q(why_good__icontains=query) |
+                Q(avoid_reason__icontains=query) |
+                Q(tags__icontains=query)
+            )[:5]:
+                results.append({
+                    'module': 'treasure', 'module_name': '💎 好东西',
+                    'id': t.id, 'title': t.name,
+                    'content': (t.why_good or t.avoid_reason or '')[:100],
+                    'date': t.created_at.strftime('%Y-%m-%d'),
+                })
+        except Exception as e:
+            logger.warning('全局搜索模块「好东西」失败: %s', e)
+
+        # 5. 复盘记录
+        try:
+            from apps.toolkit.models import ReviewRecord
+            for r in ReviewRecord.objects.filter(
+                Q(notes__icontains=query) |
+                Q(completed__icontains=query) |
+                Q(reflection__icontains=query) |
+                Q(nourishing__icontains=query) |
+                Q(draining__icontains=query) |
+                Q(fears__icontains=query) |
+                Q(life_line__icontains=query) |
+                Q(deep_reflection__icontains=query)
+            )[:5]:
+                results.append({
+                    'module': 'review', 'module_name': '🧭 复盘',
+                    'id': r.id,
+                    'title': f'{r.get_review_type_display()} - {r.review_date}',
+                    'content': (r.notes or r.reflection or '')[:100],
+                    'date': r.review_date.isoformat(),
+                })
+        except Exception as e:
+            logger.warning('全局搜索模块「复盘」失败: %s', e)
+
+        # 按模块分组
+        grouped = {}
+        for r in results:
+            group_key = r['module']
+            if group_key not in grouped:
+                grouped[group_key] = {'module_name': r['module_name'], 'items': []}
+            grouped[group_key]['items'].append(r)
+
+        return Response({
+            'query': query,
+            'total': len(results),
+            'groups': list(grouped.values()),
+        })

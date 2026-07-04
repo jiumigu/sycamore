@@ -9,3 +9,7 @@ export function backupDatabase() {
 export function quickRecord(data: { module: string; content: string }) {
   return request({ url: '/core/quick-record/', method: 'post', data })
 }
+
+export function globalSearch(q: string) {
+  return request({ url: '/core/search/', method: 'get', params: { q } })
+}

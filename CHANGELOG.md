@@ -1,6 +1,52 @@
 # Sycamore 人生管理系统 - 更新日志
 
-## [2026-07-02] v3.20.0 - 目标看板重构 + 仪表盘金句 + 良品率 UI 修复
+## [2026-07-04] v3.22.0 — 父子目标关联 + 代码审查修复
+
+### ✨ 新增
+
+- **父子目标关联**：Goal 模型新增 `parent_goal` 自关联外键，支持目标嵌套。后端 `GoalProgressService.recalculate` 递归向上冒泡（子目标平均进度 → 父目标进度），`GoalDetailSerializer` 嵌套 `sub_goals` 列表，`GoalListSerializer` 新增 `sub_goals_count`/`parent_goal_name`。API 端点 `GET /goals/goals/{id}/sub_goals/`。前端 `GoalCard` 显示父目标名称（紫色徽章）和子目标数量，`GoalHub` 子目标弹窗含进度条，`GoalDetail` 编辑弹窗新增父目标选择器（可搜索、排除自身和已有父目标的目标）
+
+### 🔧 优化
+
+- **小确幸编辑事务保护**：`perform_update` 将 `serializer.save()` 移入 `transaction.atomic()` 块，确保奖励池与记录数据一致
+- **小确幸编辑 `years/month` 自动同步**：`time` 字段变更时自动更新 `years`/`month`，避免日期与年份月份脱节
+- **里程碑取消完成扣回奖励**：`MilestoneViewSet.perform_update` 在里程碑从已完成变为其他状态时调用 `deduct_reward` 扣回奖励并重置 `reward_synced`
+- **标签合并去重保护**：合并操作替换标签后增加顺序保持去重，防止新标签已在记录中时产生重复
+- **全局搜索异常隔离**：5 个模块各自独立 `try/except`，单模块异常不级联崩溃
+
+### 🐛 修复
+
+- **父子目标循环引用**：Serializer 新增 `validate_parent_goal` 向上遍历检测循环引用；`GoalViewSet.perform_update` 拒绝将已是子目标的目标设为父目标。API 层双重防护
+- **小确幸编辑 `serializer.save()` 在原子块外**：`serializer.save()` 在 `transaction.atomic()` 外执行，若奖励池更新失败则数据不一致。修复：移入原子块内
+- **小确幸编辑不更新年份月份**：编辑 `time` 后 `years` 和 `month` 保持旧值。修复：`perform_update` 末尾自动同步
+- **取消里程碑完成不扣回奖励**：completed→pending 时已发放奖励未扣回。修复：调用 `deduct_reward` + 重置状态
+- **标签合并产生重复**：新标签已在记录中时替换后变成"标签A,标签A"。修复：替换后去重
+- **全局搜索单模块异常导致整体 500**：任一模块查询失败（如表结构变更）导致全接口崩溃。修复：各模块独立 try/except
+
+---
+
+## [2026-07-03] v3.21.0 — 小确幸快乐类型重构 + 编辑修复
+
+### ✨ 新增
+
+- **小确幸快乐类型五类重构**：后端 `SugarRecord.joy_type` 选项从七类（创造/社交/独处/户外/美食/学习/其他）改为五类（感官型/秩序型/联结型/意外型/独处型），前端 `JOY_TYPE_OPTIONS`/`JOY_TYPE_COLORS` 同步更新，新增迁移 `0006`。旧数据保留不变，编辑时显示原值
+- **小确幸编辑弹窗发生日期**：弹窗新增日期选择器，编辑时自动回填原日期，支持修改
+- **全局搜索增强**：跨模块搜索（Quote/OneDayPage/SugarRecord/GoodThing/ReviewRecord），前端 SearchBar 组件+全局搜索框
+- **标签管理器**：独立运维页面 `/admin/tag-manager`，聚合 Quote/Sugar/GoodThing 三模块标签，支持重命名/合并
+
+### 🔧 优化
+
+- **目标编辑里程碑保存**：后端 `GoalCreateUpdateSerializer.update()` 新增里程碑增量同步（匹配 ID 更新、新增、删除），前端回填带上 `id: m.id`，不再删除重建
+- **小确幸奖励金额**：`perform_create` 改用 `serializer.save(reward_amount=level)`，奖励金额直接等于快乐程度值，不再经过阈值映射
+- **侧边栏**：新增"系统运维"分组，标签管理器移至 `/admin/tag-manager`
+
+### 🐛 修复
+
+- **目标编辑新增里程碑未保存**：后端 `GoalCreateUpdateSerializer.update()` 原 `validated_data.pop('milestones', None)` 丢弃里程碑数据，重写为完整的增量同步逻辑
+- **小确幸编辑日期变为修改日期**：`handleSubmit` 始终用 `new Date()` 覆盖 `time`，改为 `form.event_date` 优先
+- **小确幸新增奖励金额不一致**：按钮显示 12 元，保存后变 5 元。`perform_create` 绕过 `serializer.save()` 走 `_calculate_reward_amount` 阈值映射，改为直接 save 并同步奖励池
+
+---
 
 ### ✨ 新增
 

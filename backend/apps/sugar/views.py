@@ -60,32 +60,36 @@ class SugarRecordViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        service = SugarRecordService()
-        data = {
-            'title': serializer.validated_data['title'],
-            'level_of_happiness': serializer.validated_data['level_of_happiness'],
-            'time': serializer.validated_data['time'],
-            'years': serializer.validated_data.get('years') or serializer.validated_data['time'].year,
-            'month': serializer.validated_data.get('month') or serializer.validated_data['time'].month,
-            'category': serializer.validated_data.get('category'),
-            'tags': serializer.validated_data.get('tags'),
-            'notes': serializer.validated_data.get('notes'),
-        }
-        record = service.create(**data)
-        serializer.instance = record
+        level = serializer.validated_data['level_of_happiness']
+        time = serializer.validated_data['time']
+        record = serializer.save(
+            reward_amount=level,
+            reward_synced=True,
+            years=time.year,
+            month=time.month,
+        )
+        # 同步奖励池
+        from apps.reward.services import RewardPoolService
+        RewardPoolService().add_reward(
+            source_id=record.s_id,
+            source_type='sugar',
+            amount=level,
+            transaction_type='sugar_create',
+            description=f'新增小确幸：{record.title}，获得{level}元奖励',
+        )
 
     def perform_update(self, serializer):
-        instance = serializer.instance
+        instance = self.get_object()
         old_amount = instance.reward_amount or 0
-        new_amount = serializer.validated_data.get('level_of_happiness')
+        new_amount = serializer.validated_data.get('level_of_happiness', old_amount)
 
-        if new_amount is not None and new_amount != old_amount:
+        from django.db import transaction
+        with transaction.atomic():
             serializer.save(reward_amount=new_amount)
 
-            from django.db import transaction
-            from apps.reward.models import RewardPool, RewardTransaction
+            if old_amount != new_amount:
+                from apps.reward.models import RewardPool, RewardTransaction
 
-            with transaction.atomic():
                 pool = RewardPool.objects.select_for_update().first()
                 if pool:
                     delta = new_amount - old_amount
@@ -103,8 +107,13 @@ class SugarRecordViewSet(viewsets.ModelViewSet):
                         balance_after=pool.balance,
                         description=f'小确幸快乐程度变化：{instance.title}，奖励 {old_amount}→{new_amount}',
                     )
-        else:
-            serializer.save()
+
+        if 'time' in serializer.validated_data:
+            new_time = serializer.validated_data['time']
+            if new_time:
+                instance.years = new_time.year
+                instance.month = new_time.month
+                instance.save(update_fields=['years', 'month'])
 
     def perform_destroy(self, instance):
         service = SugarRecordService()

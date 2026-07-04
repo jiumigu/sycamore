@@ -153,3 +153,13 @@ export function createFreeSpending(data: Record<string, unknown>) {
 export function deleteFreeSpending(id: number) {
   return request({ url: `/toolkit/free-spending/${id}/`, method: 'delete' })
 }
+
+// ────────── 标签管理器 ──────────
+
+export function getTags() {
+  return request({ url: '/toolkit/tags/', method: 'get' })
+}
+
+export function mergeTag(data: { action: string; old_tag: string; new_tag: string }) {
+  return request({ url: '/toolkit/tags/', method: 'post', data })
+}

@@ -138,21 +138,17 @@ export interface JoyTypeStats {
 }
 
 export const JOY_TYPE_OPTIONS = [
-  { value: '创造', label: '创造', icon: '🎨' },
-  { value: '社交', label: '社交', icon: '💬' },
-  { value: '独处', label: '独处', icon: '🧘' },
-  { value: '户外', label: '户外', icon: '🌿' },
-  { value: '美食', label: '美食', icon: '🍽️' },
-  { value: '学习', label: '学习', icon: '📚' },
-  { value: '其他', label: '其他', icon: '✨' },
+  { value: '感官型', label: '感官型 — 五感满足', icon: '🌿' },
+  { value: '秩序型', label: '秩序型 — 掌控感', icon: '📋' },
+  { value: '联结型', label: '联结型 — 关系满足', icon: '💬' },
+  { value: '意外型', label: '意外型 — 惊喜感', icon: '🎁' },
+  { value: '独处型', label: '独处型 — 内在空间', icon: '🧘' },
 ]
 
 export const JOY_TYPE_COLORS: Record<string, string> = {
-  '创造': '#8B5CF6',
-  '社交': '#3B82F6',
-  '独处': '#10B981',
-  '户外': '#F59E0B',
-  '美食': '#EF4444',
-  '学习': '#06B6D4',
-  '其他': '#9CA3AF',
+  '感官型': '#10B981',
+  '秩序型': '#3B82F6',
+  '联结型': '#EF4444',
+  '意外型': '#F59E0B',
+  '独处型': '#8B5CF6',
 }

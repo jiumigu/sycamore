@@ -62,6 +62,17 @@
         </el-col>
       </el-row>
 
+      <el-row :gutter="20">
+        <el-col :span="12">
+          <el-form-item label="父目标">
+            <el-select v-model="form.parent_goal" placeholder="选择关联的大目标（可选）" clearable filterable style="width: 100%">
+              <el-option v-for="g in availableParentGoals" :key="g.id" :label="g.title" :value="g.id" />
+            </el-select>
+            <span style="font-size: 12px; color: #999; display: block; margin-top: 2px;">选择后，本目标进度将汇总到大目标</span>
+          </el-form-item>
+        </el-col>
+      </el-row>
+
       <el-row v-if="form.enable_reward" :gutter="20">
         <el-col :span="12">
           <el-form-item label="默认奖励金" prop="default_reward_amount">
@@ -111,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, type FormInstance } from 'element-plus'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import { useGoalStore } from '../stores/goalStore'
@@ -128,13 +139,18 @@ const submitting = ref(false)
 const form = reactive({
   title: '', description: '', category: '', status: '', priority: 'p2', tags: [] as string[],
   reward_value: 0, enable_reward: false, default_reward_amount: 0, start_date: '', deadline: '', notes: '',
-  milestones: [] as Array<{ title: string; status: string; description?: string }>,
+  parent_goal: null as number | null,
+  milestones: [] as Array<{ id?: number; title: string; status: string; description?: string }>,
 })
 
 const rules = {
   title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
   category: [{ required: true, message: '请选择类型', trigger: 'change' }],
 }
+
+const availableParentGoals = computed(() =>
+  goalStore.goalList.filter(g => g.id !== props.goalId && !g.parent_goal)
+)
 
 function addMilestone() { form.milestones.push({ title: '', status: 'pending', description: '' }) }
 function removeMilestone(i: number) { form.milestones.splice(i, 1) }
@@ -145,6 +161,7 @@ watch(() => props.goalId, async (id) => {
     form.priority = 'p2'; form.tags = []; form.reward_value = 0
     form.enable_reward = false; form.default_reward_amount = 0
     form.start_date = ''; form.deadline = ''; form.notes = ''
+    form.parent_goal = null
     form.milestones = []
     return
   }
@@ -163,7 +180,8 @@ watch(() => props.goalId, async (id) => {
     form.start_date = goal.start_date || ''
     form.deadline = goal.deadline || ''
     form.notes = goal.notes || ''
-    form.milestones = (goal.milestones || []).map((m: Milestone) => ({ title: m.title, status: m.status, description: m.description || '' }))
+    form.parent_goal = goal.parent_goal ?? null
+    form.milestones = (goal.milestones || []).map((m: Milestone) => ({ id: m.id, title: m.title, status: m.status, description: m.description || '' }))
     if (!form.milestones.length) form.milestones.push({ title: '', status: 'pending' })
   } catch { ElMessage.error('加载目标失败') }
 })
@@ -182,6 +200,7 @@ async function handleSubmit() {
       priority: form.priority,
       status: form.status || undefined,
       tags: form.tags,
+      parent_goal: form.parent_goal || null,
       reward_value: form.reward_value,
       enable_reward: form.enable_reward,
       default_reward_amount: form.default_reward_amount,

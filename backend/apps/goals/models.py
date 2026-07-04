@@ -57,6 +57,11 @@ class Goal(models.Model):
     default_reward_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='默认奖励金额')
     total_reward_issued = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name='本目标已发放奖励总额')
 
+    parent_goal = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='sub_goals', verbose_name='父目标',
+    )
+
     user_id = models.IntegerField(blank=True, null=True, verbose_name='用户ID（预留）')
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')

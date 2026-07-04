@@ -111,6 +111,10 @@ class GoalViewSet(viewsets.ModelViewSet):
         GoalProgressService.recalculate(goal)
 
     def perform_update(self, serializer):
+        parent = serializer.validated_data.get('parent_goal')
+        if parent and parent.parent_goal:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'parent_goal': '父目标本身已是子目标，不能作为父目标'})
         goal = serializer.save()
         GoalProgressService.recalculate(goal)
 
@@ -231,6 +235,13 @@ class GoalViewSet(viewsets.ModelViewSet):
         goal = self.get_object()
         GoalProgressService.recalculate(goal)
         return Response({'progress_percentage': goal.progress_percentage})
+
+    @action(detail=True, methods=['get'])
+    def sub_goals(self, request, pk=None):
+        """获取子目标列表"""
+        goal = self.get_object()
+        subs = goal.sub_goals.all()
+        return Response(GoalListSerializer(subs, many=True).data)
 
     @action(detail=False, methods=['delete'])
     def bulk_delete(self, request):
@@ -490,17 +501,33 @@ class MilestoneViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         old_instance = self.get_object()
-
-        # 判断状态是否从非完成变为完成
-        is_newly_completed = (
-            old_instance.status != 'completed' and
-            serializer.validated_data.get('status') == 'completed'
-        )
+        old_status = old_instance.status
+        new_status = serializer.validated_data.get('status', old_status)
 
         instance = serializer.save()
 
-        # 只有首次完成时才发放奖励
-        if is_newly_completed and not old_instance.reward_synced:
+        # 取消完成 → 扣回奖励
+        if old_status == 'completed' and new_status != 'completed' and old_instance.reward_synced:
+            from apps.reward.services import RewardPoolService
+            reward_amount = (
+                old_instance.reward_amount
+                or old_instance.goal.default_reward_amount
+                or 0
+            )
+            if reward_amount > 0:
+                RewardPoolService.deduct_reward(
+                    source_id=old_instance.id,
+                    source_type='milestone',
+                    amount=reward_amount,
+                    reason='milestone_uncheck',
+                    description=f'取消完成里程碑「{old_instance.title}」（{old_instance.goal.title}），扣回{reward_amount}元',
+                )
+                instance.reward_synced = False
+                instance.reward_issued_at = None
+                instance.save(update_fields=['reward_synced', 'reward_issued_at'])
+
+        # 首次完成 → 发放奖励
+        elif old_status != 'completed' and new_status == 'completed' and not old_instance.reward_synced:
             from apps.reward.services import RewardPoolService
             from decimal import Decimal
 

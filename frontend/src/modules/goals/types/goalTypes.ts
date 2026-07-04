@@ -125,6 +125,10 @@ export interface Goal {
   circle_check?: number | null
   happiness_impact?: number | null
   peace_impact?: number | null
+  parent_goal?: number | null
+  parent_goal_name?: string
+  sub_goals_count?: number
+  sub_goals?: Goal[]
   milestones?: Milestone[]
   actions?: Action[]
   reviews?: GoalReview[]
