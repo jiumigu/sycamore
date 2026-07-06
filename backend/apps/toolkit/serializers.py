@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, Quote, ReviewRecord, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
 
 
 class CityCoordinateSerializer(serializers.ModelSerializer):
@@ -120,3 +120,15 @@ class ReviewRecordSerializer(serializers.ModelSerializer):
 
     def get_review_type_display(self, obj):
         return obj.get_review_type_display()
+
+
+class LanguageTrainingSerializer(serializers.ModelSerializer):
+    train_type_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LanguageTraining
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at']
+
+    def get_train_type_display(self, obj):
+        return obj.get_train_type_display()

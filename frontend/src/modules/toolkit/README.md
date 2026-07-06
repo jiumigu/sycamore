@@ -8,3 +8,4 @@
 | `toolkitStore.ts` | Pinia 状态管理 |
 | `toolkitApi.ts` | API 调用封装（6函数） |
 | `toolkitTypes.ts` | 类型定义 + CATEGORY_LABELS + STATUS_CONFIG |
+| `LanguageTrainer.vue` | 语言训练器（4 TAB 切换 + CRUD 历史列表 + 弹窗表单） |

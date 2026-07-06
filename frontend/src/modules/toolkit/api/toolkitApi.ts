@@ -163,3 +163,21 @@ export function getTags() {
 export function mergeTag(data: { action: string; old_tag: string; new_tag: string }) {
   return request({ url: '/toolkit/tags/', method: 'post', data })
 }
+
+// ────────── 语言训练 ──────────
+
+export function getLanguageTrainingList(params?: Record<string, unknown>) {
+  return request({ url: '/toolkit/language-training/', method: 'get', params })
+}
+
+export function createLanguageTraining(data: Record<string, unknown>) {
+  return request({ url: '/toolkit/language-training/', method: 'post', data })
+}
+
+export function updateLanguageTraining(id: number, data: Record<string, unknown>) {
+  return request({ url: `/toolkit/language-training/${id}/`, method: 'patch', data })
+}
+
+export function deleteLanguageTraining(id: number) {
+  return request({ url: `/toolkit/language-training/${id}/`, method: 'delete' })
+}

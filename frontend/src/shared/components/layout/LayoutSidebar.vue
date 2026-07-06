@@ -358,6 +358,14 @@
           <el-icon><List /></el-icon>
           <span v-if="!isCollapsed">复盘工具箱</span>
         </router-link>
+        <router-link
+          to="/toolkit/language-trainer"
+          class="nav-item sub-item"
+          :class="{ active: isRouteActive('/toolkit/language-trainer') }"
+        >
+          <el-icon><EditPen /></el-icon>
+          <span v-if="!isCollapsed">语言训练器</span>
+        </router-link>
       </div>
 
       <!-- ========== 系统运维 ========== -->
@@ -395,7 +403,7 @@ import {
   Sunny, Reading, Trophy, Present,
   Money, Cpu,
   Location, User, Tools, Food, WarningFilled, PriceTag,
-  Histogram, Connection, MessageBox, List,
+  Histogram, Connection, MessageBox, List, EditPen,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

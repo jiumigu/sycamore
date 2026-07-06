@@ -13,7 +13,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 
 from apps.sugar.models import SugarRecord
 from apps.treasure.models import GoodThing
@@ -28,6 +28,7 @@ from .serializers import (
     FreeSpendingCalculatorSerializer,
     HealthSelfCheckSerializer,
     HourlyWageRecordSerializer,
+    LanguageTrainingSerializer,
     QuoteSerializer,
     ReviewRecordSerializer,
     ToolInfoSerializer,
@@ -714,3 +715,23 @@ class TagManagerView(views.APIView):
             return Response({'success': True, 'affected': affected})
 
         return Response({'error': '未知操作'}, status=400)
+
+
+class LanguageTrainingViewSet(viewsets.ModelViewSet):
+    """语言训练记录 CRUD"""
+
+    permission_classes = [AllowAny]
+    queryset = LanguageTraining.objects.all()
+    serializer_class = LanguageTrainingSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        train_type = params.get('train_type')
+        if train_type:
+            qs = qs.filter(train_type=train_type)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(user_id=1)

@@ -1,6 +1,20 @@
 # Sycamore 人生管理系统 - 更新日志
 
-## [2026-07-04] v3.22.0 — 父子目标关联 + 代码审查修复
+## [2026-07-06] v3.23.0 — 语言训练器 + 旅行路线全屏重构
+
+### ✨ 新增
+
+- **语言训练器**：工具箱全栈工具，4种训练类型 — 词汇颗粒度（粗糙→精确词汇替换）、场景描述（总结+还原）、语言素材（来源+原句+赏析）、逼近修订（初版→多轮修订→终版），TAB 切换筛选 + CRUD 历史列表，含 revisions JSON 动态数组编辑。后端 `LanguageTraining` 模型 + `LanguageTrainingViewSet` + `LanguageTrainerTool` 注册，前端 `LanguageTrainer.vue` + API 层 + 路由 + 侧边栏入口
+
+### 🔧 优化
+
+- **旅行路线推演全屏重构**：左侧 50px 可折叠窄条 + 340px 抽屉覆盖层滑入/滑出动画，地图占满全屏区域（`calc(100vh - 80px)`），选择路线后抽屉自动收起，空状态引导提示居中显示，控制栏 absolute 悬浮地图底部，不再使用 el-row 分栏布局
+
+### 🐛 修复
+
+- **语言训练器保存后列表空白**：后端 `LanguageTrainingViewSet` 设置 `pagination_class = None` 返回纯数组，前端误用 `res.data?.results` 解构分页格式导致始终取到 `undefined`。修复：`fetchRecords` 检测 `Array.isArray(data)` 兼容纯数组和分页对象两种响应格式
+
+---
 
 ### ✨ 新增
 

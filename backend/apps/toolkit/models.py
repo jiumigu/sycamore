@@ -495,3 +495,51 @@ class ReviewRecord(models.Model):
 
     def __str__(self):
         return f'{self.get_review_type_display()} {self.review_date}'
+
+
+class LanguageTraining(models.Model):
+    """语言训练记录"""
+
+    TRAIN_TYPE_CHOICES = [
+        ('granularity', '词汇颗粒度'),
+        ('describe', '场景描述'),
+        ('material', '语言素材'),
+        ('revision', '逼近修订'),
+    ]
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    train_type = models.CharField(max_length=20, choices=TRAIN_TYPE_CHOICES, verbose_name='训练类型')
+    train_date = models.DateField(verbose_name='训练日期')
+
+    # 词汇颗粒度
+    rough_word = models.CharField(max_length=50, blank=True, default='', verbose_name='粗糙词汇')
+    refined_words = models.TextField(blank=True, default='', verbose_name='拆分后的词汇')
+
+    # 场景描述
+    summary = models.CharField(max_length=200, blank=True, default='', verbose_name='总结性描述')
+    scene = models.TextField(blank=True, default='', verbose_name='场景还原')
+
+    # 语言素材
+    source = models.CharField(max_length=200, blank=True, default='', verbose_name='来源')
+    quote_text = models.TextField(blank=True, default='', verbose_name='原句')
+    why_good = models.TextField(blank=True, default='', verbose_name='为什么觉得好')
+
+    # 逼近修订
+    first_draft = models.TextField(blank=True, default='', verbose_name='第一版')
+    revisions = models.JSONField(default=list, blank=True, verbose_name='修订过程')
+    final_version = models.TextField(blank=True, default='', verbose_name='最终版')
+
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_language_training'
+        ordering = ['-train_date']
+        verbose_name = '语言训练记录'
+        indexes = [
+            models.Index(fields=['train_type']),
+            models.Index(fields=['train_date']),
+        ]
+
+    def __str__(self):
+        return f'{self.get_train_type_display()} {self.train_date}'

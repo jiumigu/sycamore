@@ -14,6 +14,7 @@ router.register(r'health-self-checks', views.HealthSelfCheckViewSet, basename='h
 router.register(r'free-spending', views.FreeSpendingCalculatorViewSet, basename='free-spending')
 router.register(r'hourly-wage', views.HourlyWageViewSet, basename='hourly-wage')
 router.register(r'review-records', views.ReviewRecordViewSet, basename='review-record')
+router.register(r'language-training', views.LanguageTrainingViewSet, basename='language-training')
 router.register(r'quotes', views.QuoteViewSet, basename='quote')
 
 urlpatterns = [

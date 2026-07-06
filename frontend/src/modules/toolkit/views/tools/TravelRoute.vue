@@ -1,61 +1,64 @@
 <template>
   <div class="travel-route">
-    <el-row :gutter="16">
-      <!-- 左侧：已保存路线 -->
-      <el-col :span="6">
-        <el-card class="preset-list-card" shadow="never">
-          <template #header>
-            <div class="preset-header">
-              <span>📋 已保存路线</span>
-              <el-button size="small" type="primary" @click="openCreateDialog">+ 新建</el-button>
+    <!-- 左侧折叠窄条 -->
+    <div class="sidebar-toggle" @click="drawerOpen = !drawerOpen">
+      <el-icon :size="20">
+        <ArrowRight v-if="!drawerOpen" />
+        <ArrowLeft v-else />
+      </el-icon>
+      <span v-if="!drawerOpen" class="toggle-text">路线</span>
+    </div>
+
+    <!-- 左侧抽屉（覆盖在地图上） -->
+    <transition name="slide">
+      <div v-if="drawerOpen" class="route-drawer">
+        <div class="drawer-header">
+          <span>📋 已保存路线</span>
+          <el-button size="small" type="primary" @click="openNewRoute">+ 新建</el-button>
+        </div>
+
+        <div class="preset-list">
+          <div
+            v-for="preset in presets"
+            :key="preset.id"
+            class="preset-item"
+            :class="{ active: selectedPreset?.id === preset.id }"
+            @click="selectPreset(preset)"
+          >
+            <div class="preset-name">{{ preset.name }}</div>
+            <div class="preset-route">{{ preset.origin }} → {{ preset.destinations.join(' → ') }}</div>
+            <div class="preset-actions" @click.stop>
+              <el-button size="small" text @click="editPreset(preset)">✏️</el-button>
+              <el-button size="small" text type="danger" @click="deletePreset(preset.id)">🗑️</el-button>
             </div>
-          </template>
-
-          <div v-if="presets.length > 0" class="preset-list">
-            <div
-              v-for="preset in presets"
-              :key="preset.id"
-              class="preset-item"
-              :class="{ active: selectedPreset?.id === preset.id }"
-              @click="loadPreset(preset)"
-            >
-              <div class="preset-info">
-                <span class="preset-name">{{ preset.name }}</span>
-                <span class="preset-route">{{ preset.origin }} → {{ preset.destinations.join(' → ') }}</span>
-              </div>
-              <div class="preset-actions" @click.stop>
-                <el-button size="small" text @click="editPreset(preset)">✏️</el-button>
-                <el-button size="small" text type="danger" @click="deletePreset(preset.id)">🗑️</el-button>
-              </div>
-            </div>
           </div>
-          <el-empty v-else description="暂无路线" :image-size="60" />
-        </el-card>
-      </el-col>
+        </div>
 
-      <!-- 右侧：地图 -->
-      <el-col :span="18">
-        <el-card v-if="started" class="map-card" shadow="never">
-          <div ref="chartRef" class="route-map" />
+        <el-empty v-if="presets.length === 0" description="暂无路线，点击新建" />
+      </div>
+    </transition>
 
-          <div class="controls">
-            <el-button @click="prevStop" :disabled="currentStop === 0">⏮</el-button>
-            <span class="current-info">{{ currentStop < stops.length ? stops[currentStop] : '终点' }} 🚂</span>
-            <el-button @click="nextStop" :disabled="currentStop >= stops.length - 1 || isAnimating">⏭</el-button>
-            <el-button @click="autoPlay" :type="playing ? 'warning' : 'primary'">
-              {{ playing ? '⏸' : '▶' }}
-            </el-button>
-          </div>
-        </el-card>
+    <!-- 地图全屏 -->
+    <div class="map-container">
+      <div ref="chartRef" class="route-map" />
 
-        <el-card v-else class="placeholder-card" shadow="never">
-          <div class="placeholder-content">
-            <div class="placeholder-icon">🚂</div>
-            <p class="placeholder-text">选择左侧路线或点击「新建」创建路线</p>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+      <!-- 空状态提示（地图中央） -->
+      <div v-if="!started" class="empty-hint">
+        <div class="empty-icon">🗺️</div>
+        <div class="empty-text">选择左侧路线或点击「新建」创建路线</div>
+        <el-button type="primary" @click="drawerOpen = true">展开路线列表</el-button>
+      </div>
+
+      <!-- 控制栏 -->
+      <div v-if="started" class="map-controls">
+        <span class="current-stop">{{ stops[currentStop] }} 🚂</span>
+        <el-button-group>
+          <el-button size="small" :disabled="currentStop === 0" @click="prevStop">上一站</el-button>
+          <el-button size="small" :disabled="currentStop >= stops.length - 1 || isAnimating" @click="nextStop">下一站</el-button>
+        </el-button-group>
+        <el-button size="small" :type="playing ? 'warning' : 'primary'" @click="autoPlay">{{ playing ? '⏸' : '▶' }}</el-button>
+      </div>
+    </div>
 
     <!-- 新建/编辑路线弹窗 -->
     <el-dialog v-model="showPresetDialog" :title="editingPreset ? '编辑路线' : '新建路线'" width="600px" destroy-on-close>
@@ -102,6 +105,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import betterEchartsMaps from 'better-echarts-maps/dist/china.js'
@@ -110,6 +114,7 @@ import draggable from 'vuedraggable'
 import * as api from '../../api/toolkitApi'
 import type { CityCoordinate, TravelRoutePreset } from '../../types/toolkitTypes'
 
+const drawerOpen = ref(false)
 const origin = ref('')
 const destinations = ref<string[]>([])
 const started = ref(false)
@@ -170,16 +175,17 @@ async function loadPresets() {
   }
 }
 
-function loadPreset(p: TravelRoutePreset) {
+function selectPreset(p: TravelRoutePreset) {
   selectedPreset.value = p
   origin.value = p.origin
   destinations.value = [...p.destinations]
+  drawerOpen.value = false
   startJourney()
 }
 
-function openCreateDialog() {
-  editingPreset.value = null
+function openNewRoute() {
   selectedPreset.value = null
+  editingPreset.value = null
   presetForm.value = {
     name: '',
     origin: '',
@@ -606,71 +612,145 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.travel-route { padding: 16px; }
-
-.preset-list-card {
-  height: calc(100vh - 120px);
-  overflow-y: auto;
-  border: none;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+.travel-route {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 80px);
+  overflow: hidden;
 }
-.preset-header { display: flex; justify-content: space-between; align-items: center; }
 
-.preset-item {
+/* 左侧折叠窄条 */
+.sidebar-toggle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  width: 50px;
+  height: 80px;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 0 8px 8px 0;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   align-items: center;
-  padding: 10px;
-  border: 1px solid #eee;
-  border-radius: 8px;
-  margin-bottom: 8px;
+  justify-content: center;
   cursor: pointer;
-  transition: background 0.2s;
-}
-.preset-item:hover { background: #f5f7fa; }
-.preset-item.active { border-color: #409eff; background: #ecf5ff; }
-.preset-info { overflow: hidden; flex: 1; }
-.preset-name { font-weight: 500; font-size: 14px; color: #1f2937; }
-.preset-route { font-size: 12px; color: #999; display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.preset-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  box-shadow: 2px 0 8px rgba(0,0,0,0.06);
+  transition: all 0.2s;
 
-.map-card {
-  height: calc(100vh - 120px);
-  border: none;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
-.route-map { width: 100%; height: calc(100% - 50px); border-radius: 8px; }
+  &:hover { background: #ecf5ff; }
 
-.controls {
+  .toggle-text {
+    writing-mode: vertical-rl;
+    font-size: 13px;
+    color: #666;
+    margin-top: 4px;
+  }
+}
+
+/* 抽屉（覆盖在地图上） */
+.route-drawer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 340px;
+  height: 100%;
+  background: #fff;
+  z-index: 99;
+  box-shadow: 4px 0 16px rgba(0,0,0,0.1);
   display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
+  flex-direction: column;
+
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid #f0f0f0;
+    font-weight: 600;
+  }
+
+  .preset-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .preset-item {
+    padding: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-bottom: 8px;
+    border: 1px solid #eee;
+    transition: all 0.2s;
+
+    &:hover { background: #f5f7fa; }
+    &.active { border-color: #409eff; background: #ecf5ff; }
+
+    .preset-name { font-weight: 500; font-size: 14px; }
+    .preset-route { font-size: 12px; color: #999; margin-top: 4px; }
+    .preset-actions { margin-top: 4px; text-align: right; }
+  }
 }
 
-.current-info {
-  font-size: 22px;
-  font-weight: 600;
-  min-width: 140px;
-  text-align: center;
+/* 滑入动画 */
+.slide-enter-active, .slide-leave-active {
+  transition: transform 0.3s ease;
+}
+.slide-enter-from, .slide-leave-to {
+  transform: translateX(-100%);
 }
 
-.placeholder-card {
-  border: none;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  height: calc(100vh - 120px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.placeholder-content { text-align: center; }
-.placeholder-icon { font-size: 64px; margin-bottom: 16px; }
-.placeholder-text { font-size: 15px; color: #9CA3AF; margin: 0; }
+/* 地图全屏 */
+.map-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
 
+  .route-map {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* 空状态提示 */
+  .empty-hint {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 10;
+
+    .empty-icon { font-size: 64px; margin-bottom: 16px; }
+    .empty-text { font-size: 16px; color: #999; margin-bottom: 16px; }
+  }
+
+  /* 控制栏 */
+  .map-controls {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    padding: 8px 16px;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 10;
+
+    .current-stop {
+      font-size: 16px;
+      font-weight: 600;
+      min-width: 100px;
+      text-align: center;
+    }
+  }
+}
+
+/* 弹窗中的目的地编辑 */
 .destination-item {
   display: flex;
   align-items: center;

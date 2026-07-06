@@ -241,6 +241,16 @@ const routes: RouteRecordRaw[] = [
         redirect: '/toolkit/review-toolbox',
       },
       {
+        path: 'language-trainer',
+        name: 'language-trainer',
+        component: () => import('@/modules/toolkit/views/tools/LanguageTrainer.vue'),
+        meta: { title: '语言训练器' },
+      },
+      {
+        path: 'language-trainer-tool',
+        redirect: '/toolkit/language-trainer',
+      },
+      {
         path: ':toolKey',
         name: 'toolkit-detail',
         component: () => import('@/modules/toolkit/views/ToolDetail.vue'),
