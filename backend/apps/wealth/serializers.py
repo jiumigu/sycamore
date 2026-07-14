@@ -56,6 +56,7 @@ class CoverageInputSerializer(serializers.Serializer):
     current_week = serializers.IntegerField(min_value=1, max_value=52)
     current_cash = serializers.DecimalField(max_digits=14, decimal_places=2)
     daily_budget = serializers.DecimalField(max_digits=10, decimal_places=2)
+    daily_interest_rate = serializers.DecimalField(max_digits=10, decimal_places=8, default=0)
 
 
 class LifeSummarySerializer(serializers.Serializer):

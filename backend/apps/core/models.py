@@ -6,6 +6,7 @@ class UserProfile(models.Model):
 
     user_id = models.IntegerField(default=1, unique=True, verbose_name='用户ID')
     privacy_mode = models.BooleanField(default=False, verbose_name='脱敏模式')
+    logseq_path = models.CharField(max_length=500, blank=True, default='', verbose_name='Logseq 日记目录')
 
     class Meta:
         db_table = 'core_user_profile'

@@ -17,6 +17,7 @@ export interface OneDayPage {
   remark: string | null
   user_id: number | null
   created_at: string
+  logseq_file: string | null
 }
 
 export interface OneDayPageStats {

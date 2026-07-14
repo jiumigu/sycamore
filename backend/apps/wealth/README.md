@@ -16,7 +16,7 @@
 |------|------|
 | `services/calendar_init.py` | 初始化周历，按出生日期映射年龄→年份 |
 | `services/week_aggregator.py` | 交易按周聚合 + net_level 7级颜色 |
-| `services/coverage_calculator.py` | 现金流推演算法（现金÷周预算） |
+| `services/coverage_calculator.py` | 现金流推演算法（现金÷周预算 + 日利息复利） |
 | `services/monthly_aggregator.py` | 月度日聚合 + 颜色等级 + 月度汇总 |
 | `services/regular_service.py` | 定期存款完整业务逻辑 |
 | `services/cashflow_service.py` | 现金盘点（资产全景/趋势/快照CRUD/复制上月/对账） |

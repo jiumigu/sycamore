@@ -32,6 +32,7 @@ class WealthCurrentScenario(models.Model):
     current_week = models.IntegerField(verbose_name='当前周数(1-52)')
     current_cash = models.DecimalField(max_digits=14, decimal_places=2, verbose_name='当前现金(元)')
     daily_budget = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='每日预算(元/天)')
+    daily_interest_rate = models.DecimalField(max_digits=10, decimal_places=8, default=0, verbose_name='日利息率(小数)')
     support_weeks = models.IntegerField(default=0, verbose_name='可支撑周数')
     end_age = models.IntegerField(null=True, blank=True, verbose_name='资金耗尽时的年龄')
     end_week = models.IntegerField(null=True, blank=True, verbose_name='资金耗尽时的周数')
@@ -53,6 +54,7 @@ class WealthScenarioHistory(models.Model):
     current_week = models.IntegerField(verbose_name='当前周数')
     current_cash = models.DecimalField(max_digits=14, decimal_places=2, verbose_name='当前现金')
     daily_budget = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='每日预算')
+    daily_interest_rate = models.DecimalField(max_digits=10, decimal_places=8, default=0, verbose_name='日利息率(小数)')
     support_weeks = models.IntegerField(default=0, verbose_name='可支撑周数')
     note = models.CharField(max_length=200, blank=True, verbose_name='备注')
 

@@ -1,3 +1,5 @@
+import os
+import re
 import uuid
 
 from datetime import date, datetime
@@ -304,3 +306,26 @@ class OneDayPageViewSet(viewsets.ModelViewSet):
         ).count()
 
         return Response({'count': count})
+
+
+class OpenLogseqView(APIView):
+    """打开 Logseq 日记文件，返回 Markdown 内容"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        filepath = request.GET.get('path', '')
+
+        if not filepath or not os.path.exists(filepath):
+            return Response({'error': '文件不存在'}, status=404)
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        content = re.sub(r'^---\n.*?\n---\n', '', content, flags=re.DOTALL)
+        content = re.sub(r'collapsed::\s*true', '', content)
+
+        return Response({
+            'filename': os.path.basename(filepath),
+            'content': content,
+        })

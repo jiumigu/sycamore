@@ -81,6 +81,7 @@ export const useWealthStore = defineStore('wealth', () => {
     current_week: number
     current_cash: number
     daily_budget: number
+    daily_interest_rate?: number
   }) {
     scenarioLoading.value = true
     try {

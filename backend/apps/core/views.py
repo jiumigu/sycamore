@@ -121,7 +121,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
-        fields = ['user_id', 'privacy_mode']
+        fields = ['user_id', 'privacy_mode', 'logseq_path']
 
 
 class ProfileView(APIView):

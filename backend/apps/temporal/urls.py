@@ -11,4 +11,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('weekly-tracking/', views.WeeklyTimeTrackingView.as_view()),
     path('weekly-tracking/refresh/', views.RefreshWeeklyCacheView.as_view()),
+    path('open-logseq/', views.OpenLogseqView.as_view()),
 ]

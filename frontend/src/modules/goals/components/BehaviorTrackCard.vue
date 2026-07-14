@@ -39,30 +39,33 @@
     <!-- 里程碑列表 -->
     <div class="milestone-section">
       <div class="milestone-section-title">🎯 里程碑（{{ stats?.completed_milestones ?? 0 }}/{{ stats?.total_milestones ?? 0 }}）</div>
-      <div
-        v-for="m in milestones"
-        :key="m.id"
-        class="milestone-item"
-        :class="{ completed: m.status === 'completed' }"
-      >
-        <div class="milestone-left">
-          <span class="status-icon" :class="m.status === 'completed' ? 'done' : 'todo'" @click.stop="toggleMilestoneStatus(m)">
-            {{ m.status === 'completed' ? '✅' : '○' }}
-          </span>
+      <template v-for="item in foldedMilestones" :key="item.id">
+        <!-- 折叠占位符 -->
+        <div v-if="item.isFoldPlaceholder" class="fold-placeholder" @click="toggleFold(item.foldGroupKey)">
+          <el-icon><ArrowDown v-if="!isExpanded(item.foldGroupKey)" /></el-icon>
+          <span>{{ isExpanded(item.foldGroupKey) ? '收起' : `展开 ${item.foldCount} 条相同记录` }}</span>
         </div>
-        <div class="milestone-content">
-          <div class="milestone-name">{{ m.title }}</div>
-          <div class="milestone-meta">
-            <span v-if="m.reward_amount">💰 ¥{{ m.reward_amount }}</span>
-            <el-tag :type="m.status === 'completed' ? 'success' : 'info'" size="small">
-              {{ m.status === 'completed' ? '已达成' : '待开始' }}
-            </el-tag>
+        <!-- 正常里程碑条目 -->
+        <div v-else class="milestone-item" :class="{ completed: item.status === 'completed' }">
+          <div class="milestone-left">
+            <span class="status-icon" :class="item.status === 'completed' ? 'done' : 'todo'" @click.stop="toggleMilestoneStatus(item)">
+              {{ item.status === 'completed' ? '✅' : '○' }}
+            </span>
+          </div>
+          <div class="milestone-content">
+            <div class="milestone-name">{{ item.title }}</div>
+            <div class="milestone-meta">
+              <span v-if="item.reward_amount">💰 ¥{{ item.reward_amount }}</span>
+              <el-tag :type="item.status === 'completed' ? 'success' : 'info'" size="small">
+                {{ item.status === 'completed' ? '已达成' : '待开始' }}
+              </el-tag>
+            </div>
+          </div>
+          <div class="milestone-right">
+            <el-button size="small" text @click.stop="openEditDialog(item)">✏️</el-button>
           </div>
         </div>
-        <div class="milestone-right">
-          <el-button size="small" text @click.stop="openEditDialog(m)">✏️</el-button>
-        </div>
-      </div>
+      </template>
       <el-empty v-if="!milestones.length" description="暂无里程碑" :image-size="60" />
     </div>
 
@@ -98,7 +101,7 @@
     </el-dialog>
 
     <!-- 打卡日历弹窗 -->
-    <el-dialog v-model="showCalendar" title="打卡日历" width="560px" destroy-on-close>
+    <el-dialog v-model="showCalendar" title="打卡日历" width="560px" append-to-body destroy-on-close>
       <div class="calendar-heatmap">
         <div class="calendar-month" v-for="(days, monthLabel) in calendarByMonth" :key="monthLabel">
           <div class="month-label">{{ monthLabel }}</div>
@@ -140,10 +143,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ElMessageBox } from 'element-plus'
-import { Select, Calendar } from '@element-plus/icons-vue'
+import { Select, Calendar, ArrowDown } from '@element-plus/icons-vue'
 import { checkinAction, getCheckinStats, patchMilestone, toggleMilestone } from '../api/goalApi'
 import type { CheckinStats, CheckinMilestone } from '../types/goalTypes'
 
@@ -163,6 +166,110 @@ const stats = ref<CheckinStats | null>(null)
 const alreadyChecked = ref(false)
 
 const milestones = computed(() => stats.value?.milestones ?? [])
+
+watch(milestones, (val) => {
+  console.log('【折叠调试】milestones 数据变化，数量:', val?.length, '条目:', val?.map(m => ({ title: m.title?.slice(0, 20), status: m.status })))
+}, { immediate: true, deep: true })
+
+interface FoldPlaceholder {
+  id: string
+  isFoldPlaceholder: true
+  foldGroupKey: string
+  foldCount: number
+}
+
+type FoldedItem = CheckinMilestone | FoldPlaceholder
+
+const expandedGroups = ref<Set<string>>(new Set())
+
+function isExpanded(key: string): boolean {
+  return expandedGroups.value.has(key)
+}
+
+function toggleFold(key: string) {
+  if (expandedGroups.value.has(key)) {
+    expandedGroups.value.delete(key)
+  } else {
+    expandedGroups.value.add(key)
+  }
+}
+
+const normalizeName = (name: string) => {
+  if (!name) return ''
+  return name
+    .replace(/倒计时第\d+天/g, '倒计时')
+    .replace(/第\d+天/g, '')
+    .replace(/倒数\d+天/g, '倒数')
+    .replace(/\d{4}-\d{2}-\d{2}/g, '')
+    .replace(/\d+月\d+日/g, '')
+    .replace(/\s+/g, '')
+    .slice(0, 40)
+}
+
+const foldedMilestones = computed<FoldedItem[]>(() => {
+  console.log('【折叠调试】foldedMilestones computed 被调用')
+  const items = milestones.value
+  console.log('【折叠调试】输入数量:', items?.length)
+
+  if (!items || items.length === 0) {
+    console.log('【折叠调试】无数据，返回空')
+    return []
+  }
+
+  const result: FoldedItem[] = []
+  let i = 0
+  while (i < items.length) {
+    const current = items[i]
+    const isCompleted = ['已完成', 'completed', '已达成'].includes(current.status)
+    const curTitle = normalizeName(current.title)
+
+    if (isCompleted && curTitle) {
+      let j = i + 1
+      while (j < items.length) {
+        const nextTitle = normalizeName(items[j].title)
+        const nextCompleted = ['已完成', 'completed', '已达成'].includes(items[j].status)
+        if (nextTitle === curTitle && nextCompleted) {
+          j++
+        } else {
+          break
+        }
+      }
+      const sameCount = j - i
+      console.log(`【折叠调试】位置${i}: "${curTitle}" 连续${sameCount}条（原始标题示例: "${current.title.slice(0, 40)}"）`)
+
+      if (sameCount >= 3) {
+        const groupKey = `fold_${curTitle}_${i}`
+        const expanded = expandedGroups.value.has(groupKey)
+        console.log(`【折叠调试】触发折叠！共${sameCount}条，展开=${expanded}`)
+
+        if (expanded) {
+          // 展开状态：全部显示
+          for (let k = i; k < j; k++) {
+            result.push(items[k])
+          }
+        } else {
+          // 折叠状态：首 + 占位符 + 尾
+          result.push(current)
+          result.push({
+            id: groupKey,
+            isFoldPlaceholder: true,
+            foldGroupKey: groupKey,
+            foldCount: sameCount - 2,
+          })
+          result.push(items[j - 1])
+        }
+
+        i = j
+        continue
+      }
+    }
+    result.push(current)
+    i++
+  }
+
+  console.log('【折叠调试】原始数量:', items.length, '→ 折叠后:', result.length)
+  return result
+})
 
 const showCheckinDialog = ref(false)
 const checkingDate = ref('')
@@ -449,6 +556,30 @@ onMounted(loadStats)
       }
     }
   }
+}
+
+.fold-placeholder {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  margin: 4px 0;
+  background: #f0f2f5;
+  border: 1px dashed #dcdfe6;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #606266;
+  font-size: 13px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #ecf5ff;
+    border-color: #409eff;
+    color: #409eff;
+  }
+
+  .el-icon { font-size: 14px; }
 }
 
 .milestone-section {
