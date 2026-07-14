@@ -172,6 +172,7 @@ async function handleCalculate(params: {
   current_week: number
   current_cash: number
   daily_budget: number
+  daily_interest_rate?: number
 }) {
   try {
     await store.runCoverage(params)

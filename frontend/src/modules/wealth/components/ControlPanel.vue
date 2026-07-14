@@ -31,7 +31,17 @@
           v-model="form.daily_budget" :min="0" :step="10" :precision="2"
           controls-position="right" size="default"
         />
+        <span class="control-card__suffix">元/天</span>
       </div>
+      <div class="control-card__field">
+        <span class="control-card__prefix">日利息率</span>
+        <el-input-number
+          v-model="form.daily_interest_rate" :min="0" :max="100" :precision="4" :step="0.1"
+          controls-position="right" size="default"
+        />
+        <span class="control-card__suffix">万分之</span>
+      </div>
+      <div class="control-card__hint">参考余额宝等货基日万份收益，如 1.5 = 万分之1.5</div>
 
       <el-button
         type="primary"
@@ -48,8 +58,14 @@
       <div class="control-card__result-row">
         <span class="control-card__result-label">可支撑</span>
         <span class="control-card__result-value control-card__result-value--weeks">
-          {{ result.support_weeks === Infinity ? '∞' : result.support_weeks }}
+          {{ result.support_weeks === null || result.support_weeks === undefined ? '∞' : result.support_weeks }}
           <small>周</small>
+        </span>
+      </div>
+      <div v-if="result.daily_interest_rate" class="control-card__result-row control-card__result-row--interest">
+        <span class="control-card__result-label">含日利息</span>
+        <span class="control-card__result-value control-card__result-value--interest">
+          万分之{{ (result.daily_interest_rate * 10000).toFixed(4) }}
         </span>
       </div>
       <div v-if="result.end_age !== null" class="control-card__result-row">
@@ -66,8 +82,10 @@
       <!-- 进度条 -->
       <div class="control-card__progress">
         <div class="control-card__progress-info">
-          <span>覆盖进度</span>
-          <span>{{ coveragePercent }}%</span>
+          <span>已度过 {{ passedWeeks }} 周 ({{ basePercent }}%)</span>
+          <span v-if="result.support_weeks !== null">+ 可支撑 {{ result.support_weeks }} 周</span>
+          <span v-else>+ 永不耗尽</span>
+          <span>= 覆盖至 {{ coveragePercent }}%</span>
         </div>
         <el-progress
           :percentage="coveragePercent"
@@ -91,7 +109,7 @@ import type { CoverageResult } from '../types/wealthTypes'
 import { getCurrentAgeWeek } from '../api/wealthApi'
 
 const emit = defineEmits<{
-  calculate: [params: { current_age: number; current_week: number; current_cash: number; daily_budget: number }]
+  calculate: [params: { current_age: number; current_week: number; current_cash: number; daily_budget: number; daily_interest_rate: number }]
   reset: []
 }>()
 
@@ -107,6 +125,7 @@ const form = reactive({
   current_week: props.defaultWeek ?? 18,
   current_cash: 100000,
   daily_budget: 100,
+  daily_interest_rate: 0,
 })
 
 // 动态加载当前年龄和周数
@@ -120,12 +139,23 @@ onMounted(async () => {
   }
 })
 
+const totalWeeks = 3172
+
+const passedWeeks = computed(() => {
+  const age = form.current_age || 31
+  const week = form.current_week || 1
+  return (age - 18) * 52 + week
+})
+
+const basePercent = computed(() => {
+  return Math.round(passedWeeks.value / totalWeeks * 100)
+})
+
 const coveragePercent = computed(() => {
-  if (!props.result || props.result.support_weeks === Infinity) return 0
-  // 总周数按 61年 × 52周 = 3172 计算
-  const total = 3172
-  const covered = props.result.support_weeks
-  return Math.min(Math.round((covered / total) * 100), 100)
+  if (!props.result) return 0
+  if (props.result.support_weeks === null || props.result.support_weeks === undefined) return 100
+  const covered = passedWeeks.value + props.result.support_weeks
+  return Math.min(100, Math.round(covered / totalWeeks * 100))
 })
 
 const progressColor = computed(() => {
@@ -137,10 +167,11 @@ const progressColor = computed(() => {
 
 function handleCalculate() {
   emit('calculate', {
-    current_age: form.current_age,
-    current_week: form.current_week,
-    current_cash: form.current_cash,
-    daily_budget: form.daily_budget,
+    current_age: form.current_age || 36,
+    current_week: form.current_week || 1,
+    current_cash: form.current_cash || 0,
+    daily_budget: form.daily_budget || 0,
+    daily_interest_rate: parseFloat(((form.daily_interest_rate || 0) / 10000).toFixed(8)),
   })
 }
 </script>
@@ -176,6 +207,18 @@ function handleCalculate() {
     min-width: 72px;
   }
 
+  &__suffix {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    white-space: nowrap;
+  }
+
+  &__hint {
+    font-size: 11px;
+    color: var(--el-text-color-placeholder);
+    line-height: 1.3;
+  }
+
   &__calc-btn {
     width: 100%;
     margin-top: 4px;
@@ -195,6 +238,14 @@ function handleCalculate() {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
+
+    &--interest {
+      .control-card__result-value {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--el-color-info);
+      }
+    }
   }
 
   &__result-label {

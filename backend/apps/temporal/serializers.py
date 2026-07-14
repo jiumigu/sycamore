@@ -1,4 +1,9 @@
+import os
+
+from django.conf import settings
 from rest_framework import serializers
+
+from apps.core.models import UserProfile
 from .models import OneDayPage, TemporalTask
 
 
@@ -70,18 +75,31 @@ class OneDayPageSerializer(serializers.ModelSerializer):
 
     otype_display = serializers.SerializerMethodField()
     created_at = serializers.DateField(source='begin_date', format='%Y-%m-%d', read_only=True)
+    logseq_file = serializers.SerializerMethodField()
 
     class Meta:
         model = OneDayPage
         fields = [
             'oid', 'years', 'oneday', 'page', 'total', 'title',
             'begin_date', 'otype', 'otype_display', 'update_date',
-            'flag', 'remark', 'user_id', 'created_at',
+            'flag', 'remark', 'user_id', 'created_at', 'logseq_file',
         ]
         read_only_fields = ['oid', 'years', 'total', 'update_date']
 
     def get_otype_display(self, obj):
         return obj.get_otype_display()
+
+    def get_logseq_file(self, obj):
+        if not obj.begin_date:
+            return None
+        profile = UserProfile.objects.filter(user_id=obj.user_id or 1).first()
+        if not profile or not profile.logseq_path:
+            return None
+        filename = obj.begin_date.strftime('%Y_%m_%d') + '.md'
+        full_path = os.path.join(profile.logseq_path, filename)
+        if os.path.exists(full_path):
+            return full_path
+        return None
 
     def validate_oneday(self, value):
         if value is not None and value < 0:

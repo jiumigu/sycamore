@@ -38,6 +38,10 @@ export function getYearlyHeatmap(year: number) {
   return request({ url: `/temporal/oneday/yearly_heatmap/?year=${year}`, method: 'get' })
 }
 
+export function openLogseq(path: string) {
+  return request({ url: '/temporal/open-logseq/', method: 'get', params: { path } })
+}
+
 // ─── 任务时间追踪 (Tasks) ───
 
 export function getTaskList(params?: Record<string, unknown>) {

@@ -380,6 +380,15 @@
           <el-icon><PriceTag /></el-icon>
           <span v-if="!isCollapsed">标签管理器</span>
         </router-link>
+
+        <router-link
+          to="/admin/settings"
+          class="nav-item"
+          :class="{ active: isRouteActive('/admin/settings') }"
+        >
+          <el-icon><Setting /></el-icon>
+          <span v-if="!isCollapsed">系统设置</span>
+        </router-link>
       </div>
 
     </div>
@@ -402,7 +411,7 @@ import {
   FirstAidKit, Star,
   Sunny, Reading, Trophy, Present,
   Money, Cpu,
-  Location, User, Tools, Food, WarningFilled, PriceTag,
+  Location, User, Tools, Food, WarningFilled, PriceTag, Setting,
   Histogram, Connection, MessageBox, List, EditPen,
 } from '@element-plus/icons-vue'
 

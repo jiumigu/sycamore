@@ -150,13 +150,23 @@
       <el-table
         v-loading="loading"
         :data="onedayList"
-        style="width: 100%"
+        style="width: 100%; cursor: pointer;"
         @selection-change="handleSelectionChange"
+        @row-click="handleRowClick"
         @row-dblclick="openEditDialog"
       >
         <el-table-column type="selection" width="55" />
         <el-table-column prop="oid" label="ID" width="70" sortable />
-        <el-table-column prop="title" label="主题" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="title" label="主题" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="logseq-title" :class="{ 'has-logseq': row.logseq_file }">
+              {{ row.title || '无标题' }}
+            </span>
+            <el-tooltip v-if="row.logseq_file" content="在 Logseq 中打开" placement="top">
+              <el-icon class="logseq-icon"><Link /></el-icon>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="创建日期" width="120" sortable>
           <template #default="{ row }">
             {{ formatDate(row.begin_date) }}
@@ -204,12 +214,15 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openEditDialog(row)">
+            <el-button v-if="row.logseq_file" size="small" text @click.stop="openLogseq(row)">
+              <el-icon><Link /></el-icon> Logseq
+            </el-button>
+            <el-button type="primary" link size="small" @click.stop="openEditDialog(row)">
               <el-icon><Edit /></el-icon> 编辑
             </el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">
+            <el-button type="danger" link size="small" @click.stop="handleDelete(row)">
               <el-icon><Delete /></el-icon> 删除
             </el-button>
           </template>
@@ -228,6 +241,13 @@
         />
       </div>
     </el-card>
+
+    <!-- Logseq 查看对话框 -->
+    <LogseqViewer
+      v-model="showLogseqViewer"
+      :title="viewingLogseqTitle"
+      :filepath="viewingLogseqPath"
+    />
 
     <!-- 创建/编辑对话框 -->
     <el-dialog
@@ -296,12 +316,13 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Search, Refresh, Plus, Delete, Edit, ArrowLeft, ArrowRight,
-  Document, EditPen, Calendar, RefreshRight,
+  Document, EditPen, Calendar, RefreshRight, Link,
 } from '@element-plus/icons-vue'
 import { useTemporalStore } from '../stores/temporalStore'
 import { OTYPE_OPTIONS } from '../types/temporalTypes'
 import { getYearlyHeatmap } from '../api/temporalApi'
 import type { OneDayPage } from '../types/temporalTypes'
+import LogseqViewer from '../components/LogseqViewer.vue'
 
 const store = useTemporalStore()
 
@@ -319,6 +340,9 @@ const dialogType = ref<'create' | 'edit'>('create')
 const formRef = ref()
 const editingRow = ref<number | null>(null)
 const editingField = ref<string | null>(null)
+const showLogseqViewer = ref(false)
+const viewingLogseqTitle = ref('')
+const viewingLogseqPath = ref('')
 
 // ── 日历热图 ──
 
@@ -544,6 +568,20 @@ function handleDialogClose() {
 function handleSizeChange(val: number) { pageSize.value = val; fetchData() }
 function handleCurrentChange(val: number) { currentPage.value = val; fetchData() }
 
+const handleRowClick = (row: OneDayPage) => {
+  if (row.logseq_file) {
+    openLogseq(row)
+  } else {
+    openEditDialog(row)
+  }
+}
+
+const openLogseq = (row: OneDayPage) => {
+  viewingLogseqTitle.value = row.title || row.begin_date?.slice(0, 10) || 'Logseq'
+  viewingLogseqPath.value = row.logseq_file ?? ''
+  showLogseqViewer.value = true
+}
+
 function handleRefresh() {
   fetchData()
   store.fetchStats()
@@ -721,6 +759,18 @@ onMounted(() => {
 .editable-cell {
   cursor: pointer; padding: 2px 4px; border-radius: 3px; display: inline-block;
   &:hover { background: var(--el-fill-color-light); color: var(--el-color-primary); }
+}
+
+.logseq-title.has-logseq {
+  color: var(--el-color-primary);
+  font-weight: 500;
+}
+
+.logseq-icon {
+  margin-left: 4px;
+  font-size: 14px;
+  color: var(--el-color-primary);
+  vertical-align: middle;
 }
 
 .dialog-footer {

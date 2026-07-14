@@ -266,6 +266,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/modules/toolkit/views/tools/TagManager.vue'),
     meta: { title: '标签管理器' },
   },
+  {
+    path: '/admin/settings',
+    name: 'AdminSettings',
+    component: () => import('@/core/admin/views/AdminSettings.vue'),
+    meta: { title: '系统设置' },
+  },
 
   // 连接与足迹
   { path: '/food', name: 'food', component: () => import('@/modules/food/views/FoodMapView.vue'), meta: { title: '美食地图' } },

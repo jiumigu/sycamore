@@ -158,20 +158,24 @@ class CalculateCoverageView(CreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         data = serializer.validated_data
+        daily_interest_rate = float(data.get('daily_interest_rate', 0))
         coverage, support_weeks, end_age, end_week = calculate_coverage(
             start_age=data['current_age'],
             start_week=data['current_week'],
             cash=float(data['current_cash']),
             daily_budget=float(data['daily_budget']),
+            daily_interest_rate=daily_interest_rate,
         )
 
         # 保存到当前推演
+        scenario_support = support_weeks if support_weeks is not None else 9999
         scenario, _ = WealthCurrentScenario.objects.get_or_create(pk=1)
         scenario.current_age = data['current_age']
         scenario.current_week = data['current_week']
         scenario.current_cash = data['current_cash']
         scenario.daily_budget = data['daily_budget']
-        scenario.support_weeks = support_weeks
+        scenario.daily_interest_rate = daily_interest_rate
+        scenario.support_weeks = scenario_support
         scenario.end_age = end_age
         scenario.end_week = end_week
         scenario.save()
@@ -182,7 +186,8 @@ class CalculateCoverageView(CreateAPIView):
             current_week=data['current_week'],
             current_cash=data['current_cash'],
             daily_budget=data['daily_budget'],
-            support_weeks=support_weeks if isinstance(support_weeks, int) else 9999,
+            daily_interest_rate=daily_interest_rate,
+            support_weeks=scenario_support,
             note='',
         )
 
@@ -191,6 +196,7 @@ class CalculateCoverageView(CreateAPIView):
             'support_weeks': support_weeks,
             'end_age': end_age,
             'end_week': end_week,
+            'daily_interest_rate': daily_interest_rate,
         })
 
 

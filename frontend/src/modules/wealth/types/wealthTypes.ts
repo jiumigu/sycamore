@@ -37,6 +37,7 @@ export interface CoverageInput {
   current_week: number
   current_cash: number
   daily_budget: number
+  daily_interest_rate?: number
 }
 
 /** 推演结果 */
@@ -45,6 +46,7 @@ export interface CoverageResult {
   support_weeks: number
   end_age: number | null
   end_week: number | null
+  daily_interest_rate?: number
 }
 
 /** 人生总览 */

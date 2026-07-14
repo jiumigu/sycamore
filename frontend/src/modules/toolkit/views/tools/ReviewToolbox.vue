@@ -343,13 +343,13 @@ function fillForm(r: any) {
   form.review_date = r.review_date
   form.daily_status = r.daily_status || ''
   form.daily_people = r.daily_people || ''
-  form.johari_window = { lack: '', have: '', blind: '', unknown: '', ...(r.johari_window || {}) }
-  form.emotions = { happy: '', boring: '', angry: '', nostalgic: '', ...(r.emotions || {}) }
+  form.johari_window = { lack: '', have: '', blind: '', unknown: '', ...r.johari_window }
+  form.emotions = { happy: '', boring: '', angry: '', nostalgic: '', ...r.emotions }
   form.completed = r.completed || ''
   form.plan_next = r.plan_next || ''
   form.reflection = r.reflection || ''
-  form.grai = { goal: '', result: '', reason: '', rule: '', ...(r.grai || {}) }
-  form.orid = { facts: '', feelings: '', thinking: '', decision: '', ...(r.orid || {}) }
+  form.grai = { goal: '', result: '', reason: '', rule: '', ...r.grai }
+  form.orid = { facts: '', feelings: '', thinking: '', decision: '', ...r.orid }
   form.nourishing = r.nourishing || ''
   form.draining = r.draining || ''
   form.fears = r.fears || ''

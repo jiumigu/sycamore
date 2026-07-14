@@ -4,6 +4,7 @@ import request from '@/shared/utils/request'
 
 export interface ProfileData {
   privacy_mode: boolean
+  logseq_path?: string
 }
 
 export function getProfile() {
