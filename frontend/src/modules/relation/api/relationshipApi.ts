@@ -65,3 +65,13 @@ export function getLocationStats() {
 export function getMetPlaces() {
   return request({ url: '/relation/relationships/met_places/', method: 'get' })
 }
+
+// ─── 读者互动 ───
+
+export function createQuickReaderInteraction(data: Record<string, unknown>) {
+  return request({ url: '/relation/reader-interactions/quick_record/', method: 'post', data })
+}
+
+export function getRecentReaderInteractions() {
+  return request({ url: '/relation/reader-interactions/recent/', method: 'get' })
+}

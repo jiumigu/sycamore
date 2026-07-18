@@ -425,3 +425,33 @@ class OneDayPageService:
             'year_stats': year_stats,
             'month_stats': month_stats,
         }
+
+
+class DailyLogAutoService:
+    """每日默认日记自动生成服务"""
+
+    @staticmethod
+    def generate_default_log(user_id: int = 1) -> OneDayPage | None:
+        """为今天生成默认日记（如果今天还没有任何日记）"""
+        today = date.today()
+
+        # 使用日期字段比较，兼容 DateField
+        if OneDayPage.objects.filter(
+            user_id=user_id,
+            begin_date__year=today.year,
+            begin_date__month=today.month,
+            begin_date__day=today.day,
+        ).exists():
+            return None
+
+        log = OneDayPage.objects.create(
+            user_id=user_id,
+            title='幸福未被发现，就叫做普通的一天',
+            begin_date=today,
+            otype='ONEDAY',
+            oneday=0,
+            page=0,
+            total=0,
+            years=str(today.year),
+        )
+        return log
