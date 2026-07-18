@@ -48,4 +48,6 @@ Interaction post_save/post_delete → 触发质量更新
 | GET/PUT/DELETE | /reader-groups/&lt;id&gt;/ | 群体详情/更新/删除 |
 | GET/POST | /reader-interactions/ | 读者互动列表（?group_id=）/ 创建 |
 | GET/PUT/DELETE | /reader-interactions/&lt;id&gt;/ | 互动详情/更新/删除 |
+| POST | /reader-interactions/quick_record/ | 一键记录（自动分配默认读者群，仅需 content 即可保存） |
+| GET | /reader-interactions/recent/ | 最近 5 条读者互动 |
 | GET | /reader-interactions/resonance_points/ | 认知共振点（energy_score >= 3） |

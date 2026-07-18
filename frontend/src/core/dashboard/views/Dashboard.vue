@@ -136,6 +136,60 @@
       </el-col>
     </el-row>
 
+    <!-- 快速记录读者互动 -->
+    <el-card shadow="never" class="section-card quick-interaction-card">
+      <template #header>
+        <div class="card-header">
+          <span>📬 快速记录读者互动</span>
+          <el-tag v-if="!loadingRecent && recentInteractions.length" size="small" type="success">{{ recentInteractions.length }}条</el-tag>
+        </div>
+      </template>
+      <div class="quick-input-area">
+        <el-input
+          v-model="quickContent"
+          type="textarea"
+          :rows="2"
+          placeholder="粘贴读者留言..."
+          @keydown.enter.ctrl="quickSave"
+        />
+        <div v-if="showAdvanced" class="advanced-options">
+          <el-row :gutter="8">
+            <el-col :span="8">
+              <el-select v-model="quickType" size="small" class="full-width">
+                <el-option v-for="o in INTERACTION_TYPE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </el-col>
+            <el-col :span="8">
+              <el-input v-model="quickReader" size="small" placeholder="读者名（可选）" />
+            </el-col>
+            <el-col :span="8">
+              <el-select v-model="quickEnergy" size="small" class="full-width">
+                <el-option v-for="o in ENERGY_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </el-col>
+          </el-row>
+        </div>
+        <div class="quick-footer">
+          <el-button type="primary" @click="quickSave" :loading="savingQuick" size="small">
+            记录（Ctrl+Enter）
+          </el-button>
+          <el-button size="small" text @click="showAdvanced = !showAdvanced">
+            {{ showAdvanced ? '收起' : '更多选项' }}
+          </el-button>
+          <span class="quick-tip">默认：留言 +1分 | 只需填内容</span>
+        </div>
+      </div>
+      <div v-if="!loadingRecent && recentInteractions.length" class="recent-interactions">
+        <div class="recent-title">最近互动</div>
+        <div v-for="item in recentInteractions.slice(0, 3)" :key="item.id" class="recent-item">
+          <span class="recent-date">{{ item.created_at.slice(5, 10) }}</span>
+          <span class="recent-name">{{ item.reader_name }}</span>
+          <span class="recent-content">{{ item.content.slice(0, 30) }}{{ item.content.length > 30 ? '...' : '' }}</span>
+          <span class="energy-badge">+{{ item.energy_score }}</span>
+        </div>
+      </div>
+    </el-card>
+
     <!-- 年度进度 -->
     <el-card shadow="never" class="section-card">
       <template #header>
@@ -212,11 +266,13 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { getGoalList } from '@/modules/goals/api/goalApi'
 import { getTodayPending } from '@/modules/inbox/api/inboxApi'
-import { getDueReminders } from '@/modules/relation/api/relationshipApi'
+import { getDueReminders, createQuickReaderInteraction, getRecentReaderInteractions } from '@/modules/relation/api/relationshipApi'
+import { INTERACTION_TYPE_OPTIONS, ENERGY_OPTIONS } from '@/modules/relation/types/relationshipTypes'
+import type { ReaderInteraction } from '@/modules/relation/types/relationshipTypes'
 import { getYearlyOverview } from '@/modules/summary/api/summaryApi'
 import { getWeekCount } from '@/modules/temporal/api/temporalApi'
 import { getRandomRetro } from '@/modules/summary/api/summaryApi'
@@ -273,6 +329,21 @@ const progress = ref<ProgressData | null>(null)
 const retroItem = ref<RetroItem | null>(null)
 const dailyQuote = ref<Quote | null>(null)
 const showQuoteFull = ref(false)
+
+// ─── 快速读者互动 ───
+const quickContent = ref('')
+const quickReader = ref('')
+const quickType = ref('comment')
+const quickEnergy = ref(1)
+const showAdvanced = ref(false)
+const savingQuick = ref(false)
+const recentInteractions = ref<ReaderInteraction[]>([])
+const loadingRecent = ref(true)
+
+// 从 localStorage 恢复默认值
+const savedDefaults = JSON.parse(localStorage.getItem('interaction_defaults') || '{}')
+if (savedDefaults.type) quickType.value = savedDefaults.type
+if (savedDefaults.energy) quickEnergy.value = savedDefaults.energy
 
 // ─── 独立加载状态 ───
 const loadingGoals = ref(true)
@@ -408,6 +479,45 @@ async function refreshQuote() {
   }
 }
 
+// ─── 快速读者互动 ───
+async function quickSave() {
+  if (!quickContent.value.trim()) return
+  savingQuick.value = true
+  try {
+    await createQuickReaderInteraction({
+      content: quickContent.value,
+      interaction_type: quickType.value,
+      energy_score: quickEnergy.value,
+      reader_name: quickReader.value || '匿名读者',
+    })
+    ElMessage.success(`已记录 +${quickEnergy.value} 能量`)
+    quickContent.value = ''
+    quickReader.value = ''
+    // 持久化用户偏好
+    localStorage.setItem('interaction_defaults', JSON.stringify({
+      type: quickType.value,
+      energy: quickEnergy.value,
+    }))
+    await fetchRecentInteractions()
+  } catch {
+    ElMessage.error('记录失败')
+  } finally {
+    savingQuick.value = false
+  }
+}
+
+async function fetchRecentInteractions() {
+  loadingRecent.value = true
+  try {
+    const res = await getRecentReaderInteractions()
+    recentInteractions.value = res.data
+  } catch {
+    recentInteractions.value = []
+  } finally {
+    loadingRecent.value = false
+  }
+}
+
 async function refreshAll() {
   await Promise.all([
     fetchGoalStats(),
@@ -417,6 +527,7 @@ async function refreshAll() {
     fetchDiaryCount(),
     fetchRandomRetro(),
     refreshQuote(),
+    fetchRecentInteractions(),
   ])
 }
 
@@ -429,6 +540,7 @@ onMounted(() => {
   fetchProgress()
   fetchRandomRetro()
   refreshQuote()
+  fetchRecentInteractions()
 })
 </script>
 
@@ -614,6 +726,79 @@ onMounted(() => {
   .mid-row .el-col {
     margin-bottom: 16px;
   }
+}
+
+.quick-interaction-card {
+  :deep(.el-card__body) {
+    padding: 16px 20px;
+  }
+}
+
+.quick-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.advanced-options {
+  padding: 8px 0;
+  .full-width { width: 100%; }
+}
+
+.quick-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quick-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-left: auto;
+}
+
+.recent-interactions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color-light);
+}
+
+.recent-title {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+
+  .recent-date {
+    color: var(--el-text-color-secondary);
+    min-width: 32px;
+  }
+  .recent-name {
+    font-weight: 500;
+    min-width: 48px;
+  }
+  .recent-content {
+    flex: 1;
+    color: var(--el-text-color-regular);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.energy-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #10B981;
+  min-width: 24px;
+  text-align: right;
 }
 
 .quote-body {

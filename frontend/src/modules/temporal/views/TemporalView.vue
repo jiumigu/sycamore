@@ -370,10 +370,10 @@ async function fetchYearlyHeatmap(year: number) {
 function getDayColor(month: number, day: number): string {
   const key = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   const data = heatmapData.value[key]
-  if (!data || data.count === 0) return colorScale[0]
-  if (data.count < 500) return colorScale[1]
-  if (data.count < 1000) return colorScale[2]
-  if (data.count < 2000) return colorScale[3]
+  if (!data) return colorScale[0]       // 灰色：无记录
+  if (data.count === 0) return colorScale[1]  // 浅绿：有日记但当天 0 字
+  if (data.count < 500) return colorScale[2]
+  if (data.count < 1000) return colorScale[3]
   return colorScale[4]
 }
 
@@ -432,9 +432,9 @@ function formatDate(d: string | undefined | null): string {
 function getTypeTagType(type: string) {
   const m: Record<string, string> = {
     MIGU: 'success', HAPPY: 'warning', SAD: 'danger',
-    DIGITAL: 'info', SUMMARY: '', ONEDAY: '', IDEA: 'info', ACHIEVE: 'success',
+    DIGITAL: 'info', SUMMARY: 'info', ONEDAY: 'info', IDEA: 'info', ACHIEVE: 'success',
   }
-  return m[type] || ''
+  return m[type] || 'info'
 }
 
 function handleSelectionChange(val: OneDayPage[]) {

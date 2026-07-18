@@ -156,3 +156,33 @@ export interface LocationStatsData {
   locations: LocationStatsItem[]
   summary: LocationStatsSummary
 }
+
+// ─── 读者互动 ───
+
+export interface ReaderInteraction {
+  id: number
+  reader_group: number
+  reader_name: string
+  interaction_type: string
+  interaction_type_display: string
+  content: string
+  article_title: string
+  energy_score: number
+  tags: string
+  interaction_date: string
+  created_at: string
+}
+
+export const INTERACTION_TYPE_OPTIONS = [
+  { value: 'comment', label: '💬 留言' },
+  { value: 'like', label: '❤️ 点赞' },
+  { value: 'share', label: '🔄 转发' },
+  { value: 'follow', label: '➕ 关注' },
+  { value: 'reward', label: '💰 打赏' },
+]
+
+export const ENERGY_OPTIONS = [
+  { value: 1, label: '+1 有点意思' },
+  { value: 3, label: '+3 很有共鸣' },
+  { value: 5, label: '+5 醍醐灌顶' },
+]

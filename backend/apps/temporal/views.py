@@ -18,7 +18,7 @@ from .serializers import (
     OneDayPageSerializer,
     TemporalTaskSerializer,
 )
-from .services import CSVImportService, OneDayPageService, TemporalStatsService
+from .services import CSVImportService, DailyLogAutoService, OneDayPageService, TemporalStatsService
 
 
 class TemporalTaskViewSet(viewsets.ReadOnlyModelViewSet):
@@ -206,6 +206,11 @@ class OneDayPageViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'remark']
     ordering_fields = ['begin_date', 'update_date', 'total', 'oneday', 'page', 'title']
     ordering = ['-begin_date']
+
+    def list(self, request, *args, **kwargs):
+        """列表加载时自动为今天生成默认日记（兜底）"""
+        DailyLogAutoService.generate_default_log()
+        return super().list(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = super().get_queryset()

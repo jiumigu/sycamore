@@ -230,8 +230,44 @@ class ReaderInteractionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user_id=1)
-        # 更新群体的总能量分
-        group = serializer.instance.reader_group
+        self._update_group_energy(serializer.instance.reader_group)
+
+    @action(detail=False, methods=['post'])
+    def quick_record(self, request):
+        """一键记录读者互动（零思考负担：只需填内容）"""
+        content = request.data.get('content', '').strip()
+        if not content:
+            return Response({'error': '请填写互动内容'}, status=status.HTTP_400_BAD_REQUEST)
+
+        default_group, _ = ReaderGroup.objects.get_or_create(
+            name='读者',
+            defaults={'user_id': 1, 'description': '默认读者群体'},
+        )
+
+        interaction = ReaderInteraction.objects.create(
+            user_id=1,
+            reader_group=default_group,
+            reader_name=request.data.get('reader_name', '匿名读者'),
+            interaction_type=request.data.get('interaction_type', 'comment'),
+            content=content,
+            article_title=request.data.get('article_title', ''),
+            energy_score=int(request.data.get('energy_score', 1)),
+        )
+
+        self._update_group_energy(default_group)
+
+        serializer = self.get_serializer(interaction)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'])
+    def recent(self, request):
+        """最近 5 条读者互动"""
+        qs = self.get_queryset()[:5]
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @staticmethod
+    def _update_group_energy(group):
         group.total_energy = ReaderInteraction.objects.filter(
             reader_group=group,
         ).aggregate(total=Sum('energy_score'))['total'] or 0

@@ -1,5 +1,24 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-07-19] v3.25.0 — 仪表盘快速读者互动 + 日记热力图修复
+
+### ✨ 新增
+
+- **仪表盘快速记录读者互动**：仪表盘新增"快速记录读者互动"卡片，粘贴读者留言 + Ctrl+Enter 两步完成录入，默认留言 +1 分覆盖 80% 场景。展开高级选项可切换互动类型（留言/点赞/转发/关注/打赏）、填写读者名、调整能量值（+1/+3/+5）。保存后自动刷新最近 3 条互动摘要，用户偏好持久化到 localStorage
+
+### 🐛 修复
+
+- **默认日记重复生成**：`DailyLogAutoService.generate_default_log()` 改用 `begin_date__year/month/day` 日期级检查（原逻辑只检查 `otype='ONEDAY'`），避免在有 MIGU 等类型日记的日期再生成 ONEDAY。清理 6 月至今 8 条冗余默认日记
+- **热力图默认日记不可见**：热力图 `getDayColor` 区分"无记录"（灰色 `colorScale[0]`）与"有日记但当日 0 字"（浅绿 `colorScale[1]`），使默认日记也能在热力图上显现
+- **类型标签 type prop 警告**：`getTypeTagType` 将 SUMMARY/ONEDAY 映射为 `'info'`，兜底返回 `'info'` 而非空字符串，消除 el-tag type prop 校验警告
+
+### 📝 文档
+
+- 更新 `relation/README.md`：新增 `quick_record`/`recent` 端点说明
+- 更新 `temporal/README.md`：新增 `DailyLogAutoService` 说明
+
+---
+
 ## [2026-07-13] v3.24.0 — 里程碑折叠 + 复盘工具箱修复 + 现金流推演利息复利
 
 ### ✨ 新增

@@ -10,6 +10,7 @@
 - TemporalStatsService：分类统计 / 平衡轮 / 排名
 - CSVImportService：CSV 导入
 - OneDayPageService：日记统计服务
+- DailyLogAutoService：每日自动生成默认日记（当天无任何日记时创建"幸福未被发现，就叫做普通的一天"），兜底入口在 OneDayPageViewSet.list()，管理命令为 `generate_daily_log`
 
 ## Constants
 4 类任务分类：生产与创造 / 维护与秩序 / 滋养与成长 / 连接与记录，含颜色和图标
