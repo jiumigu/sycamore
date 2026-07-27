@@ -30,7 +30,8 @@
         </div>
         <div class="tx-content">
           <div class="tx-top">
-            <span class="tx-type">{{ tx.transaction_type_display || tx.transaction_type }}</span>
+            <el-tag v-if="tx.transaction_type === 'inbox_complete'" type="success" size="small">📥 收件箱完成</el-tag>
+            <span v-else class="tx-type">{{ tx.transaction_type_display || tx.transaction_type }}</span>
             <span class="tx-amount" :class="tx.amount >= 0 ? 'positive' : 'negative'">
               {{ tx.amount >= 0 ? '+' : '' }}¥{{ formatMoney(tx.amount) }}
             </span>
@@ -130,6 +131,7 @@ function sourceEmoji(tx: RewardTransaction): string {
   if (tx.source_type === 'milestone') return '🎯'
   if (tx.source_type === 'sugar') return '🍰'
   if (tx.source_type === 'gift') return '🎁'
+  if (tx.source_type === 'inbox_complete') return '📥'
   return '⭐'
 }
 

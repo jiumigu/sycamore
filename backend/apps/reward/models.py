@@ -75,6 +75,7 @@ class RewardTransaction(models.Model):
         ('sugar_delete', '小确幸删除'),
         ('gift_exchange', '礼物兑换'),
         ('withdraw', '提取'),
+        ('inbox_complete', '收件箱完成'),
     ]
 
     id = models.AutoField(primary_key=True, verbose_name='流水ID')

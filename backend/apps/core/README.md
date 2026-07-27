@@ -32,7 +32,7 @@ Django 项目通用基础设施，不归属任何业务模块。
 
 | 文件 | 用途 |
 |------|------|
-| `models.py:UserProfile` | `user_id`(PK) + `privacy_mode`(BooleanField)，单例模式 |
+| `models.py:UserProfile` | `user_id`(PK) + `privacy_mode`(BooleanField) + `logseq_path`(CharField)，单例模式 |
 | `views.py:ProfileView` | `GET /api/core/profile/` 获取配置，`PATCH /api/core/profile/` 更新开关 |
 | `urls.py` | `path('profile/', ProfileView.as_view())` |
 

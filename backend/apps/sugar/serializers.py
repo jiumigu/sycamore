@@ -8,6 +8,7 @@ class SugarRecordSerializer(serializers.ModelSerializer):
 
     reward_label = serializers.SerializerMethodField()
     category_display = serializers.SerializerMethodField()
+    time = serializers.DateField(input_formats=['%Y-%m-%d', '%Y-%m-%d %H:%M:%S'], required=False)
 
     class Meta:
         model = SugarRecord
@@ -17,7 +18,7 @@ class SugarRecordSerializer(serializers.ModelSerializer):
             'reward_amount', 'reward_synced', 'reward_label',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['s_id', 'reward_amount', 'reward_synced', 'created_at', 'updated_at']
+        read_only_fields = ['s_id', 'reward_synced', 'created_at', 'updated_at']
 
     def get_reward_label(self, obj) -> str:
         return _reward_label(obj.level_of_happiness)

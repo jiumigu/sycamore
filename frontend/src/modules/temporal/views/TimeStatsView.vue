@@ -111,6 +111,86 @@
       </el-table>
     </el-card>
 
+    <!-- 周度追踪 -->
+    <el-divider />
+
+    <div class="weekly-tracking-section">
+      <div class="section-header">
+        <h3>📊 年度周度时间追踪</h3>
+        <div class="section-controls">
+          <el-button @click="refreshCache" :loading="refreshing" size="small">
+            <el-icon><Refresh /></el-icon> 刷新缓存
+          </el-button>
+          <span>基准小时/周：</span>
+          <el-input-number v-model="benchmark" :min="10" :max="80" :step="5" size="small" @change="fetchWeeklyData" />
+        </div>
+      </div>
+
+      <!-- 统计卡片 -->
+      <el-row :gutter="16" class="weekly-stats">
+        <el-col :span="6">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">{{ weeklyYear }}年累计</div>
+            <div class="stat-value">{{ weeklyTotal }}h</div>
+          </el-card>
+        </el-col>
+        <el-col :span="6">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">周均投入</div>
+            <div class="stat-value">{{ weeklyAvg }}h</div>
+          </el-card>
+        </el-col>
+        <el-col :span="6">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">达标周数</div>
+            <div class="stat-value">{{ qualifiedWeeks }}周</div>
+          </el-card>
+        </el-col>
+        <el-col :span="6">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">达标率</div>
+            <div class="stat-value">{{ qualifyRate }}%</div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 年度表格 -->
+      <el-card shadow="never" class="weekly-table-card">
+        <div class="table-wrapper">
+          <table class="tracking-table">
+            <thead>
+              <tr>
+                <th class="col-week">周次</th>
+                <template v-for="year in weeklyYears" :key="year">
+                  <th class="col-value">{{ year }}值</th>
+                  <th class="col-pct">{{ year }}达成率</th>
+                </template>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="week in 52" :key="week">
+                <td class="col-week">{{ week }}</td>
+                <template v-for="year in weeklyYears" :key="year">
+                  <td class="col-value" :class="getWeekCellClass(year, week, 'value')">
+                    {{ getWeekValue(year, week) }}
+                  </td>
+                  <td class="col-pct" :class="getWeekCellClass(year, week, 'pct')">
+                    {{ getWeekPct(year, week) }}
+                  </td>
+                </template>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="legend">
+          <span class="legend-item"><span class="legend-color" style="background:#c8e6c9"></span> 达标 ≥80%</span>
+          <span class="legend-item"><span class="legend-color" style="background:#fff9c4"></span> 接近 60-80%</span>
+          <span class="legend-item"><span class="legend-color" style="background:#fafafa"></span> 有记录 &lt;60%</span>
+          <span class="legend-item"><span class="legend-color" style="background:#f5f5f5;border:1px solid #eee"></span> 无数据</span>
+        </div>
+      </el-card>
+    </div>
+
     <!-- CSV 导入弹窗 -->
     <el-dialog v-model="importVisible" title="📂 导入数据" width="560px" @close="resetImport">
       <div class="import-body">
@@ -340,14 +420,95 @@ async function refreshData() {
   initCharts()
 }
 
+// ─── 周度追踪 ───
+
+const benchmark = ref(30)
+const refreshing = ref(false)
+const weeklyData = ref<Record<number, Record<number, { hours: number; percentage: number }>>>({})
+const weeklyYear = new Date().getFullYear()
+
+const weeklyYears = computed(() => {
+  return Object.keys(weeklyData.value).map(Number).sort()
+})
+
+const fetchWeeklyData = async () => {
+  const res = await temporalApi.getWeeklyTracking({
+    start_year: weeklyYear - 5,
+    end_year: weeklyYear + 4,
+    benchmark: benchmark.value,
+  })
+  weeklyData.value = res.data.data
+}
+
+const refreshCache = async () => {
+  refreshing.value = true
+  try {
+    await temporalApi.refreshWeeklyCache()
+    await fetchWeeklyData()
+    ElMessage.success('缓存已刷新')
+  } catch {
+    ElMessage.error('刷新失败')
+  } finally {
+    refreshing.value = false
+  }
+}
+
+const getWeekValue = (year: number, week: number): string => {
+  const d = weeklyData.value[year]?.[week]
+  if (!d || d.hours === 0) return ''
+  return d.hours.toFixed(1)
+}
+
+const getWeekPct = (year: number, week: number): string => {
+  const d = weeklyData.value[year]?.[week]
+  if (!d) return ''
+  return d.percentage > 0 ? d.percentage.toFixed(0) + '%' : ''
+}
+
+const getWeekCellClass = (year: number, week: number, type: string) => {
+  const d = weeklyData.value[year]?.[week]
+  if (!d || d.hours === 0) return 'cell-empty'
+  if (type === 'pct') {
+    if (d.percentage >= 80) return 'cell-high'
+    if (d.percentage >= 60) return 'cell-mid'
+    if (d.percentage > 0) return 'cell-low'
+  }
+  return ''
+}
+
+const weeklyTotal = computed(() => {
+  const data = weeklyData.value[weeklyYear] || {}
+  return Object.values(data).reduce((sum: number, d: any) => sum + d.hours, 0).toFixed(1)
+})
+
+const weeklyAvg = computed(() => {
+  const data = weeklyData.value[weeklyYear] || {}
+  const weeks = Object.keys(data).length || 1
+  const total = Object.values(data).reduce((sum: number, d: any) => sum + d.hours, 0)
+  return (total / weeks).toFixed(1)
+})
+
+const qualifiedWeeks = computed(() => {
+  const data = weeklyData.value[weeklyYear] || {}
+  return Object.values(data).filter((d: any) => d.percentage >= 80).length
+})
+
+const qualifyRate = computed(() => {
+  const data = weeklyData.value[weeklyYear] || {}
+  const total = Object.keys(data).length || 1
+  return ((qualifiedWeeks.value / total) * 100).toFixed(1)
+})
+
 // Resize handler
 window.addEventListener('resize', () => {
   balanceChart?.resize()
   trendChart?.resize()
-  distributionChart?.resize()
 })
 
-onMounted(refreshData)
+onMounted(async () => {
+  await refreshData()
+  await fetchWeeklyData()
+})
 </script>
 
 <style scoped lang="scss">
@@ -417,6 +578,45 @@ onMounted(refreshData)
     }
 
     .import-result { margin-top: 12px; }
+  }
+
+  /* 周度追踪 */
+  .weekly-tracking-section {
+    margin-top: 8px;
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+      h3 { margin: 0; font-size: 16px; }
+    }
+    .section-controls {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .weekly-stats { margin-bottom: 16px; }
+    .weekly-table-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .table-wrapper { overflow: auto; max-height: calc(100vh - 300px); }
+
+    .tracking-table {
+      border-collapse: collapse; font-size: 12px; white-space: nowrap; width: 100%;
+      th, td { padding: 3px 6px; border: 1px solid #eee; text-align: center; min-width: 50px; }
+      th { background: #f5f7fa; position: sticky; top: 0; z-index: 1; }
+      .col-week { position: sticky; left: 0; background: #f5f7fa; z-index: 2; font-weight: 600; min-width: 40px; }
+      .col-value { font-weight: 500; }
+      .col-pct { font-size: 11px; color: #666; }
+      .cell-high { background: #c8e6c9 !important; font-weight: 700; }
+      .cell-mid { background: #fff9c4 !important; }
+      .cell-low { background: #fafafa; }
+      .cell-empty { background: #f5f5f5; color: #ddd; }
+    }
+    .legend {
+      display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: #666;
+      .legend-color { display: inline-block; width: 16px; height: 16px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+    }
   }
 }
 </style>

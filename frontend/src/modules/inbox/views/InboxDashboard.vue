@@ -270,23 +270,27 @@ async function confirmComplete() {
       })
     }
 
-    // 3. 新增小确幸
+    // 3. 新增小确幸 + 奖励（金额保持一致）
+    const rewardAmount = completeForm.rewardAmount || 5
+
     if (completeForm.addSugar) {
       await sugarApi.createSugar({
-        content: `完成：${item.content}`,
-        level_of_happiness: completeForm.sugarRating || 3,
-        reward_amount: 0,
+        title: `完成：${item.content}`,
+        content: item.content,
+        level_of_happiness: (completeForm.sugarRating || 3) * 4,  // 前端 1-5 分 → 后端 5-20 分
+        reward_amount: rewardAmount,  // 与银行奖励同金额
         record_type: 'moment',
+        time: new Date().toISOString().slice(0, 10),  // 只传日期部分
       })
     }
 
-    // 3. 新增奖励
+    // 4. 新增奖励
     if (completeForm.addReward) {
       await rewardApi.addRewardTransaction({
-        amount: completeForm.rewardAmount,
+        amount: rewardAmount,
         source_type: 'inbox_complete',
-        transaction_type: 'manual_add',
-        description: completeForm.rewardReason || `完成：${item.content}`,
+        transaction_type: 'inbox_complete',
+        description: `收件箱完成小奖励：${item.content}`,
       })
     }
 

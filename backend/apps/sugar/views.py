@@ -62,8 +62,11 @@ class SugarRecordViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         level = serializer.validated_data['level_of_happiness']
         time = serializer.validated_data['time']
+        frontend_reward = serializer.validated_data.get('reward_amount')
+        # 前端明确传了 reward_amount 则优先使用，否则默认 = 快乐程度
+        reward_amount = frontend_reward if frontend_reward is not None and frontend_reward > 0 else level
         record = serializer.save(
-            reward_amount=level,
+            reward_amount=reward_amount,
             reward_synced=True,
             years=time.year,
             month=time.month,
@@ -73,7 +76,7 @@ class SugarRecordViewSet(viewsets.ModelViewSet):
         RewardPoolService().add_reward(
             source_id=record.s_id,
             source_type='sugar',
-            amount=level,
+            amount=reward_amount,
             transaction_type='sugar_create',
             description=f'新增小确幸：{record.title}，获得{level}元奖励',
         )

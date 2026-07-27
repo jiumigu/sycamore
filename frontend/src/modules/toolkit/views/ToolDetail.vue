@@ -6,8 +6,8 @@
       </el-button>
     </div>
     <div v-loading="loading">
-      <!-- 工具信息 -->
-      <el-card class="section-card" v-if="tool">
+      <!-- 工具信息（职业能量审计自带标题，不重复显示） -->
+      <el-card class="section-card" v-if="tool && toolKey !== 'career-energy-audit'">
         <div class="tool-header">
           <span class="tool-icon-large">{{ tool.icon }}</span>
           <div class="tool-info">

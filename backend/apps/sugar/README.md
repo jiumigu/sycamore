@@ -3,11 +3,11 @@
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
-| SugarRecord | sugar_record | 小确幸记录（s_id PK, 快乐程度5-20, 奖励金额=快乐值, 同步标记, joy_type 五种分类） |
+| SugarRecord | sugar_record | 小确幸记录（s_id PK, 快乐程度5-20, 奖励金额优先取前端传入值否则=快乐值, 同步标记, joy_type 五种分类） |
 
 ## 快乐程度→奖励
 
-快乐程度范围 5-20，奖励金额直接等于快乐值（不再有阈值映射）。
+快乐程度范围 5-20。奖励金额默认等于快乐程度，但前端创建时可传入 `reward_amount` 覆盖（如收件箱完成时取用户填的金额）。
 
 - 新增：自动调用 `RewardPoolService.add_reward()`
 - 编辑：`adjust_reward()` 按新旧金额差调整（`select_for_update()` 防并发）

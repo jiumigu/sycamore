@@ -8,6 +8,7 @@
 
 ## Services
 - `ConverterService`：统一转换入口，支持转为 Goal / Milestone / Sugar(EnergyTemplate) / Complete / Archive
+- 标记完成时可联动创建小确幸记录和快乐银行奖励（前端处理，非 `ConverterService` 职责）
 
 ## API Endpoints
 
@@ -17,7 +18,7 @@
 |------|------|------|
 | GET/POST | /items/ | 列表（分页 PageNumberPagination，?page=&page_size=&status=&category=&priority=&search= 筛选，status 支持 pending/processed/completed/archived，默认 pending）/ 创建 |
 | GET/PUT/DELETE | /items/&lt;id&gt;/ | 详情（含处理日志）/ 更新 / 删除 |
-| POST | /items/&lt;id&gt;/complete/ | 标记完成（可选 completion_note 备注） |
+| POST | /items/&lt;id&gt;/complete/ | 标记完成（可选 completion_note 备注）。前端联动：可同时创建小确幸记录 (`POST /sugar/`) 和奖励流水 (`POST /reward/transactions/` with `source_type=inbox_complete`) |
 | POST | /items/&lt;id&gt;/convert/ | 转为其他模块（action=convert_to_goal/convert_to_milestone/convert_to_sugar，milestone 需传 goal_id/milestone_name/target_date） |
 | POST | /items/batch/ | 批量操作（complete/archive/delete/convert） |
 | POST | /items/convert_to_goal/ | 批量转为目标（创建 Goal + 多条 Milestone） |

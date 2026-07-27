@@ -11,8 +11,7 @@
     <div class="module-navigation">
 
       <!-- ========== 总览 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">总览</div>
+      <div class="nav-group nav-group--overview">
 
         <router-link
           to="/dashboard"
@@ -32,14 +31,6 @@
           <span v-if="!isCollapsed">汇总总览</span>
         </router-link>
 
-        <router-link
-          to="/summary/quarterly"
-          class="nav-item"
-          :class="{ active: isRouteActive('/summary/quarterly') }"
-        >
-          <el-icon><TrendCharts /></el-icon>
-          <span v-if="!isCollapsed">季度决策</span>
-        </router-link>
 
         <router-link
           to="/summary/profile"
@@ -68,8 +59,7 @@
       </div>
 
       <!-- ========== 时间感知 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">时间感知</div>
+      <div class="nav-group nav-group--temporal">
 
         <router-link
           to="/temporal/daily"
@@ -91,15 +81,6 @@
           <span v-if="!isCollapsed">时间统计</span>
         </router-link>
 
-        <router-link
-          to="/temporal/weekly-tracking"
-          class="nav-item"
-          :class="{ active: isRouteActive('/temporal/weekly-tracking') }"
-          :style="getModuleStyle('temporal')"
-        >
-          <el-icon><TrendCharts /></el-icon>
-          <span v-if="!isCollapsed">周度追踪</span>
-        </router-link>
 
         <router-link
           to="/temporal/schedule"
@@ -113,8 +94,7 @@
       </div>
 
       <!-- ========== 目标与项目 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">目标与项目</div>
+      <div class="nav-group nav-group--goals">
 
         <router-link
           to="/goals"
@@ -162,8 +142,7 @@
       </div>
 
       <!-- ========== 身心健康 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">身心健康</div>
+      <div class="nav-group nav-group--health">
 
         <router-link
           to="/health"
@@ -208,8 +187,7 @@
       </div>
 
       <!-- ========== 精神滋养 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">精神滋养</div>
+      <div class="nav-group nav-group--nourishment">
 
         <router-link
           to="/books"
@@ -243,8 +221,7 @@
       </div>
 
       <!-- ========== 财富管理 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">财富管理</div>
+      <div class="nav-group nav-group--wealth">
 
         <router-link
           to="/wealth"
@@ -268,8 +245,7 @@
       </div>
 
       <!-- ========== 连接与足迹 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">连接与足迹</div>
+      <div class="nav-group nav-group--connection">
 
         <router-link
           to="/food"
@@ -313,8 +289,7 @@
       </div>
 
       <!-- ========== 工具箱 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">工具箱</div>
+      <div class="nav-group nav-group--tools">
 
         <router-link
           to="/toolkit"
@@ -369,8 +344,7 @@
       </div>
 
       <!-- ========== 系统运维 ========== -->
-      <div class="nav-section">
-        <div class="section-title" v-if="!isCollapsed">系统运维</div>
+      <div class="nav-group nav-group--admin">
 
         <router-link
           to="/admin/tag-manager"
@@ -483,7 +457,7 @@ watch(isCollapsed, (newVal) => {
 
 <style scoped lang="scss">
 .layout-sidebar {
-  width: 260px;
+  width: 220px;
   background: var(--lm-bg-primary);
   border-right: 1px solid var(--lm-border-color);
   display: flex;
@@ -491,184 +465,201 @@ watch(isCollapsed, (newVal) => {
   transition: all 0.3s ease;
   position: relative;
   height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #ddd;
+    border-radius: 4px;
+  }
 
   &.collapsed {
-    width: 70px;
+    width: 60px;
 
-    .module-navigation {
-      .section-title { display: none; }
+    .nav-group {
+      padding: 4px;
+    }
 
-      .nav-item {
-        justify-content: center;
-        padding: 12px;
+    .nav-item {
+      padding: 10px 0;
+      justify-content: center;
 
-        span { display: none; }
-        .nav-badge { display: none; }
-      }
+      span { display: none; }
+      .nav-badge { display: none; }
     }
 
     .collapse-hint { display: flex; }
+  }
+}
+
+.sidebar-toggle {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--lm-border-color);
+  cursor: pointer;
+  transition: all 0.3s;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--lm-bg-secondary);
+    .el-icon { color: var(--lm-primary-color); }
+  }
+
+  .el-icon {
+    font-size: 18px;
+    color: var(--lm-text-secondary);
+  }
+}
+
+.module-navigation {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--lm-border-color);
+    border-radius: 4px;
+    &:hover {
+      background: var(--lm-text-secondary);
     }
   }
 
-  .sidebar-toggle {
-    height: 40px;
+  // ========== 导航分组 ==========
+  .nav-group {
+    border-radius: 8px;
+    padding: 6px;
+    margin-bottom: 8px;
+
+    &--overview { background: rgba(64, 158, 255, 0.06); }
+    &--temporal { background: rgba(128, 90, 213, 0.06); }
+    &--goals { background: rgba(230, 162, 60, 0.06); }
+    &--health { background: rgba(46, 204, 113, 0.06); }
+    &--nourishment { background: rgba(231, 76, 60, 0.06); }
+    &--wealth { background: rgba(243, 156, 18, 0.06); }
+    &--connection { background: rgba(211, 84, 0, 0.06); }
+    &--tools { background: rgba(0, 0, 0, 0.03); }
+    &--admin { background: rgba(0, 0, 0, 0.02); }
+  }
+
+  .nav-item {
     display: flex;
     align-items: center;
-    justify-content: center;
-    border-bottom: 1px solid var(--lm-border-color);
-    cursor: pointer;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--lm-text-primary);
     transition: all 0.3s;
+    position: relative;
+    margin-bottom: 2px;
+
+    &.sub-item {
+      padding-left: 20px;
+    }
 
     &:hover {
       background: var(--lm-bg-secondary);
+      color: var(--lm-primary-color);
+
       .el-icon { color: var(--lm-primary-color); }
     }
 
+    &.active {
+      background: linear-gradient(
+        to right,
+        var(--module-color-light, rgba(52, 152, 219, 0.1)),
+        transparent
+      );
+      color: var(--module-color, #3498db);
+      font-weight: 500;
+
+      &::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: var(--module-color, #3498db);
+        border-radius: 0 2px 2px 0;
+      }
+
+      .el-icon { color: var(--module-color, #3498db); }
+    }
+
     .el-icon {
-      font-size: 18px;
+      font-size: 16px;
       color: var(--lm-text-secondary);
+      transition: all 0.3s;
+      flex-shrink: 0;
     }
-  }
-
-  .module-navigation {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px 12px;
-
-    &::-webkit-scrollbar {
-      width: 4px;
-    }
-
-    &::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background: var(--lm-border-color);
-      border-radius: 4px;
-
-      &:hover {
-        background: var(--lm-text-secondary);
-      }
-    }
-
-    .nav-section {
-      margin-bottom: 24px;
-
-      .section-title {
-        font-size: 12px;
-        color: var(--lm-text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 8px;
-        padding-left: 12px;
-        font-weight: 600;
-      }
-
-      .nav-item {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 12px;
-        border-radius: 8px;
-        text-decoration: none;
-        color: var(--lm-text-primary);
-        transition: all 0.3s;
-        position: relative;
-        margin-bottom: 4px;
-
-        &.sub-item {
-          padding-left: 24px;
-        }
-
-        &:hover {
-          background: var(--lm-bg-secondary);
-          color: var(--lm-primary-color);
-
-          .el-icon { color: var(--lm-primary-color); }
-        }
-
-        &.active {
-          background: linear-gradient(
-            to right,
-            var(--module-color-light, rgba(52, 152, 219, 0.1)),
-            transparent
-          );
-          color: var(--module-color, #3498db);
-          font-weight: 500;
-
-          &::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 4px;
-            background: var(--module-color, #3498db);
-            border-radius: 0 2px 2px 0;
-          }
-
-          .el-icon { color: var(--module-color, #3498db); }
-        }
-
-        .el-icon {
-          font-size: 18px;
-          color: var(--lm-text-secondary);
-          transition: all 0.3s;
-          flex-shrink: 0;
-        }
-
-        span {
-          flex: 1;
-          font-size: 14px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .nav-badge {
-          position: absolute;
-          right: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-
-          :deep(.el-badge__content) {
-            background-color: var(--module-color, #3498db);
-            border: 2px solid var(--lm-bg-primary);
-          }
-        }
-
-        &.archived-item {
-          opacity: 0.5;
-          &:hover { opacity: 0.8; }
-        }
-
-        .archived-tag {
-          margin-left: auto;
-          font-size: 10px;
-          transform: scale(0.85);
-        }
-      }
-    }
-  }
-
-  .collapse-hint {
-    display: none;
-    position: absolute;
-    bottom: 20px;
-    left: 0;
-    right: 0;
-    justify-content: center;
 
     span {
-      font-size: 12px;
-      color: var(--lm-text-secondary);
-      writing-mode: vertical-rl;
-      text-orientation: mixed;
-      letter-spacing: 2px;
+      flex: 1;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .nav-badge {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+
+      :deep(.el-badge__content) {
+        font-size: 10px;
+        height: 16px;
+        background-color: var(--module-color, #3498db);
+        border: 2px solid var(--lm-bg-primary);
+      }
+    }
+
+    &.archived-item {
       opacity: 0.5;
-      cursor: default;
+      &:hover { opacity: 0.8; }
+    }
+
+    .archived-tag {
+      margin-left: auto;
+      font-size: 10px;
+      transform: scale(0.85);
     }
   }
+}
+
+.collapse-hint {
+  display: none;
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  justify-content: center;
+
+  span {
+    font-size: 12px;
+    color: var(--lm-text-secondary);
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    letter-spacing: 2px;
+    opacity: 0.5;
+    cursor: default;
+  }
+}
 </style>

@@ -28,6 +28,7 @@
           <el-radio-button value="">全部</el-radio-button>
           <el-radio-button value="sugar">🍰 小确幸</el-radio-button>
           <el-radio-button value="milestone">🎯 里程碑</el-radio-button>
+          <el-radio-button value="inbox_complete">📥 收件箱完成</el-radio-button>
         </el-radio-group>
       </div>
     </el-card>

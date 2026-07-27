@@ -1,7 +1,21 @@
 <template>
   <div class="career-audit">
     <h2 class="page-title">⚡ 职业能量审计</h2>
-    <p class="subtitle">不是"该不该走"，是"现在走到哪了"。</p>
+    <p class="subtitle">不是"该不该走"，是"现在走到哪了"。请根据实际情况拖动下方滑块。</p>
+
+    <!-- 实时分数预览 -->
+    <el-card shadow="never" class="score-preview-card">
+      <div class="score-preview">
+        <div class="score-label">当前能量指数</div>
+        <div class="score-value-row">
+          <span :class="scoreClass">{{ totalScore }}</span>
+          <span class="score-divider">/</span>
+          <span class="score-max">130</span>
+        </div>
+      </div>
+      <el-progress :percentage="scorePercent" :color="scoreColor" :stroke-width="8" :show-text="false" />
+      <div class="score-hint" v-if="totalScore < 0">环境或工作维度可能需要关注</div>
+    </el-card>
 
     <el-card class="audit-form" style="max-width: 100%">
       <el-form :model="form" label-position="left" label-width="120px">
@@ -13,7 +27,7 @@
                 <div class="slider-label">{{ item.label }}</div>
                 <div class="slider-row">
                   <span class="slider-left">{{ item.left }}</span>
-                  <el-slider v-model="form[item.field]" :min="-5" :max="5" :step="1" show-stops :marks="{0:'0'}" size="small" />
+                  <el-slider v-model="form[item.field]" :min="-5" :max="5" :step="1" show-stops :marks="{0:'0'}" size="small" :class="getSliderClass(form[item.field])" />
                   <span class="slider-right">{{ item.right }}</span>
                 </div>
               </div>
@@ -27,7 +41,7 @@
                 <div class="slider-label">{{ item.label }}</div>
                 <div class="slider-row">
                   <span class="slider-left">{{ item.left }}</span>
-                  <el-slider v-model="form[item.field]" :min="-5" :max="5" :step="1" show-stops :marks="{0:'0'}" size="small" />
+                  <el-slider v-model="form[item.field]" :min="-5" :max="5" :step="1" show-stops :marks="{0:'0'}" size="small" :class="getSliderClass(form[item.field])" />
                   <span class="slider-right">{{ item.right }}</span>
                 </div>
               </div>
@@ -41,7 +55,7 @@
                 <div class="slider-label">{{ item.label }}</div>
                 <div class="slider-row">
                   <span class="slider-left">{{ item.left }}</span>
-                  <el-slider v-model="form[item.field]" :min="-5" :max="5" :step="1" show-stops :marks="{0:'0'}" size="small" />
+                  <el-slider v-model="form[item.field]" :min="-5" :max="5" :step="1" show-stops :marks="{0:'0'}" size="small" :class="getSliderClass(form[item.field])" />
                   <span class="slider-right">{{ item.right }}</span>
                 </div>
               </div>
@@ -100,8 +114,8 @@
           </el-col>
         </el-row>
         <el-form-item>
-          <el-button type="primary" size="large" :loading="saving" @click="handleAudit">
-            {{ saving ? '提交中...' : '提交审计' }}
+          <el-button type="primary" size="large" :loading="saving" @click="handleAudit" style="width:100%">
+            {{ saving ? '提交中...' : '📊 生成职业能量报告' }}
           </el-button>
         </el-form-item>
       </el-form>
@@ -274,6 +288,54 @@ const router = useRouter()
 
 const showEnvCalibrationHint = computed(() => consecutiveLowEnvMonths.value >= 3)
 
+// ── 实时分数预览 ──
+
+const sliderFields = [
+  'task_clarity', 'skill_match', 'autonomy', 'achievement', 'learning', 'workload', 'visibility',
+  'communication', 'transparency', 'respect', 'feedback_quality', 'process_smooth', 'commute', 'physical_env', 'colleague_relation',
+  'skill_growth', 'vision_expand', 'resume_value', 'income_satisfy', 'direction',
+]
+
+const totalScore = computed(() => {
+  let sum = 0
+  sliderFields.forEach(f => sum += (form[f] || 0))
+  // body 项（值越高越差，取反）
+  sum += -(form.sunday_anxiety - 3 || 0)
+  sum += -(form.after_work_state - 3 || 0)
+  sum += -(form.sleep_quality - 3 || 0)
+  sum += -(form.emotion_stability - 3 || 0)
+  sum += -(form.morning_feeling - 3 || 0)
+  return sum
+})
+
+const scorePercent = computed(() => {
+  // 理论范围约 -100~100 → 映射到 0~100
+  return Math.min(100, Math.max(0, Math.round((totalScore.value + 100) / 200 * 100)))
+})
+
+const scoreColor = computed(() => {
+  if (totalScore.value < -20) return '#f56c6c'
+  if (totalScore.value < 0) return '#e6a23c'
+  if (totalScore.value < 30) return '#409eff'
+  return '#67c23a'
+})
+
+const scoreClass = computed(() => {
+  if (totalScore.value < -20) return 'text-danger'
+  if (totalScore.value < 0) return 'text-warning'
+  if (totalScore.value < 30) return 'text-info'
+  return 'text-success'
+})
+
+// ── 滑块颜色 ──
+
+function getSliderClass(value: number) {
+  if (value < -2) return 'slider-danger'
+  if (value < 0) return 'slider-warning'
+  if (value <= 2) return 'slider-normal'
+  return 'slider-success'
+}
+
 async function handleAudit() {
   if (!form.audit_date) {
     ElMessage.warning('请选择审计日期')
@@ -374,7 +436,7 @@ onMounted(fetchHistory)
 <style scoped>
 .career-audit {
   width: 100%;
-  padding: 20px;
+  padding: 24px;
 }
 .page-title {
   font-size: 22px; font-weight: 700; margin: 0 0 4px;
@@ -385,6 +447,49 @@ onMounted(fetchHistory)
 .audit-form {
   margin-bottom: 18px;
 }
+
+/* 分数预览卡片 */
+.score-preview-card {
+  margin-bottom: 16px; border: none; border-radius: 10px;
+}
+.score-preview-card :deep(.el-card__body) {
+  padding: 16px 20px;
+}
+.score-preview {
+  display: flex; align-items: baseline; gap: 8px;
+}
+.score-label {
+  font-size: 13px; color: #6B7280;
+}
+.score-value-row {
+  display: flex; align-items: baseline; gap: 2px;
+}
+.score-value-row :deep(span) {
+  font-size: 28px; font-weight: 700; line-height: 1.2;
+}
+.score-divider {
+  font-size: 16px; color: #D1D5DB; font-weight: 400 !important;
+}
+.score-max {
+  font-size: 16px; color: #9CA3AF; font-weight: 400 !important;
+}
+.text-danger { color: #f56c6c; }
+.text-warning { color: #e6a23c; }
+.text-info { color: #409eff; }
+.text-success { color: #67c23a; }
+.score-hint {
+  font-size: 12px; color: #f56c6c; margin-top: 6px;
+}
+
+/* 滑块颜色 */
+:deep(.slider-danger .el-slider__bar) { background: #f56c6c; }
+:deep(.slider-danger .el-slider__button) { border-color: #f56c6c; }
+:deep(.slider-warning .el-slider__bar) { background: #e6a23c; }
+:deep(.slider-warning .el-slider__button) { border-color: #e6a23c; }
+:deep(.slider-normal .el-slider__bar) { background: #409eff; }
+:deep(.slider-normal .el-slider__button) { border-color: #409eff; }
+:deep(.slider-success .el-slider__bar) { background: #67c23a; }
+:deep(.slider-success .el-slider__button) { border-color: #67c23a; }
 .audit-form :deep(.el-form-item__label) {
   width: 120px;
 }

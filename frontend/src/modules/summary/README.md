@@ -3,6 +3,7 @@
 | 文件/组件 | 职责 |
 |-----------|------|
 | `SummaryDashboard.vue` | 综合看板主页 |
+| `QuarterlyDecisionCards.vue` | 季度决策卡片（未达标/环比下降/最需关注，嵌入看板顶部） |
 | `ProgressRing.vue` | SVG 环形进度条（红/橙/绿三色） |
 | `TrendChart.vue` | ECharts 堆叠柱状图+月目标红线 |
 | `RadarChart.vue` | ECharts 雷达图（7维度） |

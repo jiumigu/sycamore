@@ -10,7 +10,6 @@ const routes: RouteRecordRaw[] = [
   { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { title: '仪表盘' } },
   { path: '/summary', name: 'summary', component: () => import('@/modules/summary/views/SummaryDashboard.vue'), meta: { title: '汇总总览' } },
   { path: '/summary/profile', name: 'summary-profile', component: () => import('@/modules/summary/views/PersonalProfile.vue'), meta: { title: '个人画像' } },
-  { path: '/summary/quarterly', name: 'summary-quarterly', component: () => import('@/modules/summary/views/QuarterlyWorkbench.vue'), meta: { title: '季度决策' } },
 
   // 收件箱
   { path: '/inbox', name: 'inbox', component: () => import('@/modules/inbox/views/InboxDashboard.vue'), meta: { title: '收件箱' } },
@@ -27,12 +26,6 @@ const routes: RouteRecordRaw[] = [
     name: 'temporal-stats',
     component: () => import('@/modules/temporal/views/TimeStatsView.vue'),
     meta: { title: '时间统计' },
-  },
-  {
-    path: '/temporal/weekly-tracking',
-    name: 'WeeklyTracking',
-    component: () => import('@/modules/temporal/views/WeeklyTrackingView.vue'),
-    meta: { title: '年度周度追踪' },
   },
   {
     path: '/temporal/schedule',

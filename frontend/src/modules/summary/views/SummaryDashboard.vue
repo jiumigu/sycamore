@@ -1,5 +1,8 @@
 <template>
   <div class="summary-dashboard" v-loading="store.loading">
+    <!-- 季度决策卡片 -->
+    <QuarterlyDecisionCards />
+
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="header-left">
@@ -128,8 +131,8 @@
       </div>
     </el-card>
 
-    <!-- 身体-状态关联 -->
-    <BodyMindChart />
+    <!-- 身体-状态关联（暂隐藏，等待数据接口就绪后启用） -->
+    <!-- <BodyMindChart /> -->
 
     <!-- 月度详情表格 -->
     <el-card shadow="hover" class="chart-card full-card">
@@ -209,6 +212,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useSummaryStore } from '../stores/summaryStore'
 import { YEARLY_TARGET } from '../types/summaryTypes'
+import QuarterlyDecisionCards from '../components/QuarterlyDecisionCards.vue'
 import ProgressRing from '../components/ProgressRing.vue'
 import ModuleBar from '../components/ModuleBar.vue'
 import RadarChart from '../components/RadarChart.vue'

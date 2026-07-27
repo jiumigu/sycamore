@@ -247,25 +247,36 @@
         </div>
       </template>
       <div class="quote-body" v-if="dailyQuote">
-        <div v-if="dailyQuote.is_paragraph" class="quote-title">
-          {{ dailyQuote.short_title || dailyQuote.content.slice(0, 50) + '...' }}
+        <!-- 短句类型：直接显示内容 -->
+        <div v-if="!dailyQuote.is_paragraph" class="quote-content">
+          {{ dailyQuote.content }}
         </div>
-        <div v-else class="quote-content">{{ dailyQuote.content }}</div>
-        <div class="quote-author" v-if="dailyQuote.author">— {{ dailyQuote.author }}</div>
-        <el-tag size="small">{{ dailyQuote.language }}</el-tag>
+        <!-- 段落类型：完整内容，限制 4 行 -->
+        <div v-else class="quote-paragraph" @click="showQuoteFull = true">
+          <div class="paragraph-content">
+            {{ dailyQuote.content }}
+          </div>
+          <div v-if="isContentLong" class="expand-hint">... 点击展开全文</div>
+        </div>
+        <div class="quote-meta">
+          <span v-if="dailyQuote.author" class="quote-author">— {{ dailyQuote.author }}</span>
+          <el-tag size="small">{{ dailyQuote.language }}</el-tag>
+        </div>
       </div>
       <el-empty v-else description="暂无金句" :image-size="60" />
     </el-card>
-    <el-dialog v-model="showQuoteFull" title="金句详情" width="500px">
-      <div class="full-quote-content">{{ dailyQuote?.content }}</div>
-      <div v-if="dailyQuote?.author" class="full-quote-author">— {{ dailyQuote.author }}</div>
-      <div v-if="dailyQuote?.source" class="full-quote-source">📎 {{ dailyQuote.source }}</div>
+    <el-dialog v-model="showQuoteFull" :title="dailyQuote?.short_title || '摘录详情'" width="600px" append-to-body>
+      <div class="full-content" style="white-space: pre-wrap; line-height: 1.8;">
+        {{ dailyQuote?.content }}
+      </div>
+      <div v-if="dailyQuote?.author" style="margin-top:12px;color:#999;">— {{ dailyQuote.author }}</div>
+      <div v-if="dailyQuote?.source" style="color:#999;">📎 {{ dailyQuote.source }}</div>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { getGoalList } from '@/modules/goals/api/goalApi'
@@ -329,6 +340,7 @@ const progress = ref<ProgressData | null>(null)
 const retroItem = ref<RetroItem | null>(null)
 const dailyQuote = ref<Quote | null>(null)
 const showQuoteFull = ref(false)
+const isContentLong = computed(() => (dailyQuote.value?.content?.length || 0) > 200)
 
 // ─── 快速读者互动 ───
 const quickContent = ref('')
@@ -801,42 +813,50 @@ onMounted(() => {
   text-align: right;
 }
 
-.quote-body {
-  padding: 4px 0;
-}
-.quote-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--el-color-primary);
+.quote-paragraph {
   cursor: pointer;
-  line-height: 1.5;
+
+  .paragraph-content {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.6;
+    max-height: 6.4em;
+    font-size: 14px;
+    color: #555;
+    white-space: pre-wrap;
+  }
+
+  .expand-hint {
+    font-size: 12px;
+    color: #409eff;
+    margin-top: 4px;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
 }
+
 .quote-content {
-  font-size: 14px;
-  color: #1F2937;
+  font-size: 15px;
   line-height: 1.6;
+  color: #333;
   white-space: pre-wrap;
 }
-.quote-author {
-  margin-top: 6px;
-  font-size: 13px;
-  color: #6B7280;
-  font-style: italic;
-}
-.full-quote-content {
-  font-size: 16px;
-  line-height: 1.8;
-  white-space: pre-wrap;
-  margin-bottom: 12px;
-}
-.full-quote-author {
-  font-size: 14px;
-  color: #6B7280;
-  font-style: italic;
-  margin-bottom: 4px;
-}
-.full-quote-source {
-  font-size: 13px;
-  color: #9CA3AF;
+
+.quote-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+
+  .quote-author {
+    font-size: 13px;
+    color: #999;
+  }
 }
 </style>

@@ -40,3 +40,14 @@
 | GET | /oneday/yearly_heatmap/ | 年度热力图 |
 | GET | /oneday/week_count/ | 本周日记篇数 |
 | DELETE | /oneday/bulk_delete/ | 批量删除 |
+
+### Logseq
+| 方法 | 端点 | 用途 |
+|------|------|------|
+| GET | /open-logseq/?path= | 读取 Logseq md 文件，返回 `{filename, content}` |
+
+### OneDayPageSerializer 扩展字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `logseq_file` | string\|null | 按 `begin_date` 拼接 Logseq 文件名，检测文件是否存在后返回绝对路径（需配置 `UserProfile.logseq_path`） |
