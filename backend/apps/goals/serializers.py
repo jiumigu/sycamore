@@ -9,6 +9,7 @@ from .models import Action, Goal, GoalReview, Milestone, OutputRecord
 class MilestoneSerializer(serializers.ModelSerializer):
     """里程碑序列化器"""
 
+    id = serializers.IntegerField(required=False)
     status_display = serializers.SerializerMethodField()
     reward_amount_display = serializers.SerializerMethodField()
     goal_title = serializers.CharField(source='goal.title', read_only=True)
@@ -19,12 +20,12 @@ class MilestoneSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'goal', 'goal_title', 'goal_deadline', 'title', 'status', 'status_display',
             'completed_note', 'description', 'order_num', 'target_date',
-            'target_value', 'actual_value', 'self_review',
+            'target_value', 'actual_value', 'self_review', 'difficulty_met', 'next_action',
             'reward_amount', 'reward_synced', 'reward_issued_at', 'reward_transaction_id',
             'reward_amount_display',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'goal', 'reward_synced', 'reward_issued_at',
+        read_only_fields = ['goal', 'reward_synced', 'reward_issued_at',
                             'reward_transaction_id', 'created_at', 'updated_at']
 
     def get_status_display(self, obj):
@@ -133,9 +134,10 @@ class GoalListSerializer(serializers.ModelSerializer):
             'tags', 'priority', 'priority_display', 'status', 'status_display',
             'progress_percentage', 'start_date', 'deadline', 'year',
             'notes', 'reward_value', 'user_id',
-            'enable_reward', 'default_reward_amount', 'total_reward_issued',
+            'enable_reward', 'default_reward_amount', 'goal_completion_bonus', 'total_reward_issued',
             'action_count', 'milestone_count', 'is_tracking_mode',
             'parent_goal', 'parent_goal_name', 'sub_goals_count',
+            'life_dimension',
             'created_at', 'updated_at',
         ]
 
@@ -186,11 +188,12 @@ class GoalDetailSerializer(serializers.ModelSerializer):
             'tags', 'priority', 'priority_display', 'status', 'status_display',
             'progress_percentage', 'start_date', 'deadline', 'year',
             'notes', 'reward_value', 'user_id',
-            'enable_reward', 'default_reward_amount', 'total_reward_issued',
+            'enable_reward', 'default_reward_amount', 'goal_completion_bonus', 'total_reward_issued',
             'decision_quality', 'mental_models_used', 'inversion_check',
             'first_principles', 'circle_check', 'happiness_impact', 'peace_impact',
             'parent_goal', 'parent_goal_name', 'sub_goals',
             'milestones', 'actions', 'reviews',
+            'life_dimension',
             'created_at', 'updated_at',
         ]
 
@@ -208,6 +211,7 @@ class GoalCreateUpdateSerializer(serializers.ModelSerializer):
     """创建/更新用序列化器"""
 
     milestones = MilestoneSerializer(many=True, required=False)
+    life_dimension = serializers.CharField(required=True)
 
     class Meta:
         model = Goal
@@ -215,8 +219,8 @@ class GoalCreateUpdateSerializer(serializers.ModelSerializer):
             'title', 'description', 'category', 'tags', 'priority',
             'status',
             'start_date', 'deadline', 'notes', 'reward_value',
-            'enable_reward', 'default_reward_amount',
-            'parent_goal',
+            'enable_reward', 'default_reward_amount', 'goal_completion_bonus',
+            'parent_goal', 'life_dimension',
             'milestones',
         ]
 
@@ -250,6 +254,13 @@ class GoalCreateUpdateSerializer(serializers.ModelSerializer):
                 current = current.parent_goal
         return value
 
+    def validate_priority(self, value):
+        if isinstance(value, str) and value.startswith('p') and len(value) == 2:
+            return value
+        if isinstance(value, int) and 0 <= value <= 3:
+            return f'p{value}'
+        return value
+
     def create(self, validated_data):
         milestones_data = validated_data.pop('milestones', [])
         start_date = validated_data.get('start_date')
@@ -270,21 +281,36 @@ class GoalCreateUpdateSerializer(serializers.ModelSerializer):
         instance.save()
 
         if milestones_data is not None:
+            from .services import GoalProgressService
+
             existing_ids = set(instance.milestones.values_list('id', flat=True))
             sent_ids = set()
-            max_order = 0
             for m_data in milestones_data:
                 m_id = m_data.pop('id', None)
                 if m_id and m_id in existing_ids:
-                    Milestone.objects.filter(id=m_id, goal=instance).update(**m_data)
+                    existing = Milestone.objects.get(id=m_id, goal=instance)
+                    # 保护已完成里程碑的状态不被覆盖
+                    if existing.status == 'completed':
+                        m_data.pop('status', None)
+                    for key, value in m_data.items():
+                        setattr(existing, key, value)
+                    existing.save()
                     sent_ids.add(m_id)
                 else:
-                    m = Milestone.objects.create(goal=instance, order_num=max_order, **m_data)
-                    sent_ids.add(m.id)
-                max_order += 1
+                    Milestone.objects.create(goal=instance, **m_data)
+                    sent_ids.add(m_id)
+            # 不删除有奖励记录或已完成的关键里程碑
             to_delete = existing_ids - sent_ids
             if to_delete:
+                keep_ids = set(Milestone.objects.filter(
+                    id__in=to_delete, reward_synced=True,
+                ).values_list('id', flat=True))
+                to_delete -= keep_ids
+            if to_delete:
                 Milestone.objects.filter(id__in=to_delete, goal=instance).delete()
+
+        # 里程碑变更后重新计算进度
+        GoalProgressService.recalculate(instance)
 
         return instance
 
@@ -340,6 +366,8 @@ class MilestoneToggleSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=Milestone.STATUS_CHOICES, required=False)
     completed_note = serializers.CharField(required=False, allow_blank=True)
     self_review = serializers.CharField(required=False, allow_blank=True)
+    difficulty_met = serializers.CharField(required=False, allow_blank=True)
+    next_action = serializers.CharField(required=False, allow_blank=True)
     actual_value = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
 
 

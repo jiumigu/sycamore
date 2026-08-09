@@ -40,6 +40,17 @@ class Goal(models.Model):
     deadline = models.DateField(blank=True, null=True, verbose_name='截止日期')
     year = models.IntegerField(blank=True, null=True, verbose_name='年份')
     notes = models.TextField(blank=True, null=True, verbose_name='备注信息')
+    life_dimension = models.CharField(max_length=20, verbose_name='人生维度', choices=[
+        ('身体健康', '🏃 身体健康'),
+        ('财富积累', '💰 财富积累'),
+        ('学习成长', '📚 学习成长'),
+        ('事业发展', '💼 事业发展'),
+        ('休闲放松', '🌿 休闲放松'),
+        ('系统建设', '🧰 系统建设'),
+        ('创作输出', '🎨 创作输出'),
+        ('生活空间', '🏠 生活空间'),
+        ('其他事项', '✨ 其他事项'),
+    ])
 
     # 决策记录
     decision_quality = models.IntegerField(blank=True, null=True, verbose_name='决策质量评分(1-10)')
@@ -54,7 +65,8 @@ class Goal(models.Model):
 
     # 里程碑奖励功能
     enable_reward = models.BooleanField(default=False, verbose_name='是否启用里程碑奖励')
-    default_reward_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='默认奖励金额')
+    default_reward_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='每项里程碑奖励')
+    goal_completion_bonus = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='目标完成奖励金')
     total_reward_issued = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name='本目标已发放奖励总额')
 
     parent_goal = models.ForeignKey(
@@ -98,6 +110,8 @@ class Milestone(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='状态')
     completed_note = models.TextField(blank=True, null=True, verbose_name='完成备注说明')
     self_review = models.TextField(blank=True, default='', verbose_name='自我批阅')
+    difficulty_met = models.TextField(blank=True, default='', verbose_name='遇到的困难')
+    next_action = models.TextField(blank=True, default='', verbose_name='下一步行动')
     description = models.TextField(blank=True, default='', verbose_name='详细描述')
     order_num = models.IntegerField(default=0, verbose_name='排序序号')
     target_date = models.DateField(blank=True, null=True, verbose_name='目标日期')

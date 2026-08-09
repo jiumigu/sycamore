@@ -27,6 +27,8 @@
       <HealthSelfCheck v-else-if="toolKey === 'health-self-check'" />
       <FreeSpending v-else-if="toolKey === 'free-spending'" />
       <ReviewToolbox v-else-if="toolKey === 'review-toolbox'" />
+      <GifCompressor v-else-if="toolKey === 'gif-compressor'" />
+      <FixedExpense v-else-if="toolKey === 'fixed-expense'" />
 
       <!-- 执行区 -->
       <template v-else>
@@ -207,6 +209,8 @@ import CareerEnergyAudit from './tools/CareerEnergyAudit.vue'
 import HealthSelfCheck from './tools/HealthSelfCheck.vue'
 import FreeSpending from './tools/FreeSpending.vue'
 import ReviewToolbox from './tools/ReviewToolbox.vue'
+import GifCompressor from './tools/GifCompressor.vue'
+import FixedExpense from './tools/FixedExpense.vue'
 
 const route = useRoute()
 const store = useToolkitStore()
@@ -305,7 +309,7 @@ async function handleFileConvert() {
   errorMsg.value = ''
   store.resetExecution()
   try {
-    await store.runFileTool(toolKey.value, selectedFile.value, convertMode.value)
+    await store.runFileTool(toolKey.value, selectedFile.value, { mode: convertMode.value })
     if (!store.executionResult?.success && store.executionStatus === 'failed') {
       errorMsg.value = '转换失败'
     }

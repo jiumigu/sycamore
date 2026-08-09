@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
+from .services import _extra_income_monthly
 
 
 class CityCoordinateSerializer(serializers.ModelSerializer):
@@ -103,11 +104,35 @@ class FreeSpendingCalculatorSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+class FixedExpenseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FixedExpense
+        fields = '__all__'
+        read_only_fields = ['id', 'total_monthly', 'total_daily', 'total_yearly', 'created_at']
+
+
 class HourlyWageRecordSerializer(serializers.ModelSerializer):
+    salary_monthly = serializers.SerializerMethodField()
+    extra_monthly = serializers.SerializerMethodField()
+    total_monthly = serializers.SerializerMethodField()
+    total_daily = serializers.SerializerMethodField()
+
     class Meta:
         model = HourlyWageRecord
         fields = '__all__'
         read_only_fields = ['id', 'work_days_per_month', 'work_hours_per_day', 'total_hours_per_month', 'hourly_wage', 'created_at']
+
+    def get_salary_monthly(self, obj):
+        return float(obj.monthly_salary)
+
+    def get_extra_monthly(self, obj):
+        return float(_extra_income_monthly(obj.extra_incomes))
+
+    def get_total_monthly(self, obj):
+        return round(float(obj.monthly_salary) + float(_extra_income_monthly(obj.extra_incomes)), 2)
+
+    def get_total_daily(self, obj):
+        return round((float(obj.monthly_salary) + float(_extra_income_monthly(obj.extra_incomes))) / 30, 2)
 
 
 class ReviewRecordSerializer(serializers.ModelSerializer):

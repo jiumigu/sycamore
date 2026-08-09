@@ -36,6 +36,7 @@ const routes: RouteRecordRaw[] = [
 
   // 目标与项目
   { path: '/goals', name: 'goals', component: () => import('@/modules/goals/views/GoalHub.vue'), meta: { title: '人生目标' } },
+  { path: '/goals/dimension-chart', name: 'DimensionChart', component: () => import('@/modules/goals/views/DimensionChart.vue'), meta: { title: '人生维度分布' } },
   { path: '/output', name: 'output', component: () => import('@/modules/output/views/OutputDashboard.vue'), meta: { title: '个人良品率' } },
   {
     path: '/reward',

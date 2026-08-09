@@ -1,5 +1,71 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-08-05] v3.31.0 — 打卡里程碑同步 + 收件箱已废弃 + 固定开销周期增强 + 时薪附加收入
+
+### ✨ 新增
+
+- **打卡自动推进里程碑**：目标打卡（今日已打卡）时，优先完成打卡日期对应的里程碑；倒计时等无日期里程碑则推进下一个未完成里程碑，自动发放奖励并同步进度。补打卡（指定日期）同样触发，重复打卡不重复推进
+- **收件箱「已废弃」状态**：新增 `abandoned` 状态 + `abandon_reason` 废弃原因字段，记录头脑一热制定、因不合理或时过境迁不再需要处理的事项。统计卡片扩展为 6 张（新增 🗑️ 已废弃，可点击筛选），列表灰色删除线样式，日历视图不再展示已废弃事项
+- **固定开销计算器**：工具箱全栈工具，自定义开销项目（图标/名称/金额），每条项目支持按日/月/年周期记录，后端统一换算为每天/每月/每年三档总额（日 ×30 = 月、日 ×365 = 年，旧数据默认按每月口径兼容回填）。结果区三列大数字 + 各项目「原始 → 每日 → 每月 → 每年」换算明细与占比条 + 智能提示；历史记录支持编辑/复制/查看/删除
+- **时薪计算器附加收入**：支持配置额外收入来源（名称/金额/日·月·年周期），时薪改为「月总收入（工资+附加收入）÷ 总投入小时」计算；新增收入构成展示（各来源折算月额）与固定开销联动（日收入/日支出/日结余 + 开销占比健康度提示）；历史记录支持编辑/复制/查看
+- **目标人生维度分布**：新增 `/goals/dimension-chart` 页面，ECharts 雷达图展示 9 大人生维度目标数与平均进度，含各维度目标明细
+- **里程碑反思字段**：Milestone 新增 `difficulty_met`（遇到的困难）、`next_action`（下一步行动）；完成里程碑弹窗强制填写「此刻感悟」（含快捷短语），可补充困难与下一步行动
+- **目标完成奖励金**：Goal 新增 `goal_completion_bonus` 目标完成奖励金，`default_reward_amount` 语义明确为「每项里程碑奖励」，前端表单奖励拆分为里程碑奖励/完成奖励金两项
+- **管理命令 sync_field_comments**：core 新增管理命令，遍历各模型将 `verbose_name` 同步为 MySQL 字段注释（仅改 COMMENT，保留列定义/Null/默认值）
+
+### 🐛 修复
+
+- **工具集未显示固定开销计算器**：`ToolRegistry.auto_discover()` 仅在启动时扫描 `tools/*.py`，运行中新增的工具不会进入内存注册表。触发服务重载后工具正常出现，并归入「💰 财务」分类
+- **奖励来源统计 missing goal_complete/inbox_complete**：`RewardSourceStatsSerializer` 补齐缺失的 `goal_complete`/`inbox_complete` 字段声明，来源统计前端不再始终显示 ¥0
+- **目标进度 100% 未自动完成**：`recalculate()` 新增 `_auto_transition_status()`，进度达 100% 自动切换目标为已完成
+- **编辑目标覆盖已完成里程碑状态**：`GoalCreateUpdateSerializer.update()` 保护已完成里程碑，编辑时不再重置为 `pending`
+
+### 📝 文档
+
+- 更新 `toolkit/README.md`：FixedExpense 周期换算、HourlyWageRecord 附加收入字段、内置工具表
+- 更新 `inbox/README.md`：已废弃状态与统计
+- 更新 `goals/README.md`：人生维度/完成奖励金/里程碑反思字段/维度统计端点
+- 更新 `reward/README.md`：`goal_complete` 交易类型
+- 更新 `core/README.md`：`sync_field_comments` 管理命令
+
+---
+
+## [2026-08-02] v3.30.0 — 工具箱新增 GIF 压缩工具
+
+### ✨ 新增
+
+- **GIF 压缩工具**：工具箱新增 🎞️ GIF 压缩工具，支持四种压缩手段 — 抽帧（每隔 N 帧保留 1 帧）、缩放比例/指定宽高（0 表示不限制）、颜色数（256/128/64/32 自适应调色板）、压缩质量（10-100）。前端独立组件 `GifCompressor.vue`：拖拽上传 GIF → 配置参数 → 压缩 → 实时预览压缩结果（原始/压缩后大小、压缩率、帧数对比）+ 一键下载。后端 `GifCompressorTool`（`apps/toolkit/tools/gif_compressor.py`），输出文件经 `MEDIA_URL` 可访问
+- **文件上传接口泛化**：`FileToolUploadView`（`/toolkit/convert_file/`）从仅支持 `.txt` 扩展为按 `tool_key` 白名单校验扩展名（trad2simp→.txt，gif-compressor→.gif），并自动将 multipart 表单字段透传为工具参数（数值字符串自动转 int/float），`toolkitStore.runFileTool` 同步支持任意参数对象
+
+### 📝 文档
+
+- 更新 `toolkit/README.md`：内置工具表新增 `gif-compressor` 条目
+
+---
+
+## [2026-07-30] v3.29.0 — 里程碑编辑增强 + 奖励统计修复 + 表单优化
+
+### 🐛 修复
+
+- **奖励来源统计 missing goal_complete/inbox_complete**：`RewardSourceStatsSerializer` 声明了 4 个字段但缺少 `goal_complete` 和 `inbox_complete`，导致序列化时静默丢弃，前端始终显示 ¥0。修复：补齐两个字段声明
+- **目标编辑里程碑状态被覆盖**：`GoalCreateUpdateSerializer.update()` 在更新里程碑时未保护已完成的 `status`，编辑目标时误将已完成里程碑重置为 `pending`。修复：`pop('status', None)` 跳过已完成条目的状态更新
+- **目标进度未在里程碑变更后重新计算**：`GoalCreateUpdateSerializer.update()` 更新里程碑后未调用 `GoalProgressService.recalculate()`，导致 19/19 里程碑进度仍显示 84%。修复：在里程碑变更后强制重新计算进度
+- **目标进度 100% 未自动跳转完成状态**：`recalculate()` 仅更新 `progress_percentage` 字段，`status` 保持 `in-progress`。修复：新增 `_auto_transition_status()` 在进度达 100% 时自动切换为 `completed`
+- **目标完成奖励未触发**：`_check_goal_completion_bonus()` 仅在 `complete_milestone()` 路径检查，通过 serializer 还原里程碑进度达到 100% 时不触发。修复：在 `recalculate()` 中增加奖励检查
+
+### ✨ 新增
+
+- **里程碑编辑详情弹窗**：目标编辑弹窗里程碑列表改为紧凑 2 行布局（textarea + 操作按钮），点击 ✏️ 弹出详情弹窗，支持编辑里程碑描述（description）和奖励金额（reward_amount）
+- **人生维度必填**：`life_dimension` 模型字段取消 `blank=True`，前端表单 added 必填校验 + 红色星标，迁移 0014
+- **奖励池来源筛选新增目标完成**：流水筛选 radio-group 新增 `goal_complete` 选项
+- **奖励来源分布展示目标完成和收件箱完成**：`RewardTimeline` 来源比例行新增 `goal_complete` 和 `inbox_complete` 两项统计及百分比
+
+### 🔧 优化
+
+- **表单必填字段红星**：全局 CSS `:deep(.el-form-item.is-required .el-form-item__label::before)` 统一显示红色星标，替代默认黑色
+
+---
+
 ## [2026-07-27] v3.28.0 — 侧边栏导航升级 + 职业能量审计优化 + 页面整合
 
 ### ✨ 新增

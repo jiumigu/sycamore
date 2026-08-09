@@ -26,6 +26,8 @@ class RewardSourceStatsSerializer(serializers.Serializer):
     """奖励来源统计"""
     sugar = serializers.FloatField()
     milestone = serializers.FloatField()
+    goal_complete = serializers.FloatField()
+    inbox_complete = serializers.FloatField()
     total = serializers.FloatField()
     milestone_detail = serializers.ListField()
 

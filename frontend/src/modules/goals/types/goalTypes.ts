@@ -16,6 +16,8 @@ export interface Milestone {
   status_display?: string
   completed_note: string | null
   self_review?: string
+  difficulty_met?: string
+  next_action?: string
   description?: string
   order_num: number
   target_date: string | null
@@ -80,8 +82,11 @@ export interface CheckinMilestone {
   description: string
   completed_note: string
   self_review: string
+  difficulty_met?: string
+  next_action?: string
   target_date: string | null
   order_num: number
+  updated_at: string
 }
 
 export interface CheckinStats {
@@ -101,6 +106,7 @@ export interface Goal {
   category: GoalCategory
   category_display?: string
   tags: string[] | null
+  life_dimension?: string
   action_count?: number
   milestone_count?: number
   is_tracking_mode?: boolean
@@ -116,6 +122,7 @@ export interface Goal {
   reward_value: number
   enable_reward: boolean
   default_reward_amount: number
+  goal_completion_bonus: number
   total_reward_issued: number
   user_id: number | null
   decision_quality?: number | null
@@ -182,6 +189,18 @@ export const STATUS_OPTIONS = [
   { value: 'completed', label: '已完成', type: 'success' as const },
   { value: 'abandoned', label: '已放弃', type: 'info' as const },
   { value: 'archived', label: '已归档', type: 'default' as const },
+]
+
+export const DIMENSION_OPTIONS = [
+  { value: '身体健康', label: '🏃 身体健康' },
+  { value: '财富积累', label: '💰 财富积累' },
+  { value: '学习成长', label: '📚 学习成长' },
+  { value: '事业发展', label: '💼 事业发展' },
+  { value: '休闲放松', label: '🌿 休闲放松' },
+  { value: '系统建设', label: '🧰 系统建设' },
+  { value: '创作输出', label: '🎨 创作输出' },
+  { value: '生活空间', label: '🏠 生活空间' },
+  { value: '其他事项', label: '✨ 其他事项' },
 ]
 
 export const COMMON_TAGS = [

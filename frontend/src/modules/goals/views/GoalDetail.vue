@@ -9,12 +9,12 @@
     <el-form ref="formRef" :model="form" :rules="rules" label-width="100px" class="goal-form">
       <el-row :gutter="20">
         <el-col :span="12">
-          <el-form-item label="目标标题" prop="title">
+          <el-form-item label="目标标题" prop="title" required>
             <el-input v-model="form.title" placeholder="请输入目标标题" maxlength="100" show-word-limit />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="目标类型" prop="category">
+          <el-form-item label="目标类型" prop="category" required>
             <el-select v-model="form.category" placeholder="请选择" style="width: 100%">
               <el-option v-for="c in CATEGORY_OPTIONS" :key="c.value" :label="c.label" :value="c.value" />
             </el-select>
@@ -51,13 +51,20 @@
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="奖励/里程碑" prop="reward_value">
-            <el-input-number v-model="form.reward_value" :min="0" :precision="2" style="width: 100%" />
+          <el-form-item label="奖励池联动">
+            <el-switch v-model="form.enable_reward" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row v-if="form.enable_reward" :gutter="16">
+        <el-col :span="12">
+          <el-form-item label="里程碑奖励" prop="default_reward_amount">
+            <el-input-number v-model="form.default_reward_amount" :min="0" :precision="2" :step="5" style="width: 100%" placeholder="每完成一个里程碑发放" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="启用奖励">
-            <el-switch v-model="form.enable_reward" active-text="奖励池联动" />
+          <el-form-item label="目标完成奖励" prop="goal_completion_bonus">
+            <el-input-number v-model="form.goal_completion_bonus" :min="0" :precision="2" :step="5" style="width: 100%" placeholder="全部里程碑完成后额外发放" />
           </el-form-item>
         </el-col>
       </el-row>
@@ -73,10 +80,12 @@
         </el-col>
       </el-row>
 
-      <el-row v-if="form.enable_reward" :gutter="20">
+      <el-row :gutter="20">
         <el-col :span="12">
-          <el-form-item label="默认奖励金" prop="default_reward_amount">
-            <el-input-number v-model="form.default_reward_amount" :min="0" :precision="2" :step="5" style="width: 100%" placeholder="每完成一个里程碑发放" />
+          <el-form-item label="人生维度" prop="life_dimension" required>
+            <el-select v-model="form.life_dimension" placeholder="请选择人生维度" style="width: 100%">
+              <el-option v-for="d in DIMENSION_OPTIONS" :key="d.value" :label="d.label" :value="d.value" />
+            </el-select>
           </el-form-item>
         </el-col>
       </el-row>
@@ -101,18 +110,45 @@
       <el-divider>里程碑</el-divider>
       <div v-if="goalId" class="milestones-editor">
         <div v-for="(m, i) in form.milestones" :key="i" class="milestone-row">
-          <div class="milestone-fields">
-            <div class="milestone-title-row">
-              <el-input v-model="m.title" placeholder="里程碑描述" class="milestone-input" />
-              <el-button type="danger" :icon="Delete" circle size="small" @click="removeMilestone(i)" />
-            </div>
-            <el-input v-model="m.description" type="textarea" :rows="2" placeholder="详情（可选）" maxlength="500" show-word-limit class="milestone-desc" />
+          <el-input
+            v-model="m.title"
+            type="textarea"
+            :rows="2"
+            placeholder="里程碑名称"
+            class="milestone-title-input"
+          />
+          <div class="milestone-actions">
+            <el-button size="small" @click="openMilestoneDetail(m, i)">
+              <el-icon><Edit /></el-icon>
+            </el-button>
+            <el-button size="small" type="danger" @click="removeMilestone(i)">
+              <el-icon><Delete /></el-icon>
+            </el-button>
           </div>
         </div>
         <el-button type="primary" :icon="Plus" @click="addMilestone">添加里程碑</el-button>
       </div>
       <el-alert v-else type="info" :closable="false" description="请先保存目标后再管理里程碑" class="action-hint" />
     </el-form>
+
+    <el-dialog v-model="showMilestoneDetail" title="编辑里程碑详情" width="500px" append-to-body>
+      <el-form :model="editingMilestone" label-width="80px">
+        <el-form-item label="标题">
+          <el-input v-model="editingMilestone.title" />
+        </el-form-item>
+        <el-form-item label="详情">
+          <el-input v-model="editingMilestone.description" type="textarea" :rows="4" placeholder="详细描述（可选）" />
+        </el-form-item>
+        <el-form-item label="奖励金额">
+          <el-input-number v-model="editingMilestone.reward_amount" :min="0" :precision="2" style="width:100%" />
+          <span class="suffix">元</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showMilestoneDetail = false">取消</el-button>
+        <el-button type="primary" @click="saveMilestoneDetail">保存</el-button>
+      </template>
+    </el-dialog>
 
     <template #footer>
       <el-button @click="$emit('update:visible', false)">取消</el-button>
@@ -124,9 +160,9 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, type FormInstance } from 'element-plus'
-import { Delete, Plus } from '@element-plus/icons-vue'
+import { Delete, Plus, Edit } from '@element-plus/icons-vue'
 import { useGoalStore } from '../stores/goalStore'
-import { CATEGORY_OPTIONS, PRIORITY_OPTIONS, STATUS_OPTIONS, COMMON_TAGS } from '../types/goalTypes'
+import { CATEGORY_OPTIONS, PRIORITY_OPTIONS, STATUS_OPTIONS, COMMON_TAGS, DIMENSION_OPTIONS } from '../types/goalTypes'
 import type { Milestone } from '../types/goalTypes'
 
 const props = defineProps<{ visible: boolean; goalId?: number }>()
@@ -138,30 +174,47 @@ const submitting = ref(false)
 
 const form = reactive({
   title: '', description: '', category: '', status: '', priority: 'p2', tags: [] as string[],
-  reward_value: 0, enable_reward: false, default_reward_amount: 0, start_date: '', deadline: '', notes: '',
+  enable_reward: false, default_reward_amount: 0, goal_completion_bonus: 0, start_date: '', deadline: '', notes: '',
   parent_goal: null as number | null,
-  milestones: [] as Array<{ id?: number; title: string; status: string; description?: string }>,
+  life_dimension: '其他事项',
+  milestones: [] as Array<{ id?: number; title: string; status: string; description?: string; reward_amount?: number | null }>,
 })
 
 const rules = {
   title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
   category: [{ required: true, message: '请选择类型', trigger: 'change' }],
+  life_dimension: [{ required: true, message: '请选择人生维度', trigger: 'change' }],
 }
 
 const availableParentGoals = computed(() =>
   goalStore.goalList.filter(g => g.id !== props.goalId && !g.parent_goal)
 )
 
-function addMilestone() { form.milestones.push({ title: '', status: 'pending', description: '' }) }
+const showMilestoneDetail = ref(false)
+const editingMilestone = ref<{ title: string; description?: string; reward_amount?: number | null }>({ title: '', description: '', reward_amount: null })
+const editingMilestoneIndex = ref(-1)
+
+function addMilestone() { form.milestones.push({ title: '', status: 'pending', description: '', reward_amount: null }) }
 function removeMilestone(i: number) { form.milestones.splice(i, 1) }
+function openMilestoneDetail(milestone: typeof form.milestones[number], index: number) {
+  editingMilestone.value = { ...milestone }
+  editingMilestoneIndex.value = index
+  showMilestoneDetail.value = true
+}
+function saveMilestoneDetail() {
+  if (editingMilestoneIndex.value >= 0) {
+    form.milestones[editingMilestoneIndex.value] = { ...form.milestones[editingMilestoneIndex.value], ...editingMilestone.value }
+  }
+  showMilestoneDetail.value = false
+}
 
 watch(() => props.goalId, async (id) => {
   if (!id) {
     form.title = ''; form.description = ''; form.category = ''; form.status = ''
-    form.priority = 'p2'; form.tags = []; form.reward_value = 0
-    form.enable_reward = false; form.default_reward_amount = 0
+    form.priority = 'p2'; form.tags = []
+    form.enable_reward = false; form.default_reward_amount = 0; form.goal_completion_bonus = 0
     form.start_date = ''; form.deadline = ''; form.notes = ''
-    form.parent_goal = null
+    form.parent_goal = null; form.life_dimension = '其他事项'
     form.milestones = []
     return
   }
@@ -174,14 +227,15 @@ watch(() => props.goalId, async (id) => {
     form.priority = goal.priority || 'p2'
     form.status = goal.status || ''
     form.tags = goal.tags || []
-    form.reward_value = Number(goal.reward_value) || 0
     form.enable_reward = goal.enable_reward ?? false
     form.default_reward_amount = Number(goal.default_reward_amount) || 0
+    form.goal_completion_bonus = Number(goal.goal_completion_bonus) || 0
     form.start_date = goal.start_date || ''
     form.deadline = goal.deadline || ''
     form.notes = goal.notes || ''
     form.parent_goal = goal.parent_goal ?? null
-    form.milestones = (goal.milestones || []).map((m: Milestone) => ({ id: m.id, title: m.title, status: m.status, description: m.description || '' }))
+    form.life_dimension = goal.life_dimension || '其他事项'
+    form.milestones = (goal.milestones || []).map((m: Milestone) => ({ id: m.id, title: m.title, status: m.status, description: m.description || '', reward_amount: m.reward_amount ?? null }))
     if (!form.milestones.length) form.milestones.push({ title: '', status: 'pending' })
   } catch { ElMessage.error('加载目标失败') }
 })
@@ -201,9 +255,10 @@ async function handleSubmit() {
       status: form.status || undefined,
       tags: form.tags,
       parent_goal: form.parent_goal || null,
-      reward_value: form.reward_value,
+      life_dimension: form.life_dimension,
       enable_reward: form.enable_reward,
       default_reward_amount: form.default_reward_amount,
+      goal_completion_bonus: form.goal_completion_bonus,
       start_date: form.start_date || null,
       deadline: form.deadline || null,
       notes: form.notes?.trim(),
@@ -225,18 +280,35 @@ async function handleSubmit() {
 
 <style scoped lang="scss">
 .goal-form { max-height: 65vh; overflow-y: auto; padding-right: 8px; }
-.milestones-editor { display: flex; flex-direction: column; gap: 8px;
-  .milestone-row { display: flex; gap: 8px;
-    .milestone-fields { flex: 1; display: flex; flex-direction: column; gap: 4px;
-      .milestone-title-row { display: flex; gap: 8px; align-items: center;
-        .milestone-input { flex: 1; }
-      }
-      .milestone-desc { margin-top: 2px; }
+.milestones-editor { display: flex; flex-direction: column; gap: 8px; }
+
+.milestone-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+
+  .milestone-title-input {
+    flex: 1;
+
+    :deep(textarea) {
+      line-height: 1.4;
+      resize: none;
     }
+  }
+
+  .milestone-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+    padding-top: 4px;
   }
 }
 
 .action-hint { margin-top: 4px; }
+.suffix { margin-left: 4px; font-size: 13px; color: var(--lm-text-secondary); }
 
 :deep(.el-divider__text) { font-size: 14px; font-weight: 500; }
+:deep(.el-form-item.is-required .el-form-item__label::before) {
+  content: '*'; color: #f56c6c; margin-right: 4px;
+}
 </style>

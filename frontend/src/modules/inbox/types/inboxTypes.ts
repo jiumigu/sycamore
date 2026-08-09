@@ -13,6 +13,7 @@ export interface InboxItem {
   target_id: number | null
   completion_note?: string
   hesitate_reason?: string
+  abandon_reason?: string
   due_date: string | null
   remind_at: string | null
   processed_at: string | null
@@ -42,6 +43,7 @@ export interface InboxStats {
   hesitating: number
   completed: number
   processed: number
+  abandoned: number
   by_category: Record<string, number>
   by_priority: Record<string, number>
 }
@@ -74,4 +76,5 @@ export const STATUS_OPTIONS = [
   { value: 'processed', label: '已处理', color: '#8B5CF6' },
   { value: 'done', label: '已完成', color: '#10B981' },
   { value: 'archived', label: '已归档', color: '#9CA3AF' },
+  { value: 'abandoned', label: '已废弃', color: '#9CA3AF' },
 ] as const

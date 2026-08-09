@@ -3,17 +3,17 @@
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
-| Goal | goals_goal | 目标（年度/季度/月度/长期，P0-P3 优先级，支持 `parent_goal` 自关联父子嵌套） |
-| Milestone | goals_milestone | 里程碑（按序排列，含奖励同步） |
+| Goal | goals_goal | 目标（年度/季度/月度/长期，P0-P3 优先级，支持 `parent_goal` 自关联父子嵌套 + `life_dimension` 人生维度必填 + `goal_completion_bonus` 完成奖励金 + 里程碑/完成双重奖励） |
+| Milestone | goals_milestone | 里程碑（按序排列，含奖励同步 + `difficulty_met` 遇到的困难 + `next_action` 下一步行动 + 完成感悟） |
 | Action | goals_action | 行为记录 |
 | GoalReview | goals_review | 目标回顾（周/月/里程碑三种回顾类型） |
 | OutputRecord | goals_output_record | 良品率记录（类别/质量判定/难度/失败原因/失败类型，含 created_at 月度聚合） |
 
 ## Services
-- `GoalProgressService`：进度重算（有子目标时取子目标平均进度，无子目标时取里程碑完成占比；递归向上冒泡同步父目标进度）
+- `GoalProgressService`：进度重算（有子目标时取子目标平均进度，无子目标时取里程碑完成占比；递归向上冒泡同步父目标进度），进度达 100% 自动切换为已完成并发放完成奖励金（仅一次）
 - `QuickGoalService`：快速创建含批量里程碑模板的目标（月度/季度/每周模板）
 - `GoalCloneService`：复制目标及其里程碑和行为
-- `MilestoneRewardService`：里程碑完成时同步奖励池
+- `MilestoneRewardService`：里程碑完成时同步奖励池；打卡自动推进里程碑（按打卡日期匹配，未命中则推进下一个未完成里程碑）
 - `calculate_streak`：从 completion_log（`{"date": true}`）计算连续打卡天数（current/longest/total）
 
 ## API Endpoints
@@ -30,6 +30,7 @@
 | POST | /goals/&lt;pk&gt;/toggle_milestone/ | 切换里程碑状态 |
 | POST | /goals/&lt;pk&gt;/recalculate/ | 手动重算进度 |
 | GET | /goals/stats/ | 统计总览 |
+| GET | /goals/dimension_stats/ | 人生维度统计（按维度聚合目标数与平均进度，供雷达图） |
 | DELETE | /goals/bulk_delete/ | 批量删除 |
 | GET/POST | /milestones/ | 里程碑列表（?goal= 筛选）/ 创建 |
 | GET/PUT/PATCH/DELETE | /milestones/&lt;pk&gt;/ | 详情/更新/删除 |

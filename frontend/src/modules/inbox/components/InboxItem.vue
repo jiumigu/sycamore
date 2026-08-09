@@ -1,5 +1,5 @@
 <template>
-  <div class="inbox-item" :class="{ selected: isSelected, done: item.status === 'done' }">
+  <div class="inbox-item" :class="{ selected: isSelected, done: item.status === 'done', abandoned: item.status === 'abandoned' }">
     <div v-if="batchMode" class="item-checkbox" @click="toggleSelect">
       <el-checkbox :model-value="isSelected" />
     </div>
@@ -12,6 +12,7 @@
         <el-tag v-else-if="item.status === 'hesitating'" size="small" type="warning" effect="plain">犹豫中</el-tag>
         <el-tag v-else-if="item.status === 'processed'" size="small" type="warning" effect="plain">已处理</el-tag>
         <el-tag v-else-if="item.status === 'archived'" size="small" type="info" effect="plain">已归档</el-tag>
+        <el-tag v-else-if="item.status === 'abandoned'" size="small" type="info" effect="plain">已废弃</el-tag>
       </div>
       <div class="item-meta">
         <span v-if="item.description" class="item-desc">{{ item.description }}</span>
@@ -25,6 +26,9 @@
         </span>
         <span v-if="item.status === 'done' && item.completion_note" class="item-completion-note">
           📝 {{ item.completion_note }}
+        </span>
+        <span v-if="item.status === 'abandoned' && item.abandon_reason" class="item-abandon-reason">
+          🗑️ {{ item.abandon_reason }}
         </span>
       </div>
     </div>
@@ -130,6 +134,13 @@ function toggleSelect() {
 .inbox-item.done {
   opacity: 0.6;
 }
+.inbox-item.abandoned {
+  opacity: 0.6;
+  .item-content {
+    text-decoration: line-through;
+    color: #9CA3AF;
+  }
+}
 .item-checkbox {
   padding-top: 2px;
   cursor: pointer;
@@ -190,6 +201,13 @@ function toggleSelect() {
 }
 .item-completion-note {
   color: #10B981;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item-abandon-reason {
+  color: #9CA3AF;
   max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;

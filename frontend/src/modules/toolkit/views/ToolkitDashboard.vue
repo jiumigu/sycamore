@@ -65,6 +65,7 @@ const toolCategoryMap: Record<string, string> = {
   'trad2simp': '文字',
   'free-spending': '财务',
   'hourly-wage': '财务',
+  'fixed-expense': '财务',
   'quote-tool': '文字',
   'health-self-check': '健康',
 }

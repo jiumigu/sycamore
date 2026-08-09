@@ -21,6 +21,20 @@
         <span class="source-amount">¥{{ formatMoney(sourceStats.sugar) }}</span>
         <span class="source-pct">({{ sugarPct }}%)</span>
       </span>
+      <span class="source-divider">|</span>
+      <span class="source-part goal-complete">
+        <span class="source-emoji">🎉</span>
+        目标完成
+        <span class="source-amount">¥{{ formatMoney(sourceStats.goal_complete) }}</span>
+        <span class="source-pct">({{ goalCompletePct }}%)</span>
+      </span>
+      <span class="source-divider">|</span>
+      <span class="source-part inbox-complete">
+        <span class="source-emoji">📥</span>
+        收件箱
+        <span class="source-amount">¥{{ formatMoney(sourceStats.inbox_complete) }}</span>
+        <span class="source-pct">({{ inboxCompletePct }}%)</span>
+      </span>
     </div>
 
     <div v-loading="loading" class="timeline-body">
@@ -31,6 +45,7 @@
         <div class="tx-content">
           <div class="tx-top">
             <el-tag v-if="tx.transaction_type === 'inbox_complete'" type="success" size="small">📥 收件箱完成</el-tag>
+            <el-tag v-else-if="tx.transaction_type === 'goal_complete'" type="danger" size="small">🎉 目标完成</el-tag>
             <span v-else class="tx-type">{{ tx.transaction_type_display || tx.transaction_type }}</span>
             <span class="tx-amount" :class="tx.amount >= 0 ? 'positive' : 'negative'">
               {{ tx.amount >= 0 ? '+' : '' }}¥{{ formatMoney(tx.amount) }}
@@ -91,12 +106,20 @@ const props = defineProps<{
 
 const milestonePct = computed(() => {
   if (!props.sourceStats || props.sourceStats.total === 0) return 0
-  return Math.round((props.sourceStats.milestone / props.sourceStats.total) * 100)
+  return Math.round(((props.sourceStats.milestone || 0) / props.sourceStats.total) * 100)
 })
 
 const sugarPct = computed(() => {
   if (!props.sourceStats || props.sourceStats.total === 0) return 0
-  return Math.round((props.sourceStats.sugar / props.sourceStats.total) * 100)
+  return Math.round(((props.sourceStats.sugar || 0) / props.sourceStats.total) * 100)
+})
+const goalCompletePct = computed(() => {
+  if (!props.sourceStats || props.sourceStats.total === 0) return 0
+  return Math.round(((props.sourceStats.goal_complete || 0) / props.sourceStats.total) * 100)
+})
+const inboxCompletePct = computed(() => {
+  if (!props.sourceStats || props.sourceStats.total === 0) return 0
+  return Math.round(((props.sourceStats.inbox_complete || 0) / props.sourceStats.total) * 100)
 })
 
 const emit = defineEmits<{
@@ -132,6 +155,7 @@ function sourceEmoji(tx: RewardTransaction): string {
   if (tx.source_type === 'sugar') return '🍰'
   if (tx.source_type === 'gift') return '🎁'
   if (tx.source_type === 'inbox_complete') return '📥'
+  if (tx.source_type === 'goal_complete') return '🎉'
   return '⭐'
 }
 

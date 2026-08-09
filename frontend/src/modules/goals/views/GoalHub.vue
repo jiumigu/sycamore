@@ -6,6 +6,10 @@
         <el-tag type="primary" class="module-tag">成长发展</el-tag>
       </div>
       <div class="header-actions">
+        <el-button @click="goToDimensionChart">
+          <el-icon><PieChart /></el-icon>
+          人生维度分布
+        </el-button>
         <el-button type="primary" @click="showQuickDialog = true">
           <el-icon><Lightning /></el-icon>
           快速创建
@@ -177,32 +181,31 @@
     <el-divider />
 
     <div v-if="milestones.length > 0" class="milestone-list">
-      <div
-        v-for="m in milestones" :key="m.id"
-        class="milestone-item"
-        :class="{ completed: m.status === 'completed' }"
-      >
-        <div class="milestone-left">
-          <el-checkbox
-            :model-value="m.status === 'completed'"
-            @change="(val: boolean) => handleToggleMilestone(m, val)"
-          />
+      <div class="milestone-list-header">
+        <span class="milestone-list-title">🏁 里程碑（{{ milestoneCompletedCount }}/{{ milestoneTotalCount }}）</span>
+        <span v-if="uniformReward > 0" class="uniform-reward">💰 每项奖励 ¥{{ uniformReward }}</span>
+      </div>
+      <div v-for="m in milestones" :key="m.id" class="milestone-wrapper">
+        <div class="milestone-item" :class="{ completed: m.status === 'completed' }">
+          <span class="status-icon" :class="m.status === 'completed' ? 'done' : 'todo'" @click.stop="handleToggleMilestone(m, m.status !== 'completed')">
+            {{ m.status === 'completed' ? '✅' : '○' }}
+          </span>
+          <el-tooltip :content="m.title" placement="top" :disabled="(m.title?.length || 0) < 20">
+            <span class="milestone-title" :class="{ 'text-done': m.status === 'completed' }">{{ m.title }}</span>
+          </el-tooltip>
+          <span class="milestone-date">
+            <template v-if="m.status === 'completed'">
+              完成：{{ m.updated_at?.slice(0, 10) || m.target_date?.slice(0, 10) || '--' }}
+            </template>
+            <template v-else>
+              截止：{{ m.target_date?.slice(0, 10) || '未设置' }}
+            </template>
+          </span>
+          <el-button size="small" text @click.stop="editMilestoneDate(m)" class="date-edit-btn" v-if="!m.target_date">📅</el-button>
+          <el-button size="small" text @click.stop="editMilestoneDate(m)" class="date-edit-btn" v-else>📅</el-button>
+          <el-button size="small" text @click.stop="handleEditMilestone(milestoneGoal!, m)">✏️</el-button>
         </div>
-        <div class="milestone-content">
-          <div class="milestone-name">{{ m.title }}</div>
-          <div class="milestone-meta">
-            <span v-if="m.target_date">
-              截止：{{ m.target_date }}
-              <el-button size="small" text @click.stop="editMilestoneDate(m)">✏️</el-button>
-            </span>
-            <span v-else>
-              <el-button size="small" text @click.stop="editMilestoneDate(m)">+ 设置截止日期</el-button>
-            </span>
-            <span v-if="m.reward_amount">💰 ¥{{ m.reward_amount }}</span>
-            <span :class="m.status === 'completed' ? 'text-success' : 'text-warning'">
-              {{ m.status_display || m.status }}
-            </span>
-          </div>
+        <div v-if="m.description || m.completed_note || m.self_review" class="milestone-extra">
           <div v-if="m.description" class="milestone-detail-desc">📋 {{ m.description }}</div>
           <div v-if="m.completed_note" class="milestone-detail-note">✅ {{ m.completed_note }}</div>
           <div v-if="m.self_review" class="milestone-detail-review">💭 {{ m.self_review }}</div>
@@ -264,6 +267,24 @@
       />
     </el-form-item>
 
+    <el-form-item label="遇到的困难">
+      <el-input
+        v-model="editDifficulty"
+        type="textarea" :rows="2"
+        placeholder="过程中遇到了哪些困难？"
+        maxlength="500" show-word-limit
+      />
+    </el-form-item>
+
+    <el-form-item label="下一步行动">
+      <el-input
+        v-model="editNextAction"
+        type="textarea" :rows="2"
+        placeholder="接下来做什么？"
+        maxlength="500" show-word-limit
+      />
+    </el-form-item>
+
     <div class="quick-phrases">
       <span class="phrase-label">快捷填入：</span>
       <el-tag
@@ -280,12 +301,79 @@
       <el-button type="primary" @click="saveMilestoneDetail">保存</el-button>
     </template>
   </el-dialog>
+
+  <!-- 里程碑完成弹窗（含感悟必填） -->
+  <el-dialog v-model="showCompleteDialog" title="✅ 里程碑完成" width="500px" :close-on-click-modal="false">
+    <div class="complete-info">
+      <p>🎉 太棒了！你完成了：<strong>{{ completingMilestone?.title }}</strong></p>
+      <p v-if="completingMilestone?.target_date" class="complete-deadline">
+        截止日期：{{ completingMilestone.target_date.slice(0, 10) }}
+      </p>
+    </div>
+
+    <el-divider />
+
+    <el-form-item label="完成情况">
+      <el-input
+        v-model="completionNote"
+        type="textarea" :rows="2"
+        placeholder="简单记录一下完成情况（如：实际减了3.2斤）"
+        maxlength="200" show-word-limit
+      />
+    </el-form-item>
+
+    <el-form-item label="此刻感悟" required>
+      <el-input
+        v-model="selfReview"
+        type="textarea" :rows="4"
+        placeholder="完成这件事，你有什么想对自己说的？哪怕一句话也好。"
+        maxlength="500" show-word-limit
+      />
+    </el-form-item>
+
+    <el-form-item label="遇到的困难">
+      <el-input
+        v-model="completingDifficulty"
+        type="textarea" :rows="2"
+        placeholder="过程中遇到了哪些困难？（可选）"
+        maxlength="500" show-word-limit
+      />
+    </el-form-item>
+
+    <el-form-item label="下一步行动">
+      <el-input
+        v-model="completingNextAction"
+        type="textarea" :rows="2"
+        placeholder="接下来做什么？（可选）"
+        maxlength="500" show-word-limit
+      />
+    </el-form-item>
+
+    <div class="quick-phrases">
+      <span class="phrase-label">不知道写什么？试试：</span>
+      <el-tag
+        v-for="phrase in quickPhrases" :key="phrase"
+        size="small" class="phrase-tag"
+        @click="selfReview = phrase"
+      >
+        {{ phrase }}
+      </el-tag>
+    </div>
+
+    <template #footer>
+      <el-button @click="showCompleteDialog = false">取消</el-button>
+      <el-button type="success" @click="confirmComplete" :disabled="!selfReview.trim()">
+        记录感悟并完成
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, RefreshRight, Lightning, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Refresh, RefreshRight, Lightning, PieChart } from '@element-plus/icons-vue'
 import { useGoalStore } from '../stores/goalStore'
 import { useGoalBoardStore } from '../stores/goalBoardStore'
 import * as goalApi from '../api/goalApi'
@@ -299,6 +387,7 @@ import QuickGoalDialog from '../components/QuickGoalDialog.vue'
 
 const goalStore = useGoalStore()
 const boardStore = useGoalBoardStore()
+const router = useRouter()
 
 const searchKeyword = ref('')
 const activeStatus = ref('in-progress')
@@ -475,9 +564,42 @@ async function handleExpand(goalId: number) {
 }
 
 async function handleMilestoneToggle(goal: Goal, milestone: Milestone, status: string) {
+  if (status === 'completed') {
+    completingMilestone.value = milestone
+    completingGoalId.value = goal.id
+    completionNote.value = milestone.completed_note || ''
+    selfReview.value = milestone.self_review || ''
+    completingDifficulty.value = milestone.difficulty_met || ''
+    completingNextAction.value = milestone.next_action || ''
+    showCompleteDialog.value = true
+    return
+  }
+  // 取消完成直接保存
   try {
     await goalStore.updateMilestoneStatus(milestone.id, { status }, goal.id)
-    ElMessage.success(status === 'completed' ? '里程碑已完成' : '里程碑已重置')
+    ElMessage.success('里程碑已重置')
+  } catch {
+    ElMessage.error('操作失败，请重试')
+  }
+}
+
+async function confirmComplete() {
+  if (!selfReview.value.trim()) {
+    ElMessage.warning('请写下一句此刻的感悟')
+    return
+  }
+  if (!completingMilestone.value || !completingGoalId.value) return
+  try {
+    await goalStore.updateMilestoneStatus(completingMilestone.value.id, {
+      status: 'completed',
+      completed_note: completionNote.value,
+      self_review: selfReview.value,
+      difficulty_met: completingDifficulty.value,
+      next_action: completingNextAction.value,
+    }, completingGoalId.value)
+    showCompleteDialog.value = false
+    ElMessage.success('里程碑已完成')
+    refreshAll()
   } catch {
     ElMessage.error('操作失败，请重试')
   }
@@ -488,6 +610,8 @@ async function handleEditMilestone(goal: Goal, milestone: Milestone) {
   editDescription.value = milestone.description || ''
   editCompletionNote.value = milestone.completed_note || ''
   editSelfReview.value = milestone.self_review || ''
+  editDifficulty.value = milestone.difficulty_met || ''
+  editNextAction.value = milestone.next_action || ''
   showEditDialog.value = true
 }
 
@@ -496,6 +620,16 @@ const editingMilestoneData = ref<Milestone | null>(null)
 const editDescription = ref('')
 const editCompletionNote = ref('')
 const editSelfReview = ref('')
+const editDifficulty = ref('')
+const editNextAction = ref('')
+
+const showCompleteDialog = ref(false)
+const completingMilestone = ref<Milestone | null>(null)
+const completingGoalId = ref<number | null>(null)
+const completionNote = ref('')
+const selfReview = ref('')
+const completingDifficulty = ref('')
+const completingNextAction = ref('')
 
 const quickPhrases = [
   '辛苦了，这段时间不容易',
@@ -513,6 +647,8 @@ async function saveMilestoneDetail() {
       description: editDescription.value,
       completed_note: editCompletionNote.value,
       self_review: editSelfReview.value,
+      difficulty_met: editDifficulty.value,
+      next_action: editNextAction.value,
     }
     await goalStore.updateMilestoneStatus(editingMilestoneData.value.id, data, editingMilestoneData.value.goal)
     showEditDialog.value = false
@@ -535,6 +671,10 @@ async function handleUpdateStatus(goalId: number, status: GoalStatus) {
 function getTrackingActionId(goal: Goal): number | null {
   if (!goal.is_tracking_mode || !goal.actions?.length) return null
   return goal.actions[0].id ?? null
+}
+
+function goToDimensionChart() {
+  router.push('/goals/dimension-chart')
 }
 
 function handleCheckin(goalId: number) {
@@ -565,6 +705,18 @@ const editingMilestoneDate = ref('')
 
 const milestoneCompletedCount = computed(() => milestones.value.filter(m => m.status === 'completed').length)
 const milestoneTotalCount = computed(() => milestones.value.length)
+
+const uniformReward = computed(() => {
+  const amounts = milestones.value
+    .filter(m => {
+      const amt = m.reward_amount_display ?? m.reward_amount ?? 0
+      return amt > 0
+    })
+    .map(m => m.reward_amount_display ?? m.reward_amount ?? 0)
+  if (amounts.length === 0) return 0
+  const first = amounts[0]
+  return amounts.every(a => a === first) ? first : 0
+})
 
 async function openSubGoals(goal: Goal) {
   try {
@@ -748,32 +900,95 @@ onMounted(() => { refreshAll() })
 
 .add-milestone { display: flex; gap: 8px; align-items: center; }
 
-.milestone-item {
-  display: flex; gap: 12px; padding: 12px; border: 1px solid #eee; border-radius: 8px; margin-bottom: 8px;
-  &.completed { background: #f0f9f0;
-    .milestone-name { text-decoration: line-through; color: #999; }
+.milestone-list-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+
+  .milestone-list-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+  }
+
+  .uniform-reward {
+    font-size: 12px;
+    color: #e6a23c;
+    font-weight: 500;
+    white-space: nowrap;
   }
 }
 
-.milestone-meta {
-  display: flex; gap: 16px; font-size: 12px; color: #666; margin-top: 4px;
-  .text-success { color: #67c23a; }
-  .text-warning { color: #e6a23c; }
+.milestone-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  flex-wrap: nowrap;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  margin-bottom: 4px;
+
+  &.completed {
+    background: #f9fafb;
+  }
+
+  .status-icon {
+    flex-shrink: 0;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform 0.15s;
+    &:hover { transform: scale(1.2); }
+    &.done { color: #67c23a; }
+    &.todo { color: #ccc; }
+  }
+
+  .milestone-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: #333;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+    max-height: 2.8em;
+
+    &.text-done {
+      text-decoration: line-through;
+      color: #bbb;
+    }
+  }
+
+  .milestone-date {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #999;
+    white-space: nowrap;
+  }
 }
 
-.milestone-notes {
-  margin-top: 6px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 13px; color: #666;
+.date-edit-btn {
+  flex-shrink: 0;
+  font-size: 14px;
 }
 
-.milestone-detail-desc {
-  margin-top: 6px; padding: 8px; background: #f0f5ff; border-radius: 4px; font-size: 13px; color: #555;
-}
-.milestone-detail-note {
-  margin-top: 6px; padding: 8px; background: #f0fff4; border-radius: 4px; font-size: 13px; color: #555;
-}
-.milestone-detail-review {
-  margin-top: 6px; padding: 8px 10px; background: #fdf6ec; border-left: 3px solid #e6a23c;
-  border-radius: 4px; font-size: 13px; color: #666; font-style: italic;
+.milestone-extra {
+  margin: 0 0 8px 44px;
+
+  .milestone-detail-desc {
+    margin-top: 6px; padding: 8px; background: #f0f5ff; border-radius: 4px; font-size: 13px; color: #555;
+  }
+  .milestone-detail-note {
+    margin-top: 6px; padding: 8px; background: #f0fff4; border-radius: 4px; font-size: 13px; color: #555;
+  }
+  .milestone-detail-review {
+    margin-top: 6px; padding: 8px 10px; background: #fdf6ec; border-left: 3px solid #e6a23c;
+    border-radius: 4px; font-size: 13px; color: #666; font-style: italic;
+  }
 }
 
 .milestone-header {
@@ -785,5 +1000,10 @@ onMounted(() => { refreshAll() })
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px;
   .phrase-label { font-size: 12px; color: #999; }
   .phrase-tag { cursor: pointer; }
+}
+
+.complete-info {
+  p { margin: 6px 0; font-size: 15px; }
+  .complete-deadline { font-size: 13px; color: var(--el-text-color-secondary); }
 }
 </style>

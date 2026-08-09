@@ -186,7 +186,7 @@ class InboxViewSet(viewsets.ModelViewSet):
         month = request.query_params.get('month')
         qs = InboxItem.objects.filter(
             due_date__isnull=False,
-        ).exclude(status='processed')
+        ).exclude(status__in=['processed', 'abandoned'])
         if year:
             qs = qs.filter(due_date__year=year)
         if month:
@@ -230,6 +230,7 @@ class InboxViewSet(viewsets.ModelViewSet):
             'hesitating': qs.filter(status='hesitating').count(),
             'completed': qs.filter(status='done').count(),
             'processed': qs.filter(status='processed').count(),
+            'abandoned': qs.filter(status='abandoned').count(),
         }
 
         by_category = {}

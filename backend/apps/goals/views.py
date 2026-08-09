@@ -187,6 +187,40 @@ class GoalViewSet(viewsets.ModelViewSet):
         }
         return Response(result)
 
+    @action(detail=False, methods=['get'])
+    def dimension_stats(self, request):
+        """按人生维度聚合统计数据（用于雷达图）"""
+        from django.db.models import Avg, Count
+
+        qs = Goal.objects.exclude(life_dimension='').exclude(life_dimension__isnull=True)
+        aggregates = qs.values('life_dimension').annotate(
+            count=Count('id'),
+            avg_progress=Avg('progress_percentage'),
+        )
+
+        labels = dict(Goal._meta.get_field('life_dimension').choices)
+        indicators = []
+        values = []
+        for agg in aggregates:
+            dim = agg['life_dimension']
+            indicators.append({
+                'name': labels.get(dim, dim),
+                'max': 100,
+            })
+            values.append(round(agg['avg_progress'] or 0, 1))
+
+        return Response({
+            'indicators': indicators,
+            'values': values,
+            'dimensions': {
+                agg['life_dimension']: {
+                    'count': agg['count'],
+                    'avg_progress': round(agg['avg_progress'] or 0, 1),
+                }
+                for agg in aggregates
+            },
+        })
+
     @action(detail=True, methods=['post'])
     def toggle_milestone(self, request, pk=None):
         """切换里程碑状态（完成时自动发放奖励）"""
@@ -210,6 +244,12 @@ class GoalViewSet(viewsets.ModelViewSet):
         milestone.status = new_status
         if data.get('completed_note') is not None:
             milestone.completed_note = data['completed_note']
+        if data.get('self_review') is not None:
+            milestone.self_review = data['self_review']
+        if data.get('difficulty_met') is not None:
+            milestone.difficulty_met = data['difficulty_met']
+        if data.get('next_action') is not None:
+            milestone.next_action = data['next_action']
         if data.get('actual_value') is not None:
             milestone.actual_value = data['actual_value']
         milestone.save()
@@ -341,13 +381,20 @@ class ActionViewSet(viewsets.ModelViewSet):
             action.completion_log = log
             action.save(update_fields=['completion_log'])
 
-        # Complete milestone matching the checkin date, if any
-        milestone = goal.milestones.filter(target_date=checkin_date).first()
+        # 仅当本次为新增打卡时推进里程碑：
+        # 优先完成打卡日期对应的里程碑，若日期未命中（如倒计时里程碑无 target_date），
+        # 则推进下一个未完成的里程碑（按顺序）
         reward_result = None
-        if milestone and milestone.status != 'completed':
-            milestone.status = 'completed'
-            milestone.save(update_fields=['status'])
-            reward_result = MilestoneRewardService().complete_milestone(milestone)
+        completed_any = False
+        if not already:
+            milestones = goal.milestones.filter(target_date=checkin_date).exclude(status='completed')
+            if not milestones.exists():
+                milestones = goal.milestones.exclude(status='completed').order_by('order_num', 'id')[:1]
+            for milestone in milestones:
+                milestone.status = 'completed'
+                milestone.save(update_fields=['status'])
+                completed_any = True
+                reward_result = MilestoneRewardService().complete_milestone(milestone)
 
         GoalProgressService.recalculate(goal)
         streak = calculate_streak(log)
@@ -356,7 +403,7 @@ class ActionViewSet(viewsets.ModelViewSet):
             'checked': not already,
             'already_checked': already,
             'streak': streak,
-            'milestone_completed': milestone is not None,
+            'milestone_completed': completed_any,
             'reward': reward_result,
             'goal_id': goal.id,
             'goal_progress': goal.progress_percentage,

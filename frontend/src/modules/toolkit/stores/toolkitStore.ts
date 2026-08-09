@@ -68,7 +68,7 @@ export const useToolkitStore = defineStore('toolkit', () => {
     return data
   }
 
-  async function runFileTool(toolKey: string, file: File, mode: string) {
+  async function runFileTool(toolKey: string, file: File, params: Record<string, unknown> = {}) {
     executing.value = true
     executionResult.value = null
     executionStatus.value = 'running'
@@ -77,7 +77,9 @@ export const useToolkitStore = defineStore('toolkit', () => {
       const formData = new FormData()
       formData.append('tool_key', toolKey)
       formData.append('file', file)
-      formData.append('mode', mode)
+      for (const [key, value] of Object.entries(params)) {
+        formData.append(key, String(value))
+      }
       const res = await api.convertFile(formData)
       executionStatus.value = res.data.status
       if (res.data.result) {

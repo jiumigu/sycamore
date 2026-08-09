@@ -10,6 +10,9 @@
     <p class="subtitle">月薪 ÷ 真实投入时间 = 时薪。看清自己的时间价值。</p>
 
     <el-card class="calc-form">
+      <el-alert v-if="editingId" title="正在编辑已有记录" type="info" show-icon :closable="false" style="margin-bottom: 12px">
+        <el-button size="small" text @click="cancelEdit">取消编辑</el-button>
+      </el-alert>
       <el-form :model="form" label-width="130px" size="small">
         <el-row :gutter="16">
           <el-col :span="12">
@@ -140,6 +143,22 @@
           </template>
         </template>
 
+        <el-divider>💵 额外收入来源</el-divider>
+        <div class="extra-incomes">
+          <div v-for="(source, index) in form.extra_incomes" :key="index" class="source-row">
+            <el-input v-model="source.name" size="small" placeholder="来源名" style="width: 120px" />
+            <el-input-number v-model="source.amount" :min="0" :precision="2" size="small" style="width: 160px" />
+            <el-select v-model="source.period" size="small" style="width: 90px">
+              <el-option label="/天" value="daily" />
+              <el-option label="/月" value="monthly" />
+              <el-option label="/年" value="yearly" />
+            </el-select>
+            <el-button size="small" type="danger" @click="removeExtraIncome(index)" circle>✕</el-button>
+          </div>
+          <el-button size="small" @click="addExtraIncome">+ 添加收入来源</el-button>
+          <div class="hint">如副业、稿费、投资收益等工资之外的收入，将并入总收入和时薪计算</div>
+        </div>
+
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="handleCalculate">计算时薪</el-button>
           <el-button @click="resetForm">重置</el-button>
@@ -172,6 +191,52 @@
           <div class="stat-value">{{ result.total_hours_per_month }}h</div>
         </el-col>
       </el-row>
+
+      <!-- 收入构成 -->
+      <div class="income-breakdown">
+        <el-divider />
+        <div class="breakdown-item">
+          <span>💼 工资收入</span>
+          <span class="breakdown-value">¥{{ fmt(result.salary_monthly) }}/月</span>
+        </div>
+        <div v-for="source in form.extra_incomes.filter(s => s.amount > 0)" :key="source.name + source.period + source.amount" class="breakdown-item">
+          <span>💰 {{ source.name || '未命名来源' }}</span>
+          <span class="breakdown-sub">¥{{ fmt(source.amount) }}/{{ periodLabel(source.period) }} ≈ ¥{{ fmt(convertToMonthly(source)) }}/月</span>
+        </div>
+        <el-divider />
+        <div class="breakdown-total">
+          <span>📊 月总收入</span>
+          <span class="breakdown-total-value">¥{{ fmt(result.total_monthly) }}</span>
+        </div>
+      </div>
+
+      <!-- 收支对比（与固定开销联动） -->
+      <div v-if="latestExpense" class="comparison">
+        <el-divider />
+        <div class="comparison-title">💰 收支对比</div>
+        <el-row :gutter="16">
+          <el-col :span="8">
+            <div class="compare-item income">
+              <div>日收入</div>
+              <div class="compare-value">¥{{ fmt(result.total_daily) }}</div>
+            </div>
+          </el-col>
+          <el-col :span="8">
+            <div class="compare-item expense">
+              <div>日支出</div>
+              <div class="compare-value">¥{{ fmt(latestExpense.total_daily) }}</div>
+            </div>
+          </el-col>
+          <el-col :span="8">
+            <div class="compare-item" :class="dailyBalance >= 0 ? 'positive' : 'negative'">
+              <div>日结余</div>
+              <div class="compare-value">{{ dailyBalance >= 0 ? '+' : '' }}¥{{ fmt(dailyBalance) }}</div>
+            </div>
+          </el-col>
+        </el-row>
+        <el-progress :percentage="expenseRatio" :color="expenseRatio > 80 ? '#f56c6c' : '#67c23a'" :stroke-width="8" style="margin-top: 12px" />
+        <div class="insight-text">{{ expenseRatio > 80 ? '⚠️ 开销占比偏高' : '✅ 收支健康' }}（{{ expenseRatio }}%）</div>
+      </div>
     </el-card>
 
     <!-- 历史记录 -->
@@ -196,6 +261,12 @@
         <el-table-column label="时薪" width="100">
           <template #default="{ row }">¥{{ row.hourly_wage }}/h</template>
         </el-table-column>
+        <el-table-column label="月收入" width="100">
+          <template #default="{ row }">¥{{ fmt(row.total_monthly || row.monthly_salary) }}</template>
+        </el-table-column>
+        <el-table-column label="日收入" width="100">
+          <template #default="{ row }">¥{{ fmt(row.total_daily || (Number(row.monthly_salary) / 30)) }}</template>
+        </el-table-column>
         <el-table-column label="月投入" width="72">
           <template #default="{ row }">{{ row.total_hours_per_month }}h</template>
         </el-table-column>
@@ -205,25 +276,117 @@
         <el-table-column label="日期" width="88">
           <template #default="{ row }">{{ row.created_at?.slice(0, 10) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="60" fixed="right">
+        <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" link type="primary" @click="editRecord(row)">编辑</el-button>
+            <el-button size="small" link type="primary" @click="copyRecord(row)">复制</el-button>
+            <el-button size="small" link type="primary" @click="viewDetail(row)">查看</el-button>
             <el-button size="small" link type="danger" @click="handleDelete(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
       <el-empty v-if="!loading && history.length === 0" description="暂无计算记录" />
     </el-card>
+
+    <!-- 查看详情 -->
+    <el-dialog v-model="showDetailDialog" title="时薪详情" width="600px" append-to-body>
+      <template v-if="viewingRecord">
+        <div class="detail-header">
+          <span class="detail-name">{{ viewingRecord.name || '未命名记录' }}</span>
+          <span class="detail-date">{{ viewingRecord.created_at?.slice(0, 10) }}</span>
+        </div>
+
+        <el-divider />
+
+        <!-- 收入构成 -->
+        <div class="detail-section">
+          <div class="section-title">💵 收入构成</div>
+          <div class="detail-row">
+            <span>💼 工资收入</span>
+            <span>¥{{ fmt(viewingRecord.monthly_salary || 0) }}/月</span>
+          </div>
+          <div v-for="source in (viewingRecord.extra_incomes || [])" :key="source.name + source.period + source.amount" class="detail-row">
+            <span>💰 {{ source.name || '未命名来源' }}</span>
+            <span>¥{{ fmt(source.amount) }}/{{ periodLabel(source.period) }}</span>
+          </div>
+          <el-divider />
+          <div class="detail-row total">
+            <span>📊 月总收入</span>
+            <span>¥{{ fmt(viewingRecord.total_monthly || viewingRecord.monthly_salary || 0) }}</span>
+          </div>
+          <div class="detail-row">
+            <span>日收入</span>
+            <span>¥{{ fmt(detailIncomeDaily) }}</span>
+          </div>
+          <div class="detail-row">
+            <span>时薪</span>
+            <span>¥{{ viewingRecord.hourly_wage }}/h</span>
+          </div>
+        </div>
+
+        <!-- 工作时间 -->
+        <el-divider />
+        <div class="detail-section">
+          <div class="section-title">⏱️ 工作时间</div>
+          <div class="detail-row">
+            <span>月投入</span>
+            <span>{{ viewingRecord.total_hours_per_month }}h</span>
+          </div>
+          <div class="detail-row">
+            <span>模式</span>
+            <span>{{ viewingRecord.calc_mode === 'freelance' ? '自由职业' : '正式职业' }}</span>
+          </div>
+        </div>
+
+        <!-- 收支联动 -->
+        <el-divider />
+        <div class="detail-section comparison-section">
+          <div class="section-title">💰 收支联动</div>
+          <div v-if="latestExpense">
+            <div class="detail-row">
+              <span>日收入</span>
+              <span class="text-success">¥{{ fmt(detailIncomeDaily) }}</span>
+            </div>
+            <div class="detail-row">
+              <span>日固定开销</span>
+              <span class="text-danger">¥{{ fmt(latestExpense.total_daily) }}</span>
+            </div>
+            <el-divider />
+            <div class="detail-row total">
+              <span>日结余</span>
+              <span :class="detailBalance >= 0 ? 'text-success' : 'text-danger'">
+                {{ detailBalance >= 0 ? '+' : '' }}¥{{ fmt(detailBalance) }}
+              </span>
+            </div>
+            <div class="detail-row">
+              <span>开销占比</span>
+              <span>{{ detailRatio }}%</span>
+            </div>
+            <el-progress :percentage="detailRatio" :color="detailRatio > 80 ? '#f56c6c' : '#67c23a'" :stroke-width="6" style="margin-top: 8px" />
+            <div class="linked-expense-name">关联的固定开销：{{ latestExpense.name }}</div>
+          </div>
+          <div v-else class="no-link">
+            暂无固定开销记录，
+            <el-button type="primary" size="small" text @click="$router.push('/toolkit/fixed-expense')">去添加</el-button>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="showDetailDialog = false">关闭</el-button>
+        <el-button type="primary" @click="copyRecord(viewingRecord); showDetailDialog = false">复制并编辑</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { maskAmount } from '@/shared/utils/privacy'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
-import { getHourlyWageList, createHourlyWage, deleteHourlyWage } from '../../api/toolkitApi'
-import type { HourlyWageRecord } from '../../types/toolkitTypes'
+import { getHourlyWageList, createHourlyWage, updateHourlyWage, deleteHourlyWage, getFixedExpenseList } from '../../api/toolkitApi'
+import type { HourlyWageRecord, FixedExpenseRecord } from '../../types/toolkitTypes'
 
 const privacyStore = usePrivacyStore()
 const weekDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
@@ -247,6 +410,8 @@ function defaultForm() {
     // 通用
     commute_minutes: 0,
     notes: '',
+    // 额外收入来源
+    extra_incomes: [] as Array<{ name: string; amount: number; period: 'daily' | 'monthly' | 'yearly' }>,
   }
 }
 
@@ -256,10 +421,122 @@ const result = ref<HourlyWageRecord | null>(null)
 const saving = ref(false)
 const loading = ref(false)
 const history = ref<HourlyWageRecord[]>([])
+const latestExpense = ref<FixedExpenseRecord | null>(null)
+
+const editingId = ref<number | null>(null)
+const showDetailDialog = ref(false)
+const viewingRecord = ref<HourlyWageRecord | null>(null)
+
+const dailyBalance = computed(() =>
+  result.value && latestExpense.value
+    ? Number(result.value.total_daily) - Number(latestExpense.value.total_daily)
+    : 0,
+)
+
+const expenseRatio = computed(() => {
+  if (!result.value || !latestExpense.value) return 0
+  const daily = Number(result.value.total_daily)
+  if (daily <= 0) return 0
+  return Math.min(100, Math.round((Number(latestExpense.value.total_daily) / daily) * 100))
+})
+
+// 详情弹窗用：以查看记录为主体计算收支联动
+const detailIncomeDaily = computed(() => {
+  if (!viewingRecord.value) return 0
+  return Number(viewingRecord.value.total_daily) || (Number(viewingRecord.value.monthly_salary) / 30) || 0
+})
+
+const detailBalance = computed(() =>
+  detailIncomeDaily.value - (latestExpense.value ? Number(latestExpense.value.total_daily) : 0),
+)
+
+const detailRatio = computed(() => {
+  const income = viewingRecord.value
+    ? Number(viewingRecord.value.total_monthly) || Number(viewingRecord.value.monthly_salary) || 1
+    : 1
+  const expense = (latestExpense.value ? Number(latestExpense.value.total_daily) : 0) * 30
+  return Math.min(100, Math.round((expense / income) * 100))
+})
 
 function fmt(val: number | string) {
   const n = typeof val === 'string' ? parseFloat(val) : val
   return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function periodLabel(period: string): string {
+  return { daily: '日', monthly: '月', yearly: '年' }[period] || period
+}
+
+function convertToMonthly(source: { amount: number; period: string }): number {
+  if (!source.amount) return 0
+  if (source.period === 'daily') return Math.round(source.amount * 30 * 100) / 100
+  if (source.period === 'yearly') return Math.round((source.amount / 12) * 100) / 100
+  return source.amount
+}
+
+function addExtraIncome() {
+  form.extra_incomes.push({ name: '', amount: 0, period: 'monthly' })
+}
+
+function removeExtraIncome(index: number) {
+  form.extra_incomes.splice(index, 1)
+}
+
+function fillForm(record: HourlyWageRecord) {
+  form.calc_mode = record.calc_mode || 'formal'
+  form.monthly_salary = Number(record.monthly_salary) || 0
+  form.rest_type = record.rest_type || '双休'
+  form.work_start = record.work_start || '09:00'
+  form.work_end = record.work_end || '18:00'
+  form.lunch_break = record.lunch_break || 60
+  form.commute_minutes = record.commute_minutes || 0
+  form.freelance_time_mode = record.freelance_time_mode || 'fixed'
+  form.freelance_days = record.freelance_days || 22
+  form.freelance_hours_per_day = Number(record.freelance_hours_per_day) || 8
+  form.weekly_hours = record.weekly_hours || [0, 0, 0, 0, 0, 0, 0]
+  form.freelance_weeks = record.freelance_weeks || 4
+  form.extra_incomes = (record.extra_incomes || []).map(item => ({
+    name: item.name || '',
+    amount: Number(item.amount) || 0,
+    period: (item.period === 'daily' || item.period === 'yearly' ? item.period : 'monthly') as 'daily' | 'monthly' | 'yearly',
+  }))
+  form.notes = record.notes || ''
+  result.value = null
+}
+
+function editRecord(record: HourlyWageRecord) {
+  editingId.value = record.id
+  fillForm(record)
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function copyRecord(record: HourlyWageRecord | null) {
+  if (!record) return
+  editingId.value = null
+  form.name = record.name ? `${record.name}（副本）` : ''
+  fillForm(record)
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function cancelEdit() {
+  editingId.value = null
+  resetForm()
+}
+
+function viewDetail(record: HourlyWageRecord) {
+  viewingRecord.value = record
+  showDetailDialog.value = true
+  fetchLatestExpense()
+}
+
+async function fetchLatestExpense() {
+  try {
+    const res = await getFixedExpenseList()
+    const results = (res.data?.results || []) as FixedExpenseRecord[]
+    latestExpense.value = results[0] || null
+  } catch {
+    latestExpense.value = null
+  }
 }
 
 async function fetchHistory() {
@@ -289,6 +566,7 @@ async function handleCalculate() {
       calc_mode: form.calc_mode,
       commute_minutes: form.commute_minutes,
       notes: form.notes || '',
+      extra_incomes: form.extra_incomes,
     }
 
     if (form.calc_mode === 'formal') {
@@ -307,11 +585,15 @@ async function handleCalculate() {
       }
     }
 
-    const res = await createHourlyWage(payload)
+    const res = editingId.value
+      ? await updateHourlyWage(editingId.value, payload)
+      : await createHourlyWage(payload)
     const record = res.data as HourlyWageRecord
     result.value = record
+    editingId.value = null
     ElMessage.success(`时薪 ¥${record.hourly_wage}/小时`)
     await fetchHistory()
+    await fetchLatestExpense()
   } catch {
     ElMessage.error('计算失败')
   } finally {
@@ -326,6 +608,11 @@ async function handleDelete(id: number) {
     ElMessage.success('已删除')
     history.value = history.value.filter(r => r.id !== id)
     if (result.value?.id === id) result.value = null
+    if (editingId.value === id) editingId.value = null
+    if (viewingRecord.value?.id === id) {
+      viewingRecord.value = null
+      showDetailDialog.value = false
+    }
   } catch {
     // cancelled
   }
@@ -336,7 +623,10 @@ function resetForm() {
   result.value = null
 }
 
-onMounted(fetchHistory)
+onMounted(() => {
+  fetchHistory()
+  fetchLatestExpense()
+})
 </script>
 
 <style scoped>
@@ -359,4 +649,118 @@ h2 { margin: 0 0 4px; font-size: 22px; font-weight: 700; color: #1F2937; }
 .flexible-hours { display: flex; flex-direction: column; gap: 8px; }
 .day-row { display: flex; align-items: center; gap: 12px; }
 .day-label { width: 36px; font-size: 13px; color: #374151; font-weight: 500; }
+
+.extra-incomes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+
+  .source-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
+.income-breakdown {
+  text-align: left;
+  margin-top: 8px;
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+
+  .breakdown-item {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+    color: #374151;
+    padding: 3px 0;
+
+    .breakdown-value { font-weight: 600; color: #1F2937; flex-shrink: 0; }
+    .breakdown-sub { font-size: 12px; color: #9CA3AF; text-align: right; }
+  }
+
+  .breakdown-total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1F2937;
+
+    .breakdown-total-value { font-size: 20px; color: #10B981; font-weight: 700; }
+  }
+}
+
+.comparison {
+  text-align: left;
+  max-width: 420px;
+  margin: 8px auto 0;
+
+  .comparison-title { font-size: 14px; font-weight: 600; color: #1F2937; margin-bottom: 8px; }
+
+  .compare-item {
+    text-align: center;
+    padding: 10px 0;
+    border-radius: 8px;
+    background: #F3F4F6;
+
+    .compare-value { font-size: 20px; font-weight: 700; margin-top: 4px; }
+
+    &.income .compare-value { color: #10B981; }
+    &.expense .compare-value { color: #F59E0B; }
+    &.positive .compare-value { color: #10B981; }
+    &.negative .compare-value { color: #EF4444; }
+  }
+
+  .insight-text {
+    margin-top: 8px;
+    font-size: 13px;
+    text-align: center;
+    color: #6B7280;
+  }
+}
+
+.detail-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+
+  .detail-name { font-size: 16px; font-weight: 600; color: #1F2937; }
+  .detail-date { font-size: 12px; color: #9CA3AF; }
+}
+
+.detail-section {
+  .section-title { font-size: 14px; font-weight: 600; color: #1F2937; margin-bottom: 6px; }
+
+  .detail-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+    color: #374151;
+    padding: 3px 0;
+
+    &.total { font-size: 14px; font-weight: 600; color: #1F2937; }
+  }
+
+  .text-success { color: #10B981; font-weight: 600; }
+  .text-danger { color: #EF4444; font-weight: 600; }
+
+  .linked-expense-name {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #9CA3AF;
+  }
+
+  .no-link {
+    font-size: 13px;
+    color: #6B7280;
+  }
+}
 </style>

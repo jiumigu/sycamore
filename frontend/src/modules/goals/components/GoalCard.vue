@@ -65,24 +65,26 @@
         <h3 class="goal-title" @click.stop="emit('showMilestones', goal)">{{ goal.title }}</h3>
         <p v-if="goal.description" class="goal-desc">{{ goal.description }}</p>
 
-        <div class="card-meta">
-          <span class="meta-item">
-            <el-icon><Calendar /></el-icon>
-            {{ goal.deadline ? goal.deadline.slice(0, 10) : '无期限' }}
-          </span>
-          <span class="meta-item">
-            <el-icon><Flag /></el-icon>
-            {{ goal.category_display || goal.category }}
-          </span>
-          <span v-if="goal.year" class="meta-item">
-            <el-icon><Clock /></el-icon>
-            {{ goal.year }}年
-          </span>
-          <span v-if="goal.parent_goal_name" class="meta-item parent-badge">
-            📎 {{ goal.parent_goal_name }}
-          </span>
-          <span v-if="goal.sub_goals_count && goal.sub_goals_count > 0" class="meta-item">
-            📁 {{ goal.sub_goals_count }}个子目标
+        <!-- 父目标单独一行 -->
+        <div v-if="goal.parent_goal_name" class="parent-goal-row">
+          📎 {{ goal.parent_goal_name }}
+        </div>
+
+        <!-- 元数据行：紧凑排列 -->
+        <div class="goal-meta">
+          <span>{{ goal.start_date?.slice(0, 10) || '' }} ~ {{ goal.deadline?.slice(0, 10) || '不限' }}</span>
+          <el-divider direction="vertical" />
+          <span>{{ goal.category_display || goal.category }}</span>
+          <el-divider direction="vertical" />
+          <span>{{ goal.year || goal.start_date?.slice(0, 4) || '' }}年</span>
+          <el-divider direction="vertical" />
+          <el-tag v-if="goal.priority === 'p0'" type="danger" size="small">P0</el-tag>
+          <el-tag v-else-if="goal.priority === 'p1'" type="warning" size="small">P1</el-tag>
+          <el-tag v-else-if="goal.priority === 'p2'" type="info" size="small">P2</el-tag>
+          <el-tag v-else size="small">P3</el-tag>
+          <span v-if="dimensionTag" class="dimension-tag">{{ dimensionTag.label }}</span>
+          <span v-if="goal.sub_goals_count && goal.sub_goals_count > 0" class="sub-goals-tag">
+            📁 {{ goal.sub_goals_count }}
           </span>
         </div>
 
@@ -92,6 +94,8 @@
           </el-tag>
           <el-tag v-if="goal.tags.length > 3" size="small" type="info">+{{ goal.tags.length - 3 }}</el-tag>
         </div>
+
+        <el-progress :percentage="goal.progress_percentage" :stroke-width="4" class="goal-progress-bar" />
       </div>
 
       <!-- 展开区 -->
@@ -144,7 +148,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Calendar, Flag, Clock, Edit, Delete, ArrowDown, List, CopyDocument } from '@element-plus/icons-vue'
-import { PRIORITY_OPTIONS, STATUS_OPTIONS } from '../types/goalTypes'
+import { PRIORITY_OPTIONS, STATUS_OPTIONS, DIMENSION_OPTIONS } from '../types/goalTypes'
 import type { Goal, GoalStatus, Milestone } from '../types/goalTypes'
 import MilestoneBoard from './MilestoneBoard.vue'
 import BehaviorTrackCard from './BehaviorTrackCard.vue'
@@ -183,6 +187,10 @@ const progressColor = computed(() => {
   if (p >= 25) return '#f56c6c'
   return '#909399'
 })
+
+const dimensionTag = computed(() =>
+  DIMENSION_OPTIONS.find(d => d.value === props.goal.life_dimension)
+)
 
 const circumference = 2 * Math.PI * 16
 const ringCircumference = `${circumference}`
@@ -239,14 +247,19 @@ function handleMilestoneToggle(m: Milestone, status: string) {
   .goal-title { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
   .goal-desc { margin: 0 0 10px; font-size: 13px; color: var(--el-text-color-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-  .card-meta { display: flex; gap: 10px; margin-bottom: 6px; font-size: 12px; color: var(--el-text-color-secondary);
-    .meta-item { display: flex; align-items: center; gap: 3px; .el-icon { font-size: 12px; } }
-    .parent-badge { color: #8e44ad; font-weight: 500; }
+  .parent-goal-row { font-size: 12px; color: #8e44ad; font-weight: 500; margin-bottom: 4px; }
+
+  .goal-meta { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--el-text-color-secondary); margin: 6px 0; flex-wrap: wrap;
+    :deep(.el-divider--vertical) { height: 12px; margin: 0 4px; }
+    .dimension-tag { color: #0891b2; font-weight: 500; }
+    .sub-goals-tag { color: var(--el-text-color-secondary); }
   }
 
-  .card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;
+  .card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;
     .goal-tag { margin: 0; font-size: 11px; height: 20px; line-height: 18px; padding: 0 5px; }
   }
+
+  .goal-progress-bar { margin-top: 2px; }
 
   .card-expanded {
     .actions-section { margin-top: 4px; }

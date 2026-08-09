@@ -11,6 +11,15 @@ Django 项目通用基础设施，不归属任何业务模块。
 | `models.py` | 全局共享模型 + UserProfile |
 | `admin.py` | 系统管理后台配置 |
 | `views.py` | 通用视图 + ProfileView |
+| `management/commands/sync_field_comments.py` | 管理命令：将各模型 `verbose_name` 同步为 MySQL 字段注释 |
+
+## 管理命令
+
+```bash
+.venv/bin/python backend/manage.py sync_field_comments
+```
+
+遍历所有模型，将 `verbose_name` 同步为 MySQL 字段注释（仅执行 `ALTER TABLE ... MODIFY ... COMMENT`，保留原列定义/Null/默认值，自动跳过 JSON 列默认值）。
 
 ## Pagination
 

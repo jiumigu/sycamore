@@ -101,6 +101,7 @@ export interface HourlyWageRecord {
   user_id: number
   name: string
   monthly_salary: string
+  extra_incomes: Array<{ name: string; amount: number | string; period: string }>
   rest_type: string
   work_start: string
   work_end: string
@@ -116,6 +117,10 @@ export interface HourlyWageRecord {
   work_hours_per_day: string
   total_hours_per_month: string
   hourly_wage: string
+  salary_monthly: string
+  extra_monthly: string
+  total_monthly: string
+  total_daily: string
   notes: string
   created_at: string
 }
@@ -128,6 +133,24 @@ export interface FreeSpendingRecord {
   debt: string
   work_years: number
   free_amount: string
+  notes: string
+  created_at: string
+}
+
+export interface FixedExpenseItem {
+  name: string
+  amount: number
+  period: 'daily' | 'monthly' | 'yearly'
+  icon: string
+}
+
+export interface FixedExpenseRecord {
+  id: number
+  name: string
+  items: FixedExpenseItem[]
+  total_monthly: string
+  total_daily: string
+  total_yearly: string
   notes: string
   created_at: string
 }

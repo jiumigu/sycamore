@@ -19,6 +19,7 @@ class InboxItem(models.Model):
         ('processed', '已处理'),
         ('done', '已完成'),
         ('archived', '已归档'),
+        ('abandoned', '已废弃'),
     ]
 
     PRIORITY_CHOICES = [
@@ -60,6 +61,7 @@ class InboxItem(models.Model):
     processed_at = models.DateTimeField(blank=True, null=True, verbose_name='处理时间')
     completion_note = models.TextField(blank=True, default='', verbose_name='完成备注')
     hesitate_reason = models.TextField(blank=True, default='', verbose_name='犹豫原因')
+    abandon_reason = models.TextField(blank=True, default='', verbose_name='废弃原因')
 
     priority = models.CharField(
         max_length=20, choices=PRIORITY_CHOICES, default='medium', verbose_name='优先级',

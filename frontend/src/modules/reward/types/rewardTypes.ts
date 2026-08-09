@@ -75,6 +75,8 @@ export const GIFT_STATUS_MAP: Record<string, { label: string; type: string; icon
 export interface RewardSourceStats {
   sugar: number
   milestone: number
+  goal_complete: number
+  inbox_complete: number
   total: number
   milestone_detail: Array<{
     source_id: number

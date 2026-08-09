@@ -373,6 +373,27 @@ class FreeSpendingCalculator(models.Model):
         return f'¥{self.free_amount} ({self.created_at})'
 
 
+class FixedExpense(models.Model):
+    """固定开销计算记录"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    name = models.CharField(max_length=200, verbose_name='记录名称')
+    items = models.JSONField(default=list, verbose_name='开销项目列表', help_text='[{name, amount, period, icon}]，period 支持 daily/monthly/yearly')
+    total_monthly = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='月固定开销')
+    total_daily = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='日均固定开销')
+    total_yearly = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name='年固定开销')
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_fixed_expense'
+        ordering = ['-created_at']
+        verbose_name = '固定开销计算'
+
+    def __str__(self):
+        return f'{self.name or "固定开销"} ¥{self.total_monthly}'
+
+
 class HourlyWageRecord(models.Model):
     """时薪计算记录"""
 
@@ -415,6 +436,9 @@ class HourlyWageRecord(models.Model):
 
     # 通用字段
     monthly_salary = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='月薪(元)')
+
+    # 额外收入来源（工资之外的收入）
+    extra_incomes = models.JSONField(default=list, verbose_name='额外收入来源', help_text='[{"name":"公众号","amount":300,"period":"monthly"}]')
 
     # 通勤
     commute_minutes = models.IntegerField(default=0, verbose_name='单程通勤(分钟)')

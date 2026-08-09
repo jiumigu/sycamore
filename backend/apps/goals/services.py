@@ -22,7 +22,8 @@ class GoalProgressService:
         if subs.exists():
             total = sum(s.progress_percentage for s in subs)
             goal.progress_percentage = min(round(total / subs.count()), 100)
-            goal.save(update_fields=['progress_percentage'])
+            GoalProgressService._auto_transition_status(goal)
+            goal.save(update_fields=['progress_percentage', 'status'])
             # 如果自己有父目标，向上冒泡
             if goal.parent_goal_id:
                 parent = goal.parent_goal
@@ -31,7 +32,12 @@ class GoalProgressService:
 
         milestone_progress = GoalProgressService._milestone_progress(goal)
         goal.progress_percentage = min(milestone_progress, 100)
-        goal.save(update_fields=['progress_percentage'])
+        GoalProgressService._auto_transition_status(goal)
+        goal.save(update_fields=['progress_percentage', 'status'])
+
+        # 所有里程碑完成 → 检查目标完成奖励
+        if goal.progress_percentage >= 100 and not goal.milestones.exclude(status='completed').exists():
+            MilestoneRewardService._check_goal_completion_bonus(goal)
 
     @staticmethod
     def _milestone_progress(goal):
@@ -42,6 +48,12 @@ class GoalProgressService:
             return 0
         completed = milestones.filter(status='completed').count()
         return int((completed / total) * 100)
+
+    @staticmethod
+    def _auto_transition_status(goal):
+        """进度 100% 时自动流转状态为已完成"""
+        if goal.progress_percentage >= 100 and goal.status == 'in-progress':
+            goal.status = 'completed'
 
     @staticmethod
     def _action_progress(goal, days=30):
@@ -116,6 +128,7 @@ class MilestoneRewardService:
             return None
 
         reward_amount = self._get_reward_amount(milestone)
+        result = None
 
         if reward_amount > 0:
             tx = self.reward_service.add_reward(
@@ -137,12 +150,39 @@ class MilestoneRewardService:
                 total_reward_issued=models.F('total_reward_issued') + reward_amount,
             )
 
-            return {
+            result = {
                 'amount': float(reward_amount),
                 'transaction_id': tx.id,
             }
 
-        return None
+        # 检查目标是否全部完成 → 发放目标完成奖励金
+        self._check_goal_completion_bonus(milestone.goal)
+
+        return result
+
+    @staticmethod
+    def _check_goal_completion_bonus(goal) -> None:
+        """所有里程碑完成后发放目标完成奖励金（仅一次）"""
+        from apps.reward.models import RewardTransaction
+
+        if goal.goal_completion_bonus <= 0:
+            return
+        if goal.milestones.exclude(status='completed').exists():
+            return
+        if RewardTransaction.objects.filter(
+            source_type='goal_complete',
+            source_id=goal.id,
+        ).exists():
+            return
+
+        service = RewardPoolService()
+        service.add_reward(
+            source_id=goal.id,
+            source_type='goal_complete',
+            amount=goal.goal_completion_bonus,
+            transaction_type='goal_complete',
+            description=f'🎉 目标完成：{goal.title}，获得{goal.goal_completion_bonus}元额外奖励',
+        )
 
     @transaction.atomic
     def sync_on_update(self, milestone, old_status: str, old_reward: Decimal | None) -> dict | None:

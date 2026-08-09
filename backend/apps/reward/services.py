@@ -125,10 +125,20 @@ class RewardPoolService:
             .order_by('-created_at')
         )
 
+        goal_complete_total = RewardTransaction.objects.filter(
+            source_type='goal_complete',
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        inbox_complete_total = RewardTransaction.objects.filter(
+            source_type='inbox_complete',
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
         return {
             'sugar': float(sugar_total),
             'milestone': float(milestone_total),
-            'total': float(sugar_total + milestone_total),
+            'goal_complete': float(goal_complete_total),
+            'inbox_complete': float(inbox_complete_total),
+            'total': float(sugar_total + milestone_total + goal_complete_total + inbox_complete_total),
             'milestone_detail': [
                 {
                     'source_id': item['source_id'],

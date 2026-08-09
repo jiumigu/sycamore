@@ -36,6 +36,10 @@ export function getStatusStats() {
   return request({ url: '/goals/goals/status_stats/', method: 'get' })
 }
 
+export function getDimensionStats() {
+  return request({ url: '/goals/goals/dimension_stats/', method: 'get' })
+}
+
 export function toggleMilestone(goalId: number, milestoneId: number, data: Record<string, unknown>) {
   return request({
     url: `/goals/goals/${goalId}/toggle_milestone/`,

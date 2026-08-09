@@ -1,5 +1,7 @@
 """工具箱业务逻辑"""
 
+from decimal import Decimal
+
 from .models import CareerEnergyAudit
 
 
@@ -87,6 +89,26 @@ def update_career_audit_decision(instance: CareerEnergyAudit) -> None:
 # ─── 时薪计算 ────────────────────────────────────
 
 
+def _extra_income_monthly(extra_incomes) -> Decimal:
+    """把额外收入统一换算为每月金额（daily*30 / yearly/12 / monthly原值）"""
+    total = Decimal('0')
+    for source in extra_incomes or []:
+        if not isinstance(source, dict):
+            continue
+        try:
+            amount = Decimal(str(source.get('amount') or 0))
+        except (ValueError, TypeError):
+            amount = Decimal('0')
+        period = source.get('period') or 'monthly'
+        if period == 'daily':
+            total += amount * 30
+        elif period == 'yearly':
+            total += amount / 12
+        else:
+            total += amount
+    return total
+
+
 def calculate_hourly_wage(
     monthly_salary,
     rest_type='双休',
@@ -100,11 +122,15 @@ def calculate_hourly_wage(
     freelance_hours_per_day=None,
     weekly_hours=None,
     freelance_weeks=4,
+    extra_incomes=None,
 ):
-    """计算实际时薪（含通勤时间）"""
+    """计算实际时薪（含通勤时间与额外收入，时薪按总收入/总投入小时）"""
+    total_salary = Decimal(str(monthly_salary))
+    total_extra = _extra_income_monthly(extra_incomes)
+    total_income = total_salary + total_extra
+
     if calc_mode == 'freelance':
-        return _calc_freelance(
-            monthly_salary=monthly_salary,
+        stats = _freelance_stats(
             time_mode=freelance_time_mode,
             days=freelance_days,
             hours_per_day=freelance_hours_per_day,
@@ -112,8 +138,23 @@ def calculate_hourly_wage(
             weeks=freelance_weeks,
             commute_minutes=commute_minutes,
         )
+    else:
+        stats = _formal_stats(
+            rest_type=rest_type,
+            work_start=work_start,
+            work_end=work_end,
+            lunch_break=lunch_break,
+            commute_minutes=commute_minutes,
+        )
 
-    # 正式职业：原有逻辑
+    total_hours = stats['total_hours_per_month']
+    hourly_wage = round(float(total_income) / total_hours, 2) if total_hours > 0 else 0
+    stats['hourly_wage'] = hourly_wage
+    return stats
+
+
+def _formal_stats(rest_type, work_start, work_end, lunch_break, commute_minutes):
+    """正式职业：月工作天数/日工作小时/月总投入小时"""
     # 月工作天数
     if rest_type == '双休':
         work_days = 21.75
@@ -136,19 +177,15 @@ def calculate_hourly_wage(
     # 月总投入小时 = 工作小时 + 通勤小时
     total_hours = work_days * (work_hours + commute_hours)
 
-    # 时薪 = 月薪 / 总投入小时
-    hourly_wage = round(float(monthly_salary) / total_hours, 2) if total_hours > 0 else 0
-
     return {
         'work_days_per_month': round(work_days, 1),
         'work_hours_per_day': round(work_hours, 1),
         'total_hours_per_month': round(total_hours, 1),
-        'hourly_wage': hourly_wage,
     }
 
 
-def _calc_freelance(monthly_salary, time_mode, days, hours_per_day, weekly_hours, weeks, commute_minutes):
-    """自由职业时薪计算"""
+def _freelance_stats(time_mode, days, hours_per_day, weekly_hours, weeks, commute_minutes):
+    """自由职业：月工作天数/日工作小时/月总投入小时"""
     commute_hours_per_day = commute_minutes * 2 / 60
 
     if time_mode == 'flexible':
@@ -166,13 +203,10 @@ def _calc_freelance(monthly_salary, time_mode, days, hours_per_day, weekly_hours
         work_hours_per_day = h
         total_hours = d * h + commute_hours_per_day * d
 
-    hourly_wage = round(float(monthly_salary) / total_hours, 2) if total_hours > 0 else 0
-
     return {
         'work_days_per_month': round(work_days, 1),
         'work_hours_per_day': round(work_hours_per_day, 1),
         'total_hours_per_month': round(total_hours, 1),
-        'hourly_wage': hourly_wage,
     }
 
 

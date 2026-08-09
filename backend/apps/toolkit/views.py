@@ -3,6 +3,8 @@ import os
 import time
 import uuid
 
+from decimal import Decimal
+
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
@@ -13,7 +15,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 
 from apps.sugar.models import SugarRecord
 from apps.treasure.models import GoodThing
@@ -25,6 +27,7 @@ from .serializers import (
     EnvironmentAuditSerializer,
     ExecutionSerializer,
     ExecuteToolSerializer,
+    FixedExpenseSerializer,
     FreeSpendingCalculatorSerializer,
     HealthSelfCheckSerializer,
     HourlyWageRecordSerializer,
@@ -35,6 +38,9 @@ from .serializers import (
     TravelRoutePresetSerializer,
 )
 from .services import calculate_health_score, collect_health_alerts, update_career_audit_decision
+
+# 周期 → 天数换算：daily=1天、monthly=30天、yearly=365天
+PERIOD_DAYS = {'daily': 1, 'monthly': 30, 'yearly': 365}
 
 
 class CityCoordinateViewSet(viewsets.ReadOnlyModelViewSet):
@@ -193,15 +199,39 @@ class ExecuteToolView(views.APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+_TOOL_ALLOWED_EXTS = {
+    'trad2simp': {'.txt'},
+    'gif-compressor': {'.gif'},
+}
+
+
+def _build_tool_params(form_data) -> dict:
+    """将 multipart 表单字段转为工具参数，数值字符串自动转换类型"""
+    params = {}
+    for key, value in form_data.items():
+        if key in ('tool_key', 'file'):
+            continue
+        if isinstance(value, str):
+            try:
+                params[key] = int(value)
+            except ValueError:
+                try:
+                    params[key] = float(value)
+                except ValueError:
+                    params[key] = value
+        else:
+            params[key] = value
+    return params
+
+
 class FileToolUploadView(views.APIView):
-    """文件上传工具执行——接收文件 + 工具参数，用于文本转换类工具"""
+    """文件上传工具执行——接收文件 + 工具参数，用于文件处理类工具"""
 
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
 
     def post(self, request):
         tool_key = request.data.get('tool_key')
-        mode = request.data.get('mode', 't2s')
         uploaded_file = request.FILES.get('file')
 
         if not tool_key:
@@ -214,8 +244,13 @@ class FileToolUploadView(views.APIView):
             return Response({'error': '工具不存在'}, status=status.HTTP_404_NOT_FOUND)
 
         ext = os.path.splitext(uploaded_file.name)[1].lower()
-        if ext != '.txt':
-            return Response({'error': '仅支持 .txt 文件'}, status=status.HTTP_400_BAD_REQUEST)
+        allowed = _TOOL_ALLOWED_EXTS.get(tool_key)
+        if allowed is None:
+            return Response({'error': '该工具不支持文件上传'}, status=status.HTTP_400_BAD_REQUEST)
+        if ext not in allowed:
+            return Response({
+                'error': f'仅支持 {", ".join(sorted(allowed))} 文件',
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         temp_dir = os.path.join(settings.MEDIA_ROOT, 'toolkit_uploads')
         os.makedirs(temp_dir, exist_ok=True)
@@ -224,13 +259,16 @@ class FileToolUploadView(views.APIView):
             for chunk in uploaded_file.chunks():
                 f.write(chunk)
 
+        params = _build_tool_params(request.data)
+        params['file'] = temp_path
+
         definition = ToolkitDefinition.objects.filter(
             tool_key=tool_key, is_enabled=True,
         ).first()
 
         execution = ToolkitExecution.objects.create(
             tool=definition,
-            input_params={'original_name': uploaded_file.name, 'mode': mode},
+            input_params={'original_name': uploaded_file.name, **params},
             status='running',
             user_id=1,
         ) if definition else None
@@ -238,7 +276,7 @@ class FileToolUploadView(views.APIView):
         try:
             start = time.time()
             result = tool.execute(
-                {'file': temp_path, 'mode': mode},
+                params,
                 progress_callback=execution.update_progress if execution else None,
             )
             elapsed = int((time.time() - start) * 1000)
@@ -563,6 +601,42 @@ class FreeSpendingCalculatorViewSet(viewsets.ModelViewSet):
         serializer.save(user_id=1)
 
 
+class FixedExpenseViewSet(viewsets.ModelViewSet):
+    """固定开销计算 CRUD"""
+
+    permission_classes = [AllowAny]
+    queryset = FixedExpense.objects.all()
+    serializer_class = FixedExpenseSerializer
+
+    def get_queryset(self):
+        return FixedExpense.objects.filter(user_id=1)
+
+    def _compute_totals(self, items):
+        total_daily = Decimal('0')
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            amount = Decimal(str(item.get('amount') or 0))
+            days = PERIOD_DAYS.get(item.get('period') or 'monthly', 30)
+            total_daily += (amount / days).quantize(Decimal('0.01'))
+        return {
+            'total_daily': total_daily,
+            'total_monthly': (total_daily * 30).quantize(Decimal('0.01')),
+            'total_yearly': (total_daily * 365).quantize(Decimal('0.01')),
+        }
+
+    def perform_create(self, serializer):
+        items = serializer.validated_data.get('items') or []
+        serializer.save(user_id=1, **self._compute_totals(items))
+
+    def perform_update(self, serializer):
+        items = serializer.validated_data.get('items')
+        kwargs = {}
+        if items is not None:
+            kwargs.update(self._compute_totals(items))
+        serializer.save(**kwargs)
+
+
 class HourlyWageViewSet(viewsets.ModelViewSet):
     """时薪计算 CRUD"""
 
@@ -573,10 +647,9 @@ class HourlyWageViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return HourlyWageRecord.objects.filter(user_id=1)
 
-    def perform_create(self, serializer):
+    def _compute_wage(self, data):
         from .services import calculate_hourly_wage
-        data = serializer.validated_data
-        result = calculate_hourly_wage(
+        return calculate_hourly_wage(
             monthly_salary=float(data['monthly_salary']),
             rest_type=data.get('rest_type', '双休'),
             work_start=data.get('work_start', '09:00'),
@@ -589,8 +662,16 @@ class HourlyWageViewSet(viewsets.ModelViewSet):
             freelance_hours_per_day=data.get('freelance_hours_per_day'),
             weekly_hours=data.get('weekly_hours', []),
             freelance_weeks=data.get('freelance_weeks', 4),
+            extra_incomes=data.get('extra_incomes', []),
         )
+
+    def perform_create(self, serializer):
+        result = self._compute_wage(serializer.validated_data)
         serializer.save(user_id=1, **result)
+
+    def perform_update(self, serializer):
+        result = self._compute_wage(serializer.validated_data)
+        serializer.save(**result)
 
 
 class ReviewRecordViewSet(viewsets.ModelViewSet):

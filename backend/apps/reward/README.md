@@ -20,6 +20,7 @@
 | gift_exchange | 礼物兑换 |
 | withdraw | 提取 |
 | inbox_complete | 收件箱完成 |
+| goal_complete | 目标完成 |
 
 ## 核心逻辑（services.py）
 - 奖励池是单例模式：`_get_or_create_pool()` 自动创建

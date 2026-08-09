@@ -36,7 +36,7 @@ class InboxItemSerializer(serializers.ModelSerializer):
             'due_date', 'remind_at', 'processed_at',
             'priority', 'priority_display',
             'user_id', 'created_at', 'updated_at',
-            'completion_note', 'hesitate_reason',
+            'completion_note', 'hesitate_reason', 'abandon_reason',
         ]
         read_only_fields = ['id', 'processed_at', 'created_at', 'updated_at', 'completion_note']
 
@@ -72,7 +72,7 @@ class InboxItemDetailSerializer(serializers.ModelSerializer):
             'due_date', 'remind_at', 'processed_at',
             'priority', 'priority_display',
             'user_id', 'created_at', 'updated_at',
-            'completion_note', 'hesitate_reason',
+            'completion_note', 'hesitate_reason', 'abandon_reason',
             'process_logs',
         ]
         read_only_fields = ['id', 'processed_at', 'created_at', 'updated_at', 'completion_note']

@@ -38,7 +38,11 @@
 
     <!-- 里程碑列表 -->
     <div class="milestone-section">
-      <div class="milestone-section-title">🎯 里程碑（{{ stats?.completed_milestones ?? 0 }}/{{ stats?.total_milestones ?? 0 }}）</div>
+      <div class="milestone-section-header">
+        <span class="milestone-section-title">🏁 里程碑（{{ stats?.completed_milestones ?? 0 }}/{{ stats?.total_milestones ?? 0 }}）</span>
+        <span v-if="uniformReward > 0" class="uniform-reward">💰 每项奖励 ¥{{ uniformReward }}</span>
+      </div>
+      <div class="milestone-list-wrapper">
       <template v-for="item in foldedMilestones" :key="item.id">
         <!-- 折叠占位符 -->
         <div v-if="item.isFoldPlaceholder" class="fold-placeholder" @click="toggleFold(item.foldGroupKey)">
@@ -47,26 +51,23 @@
         </div>
         <!-- 正常里程碑条目 -->
         <div v-else class="milestone-item" :class="{ completed: item.status === 'completed' }">
-          <div class="milestone-left">
-            <span class="status-icon" :class="item.status === 'completed' ? 'done' : 'todo'" @click.stop="toggleMilestoneStatus(item)">
-              {{ item.status === 'completed' ? '✅' : '○' }}
-            </span>
-          </div>
-          <div class="milestone-content">
-            <div class="milestone-name">{{ item.title }}</div>
-            <div class="milestone-meta">
-              <span v-if="item.reward_amount">💰 ¥{{ item.reward_amount }}</span>
-              <el-tag :type="item.status === 'completed' ? 'success' : 'info'" size="small">
-                {{ item.status === 'completed' ? '已达成' : '待开始' }}
-              </el-tag>
-            </div>
-          </div>
-          <div class="milestone-right">
-            <el-button size="small" text @click.stop="openEditDialog(item)">✏️</el-button>
-          </div>
+          <span class="status-icon" :class="item.status === 'completed' ? 'done' : 'todo'" @click.stop="toggleMilestoneStatus(item)">
+            {{ item.status === 'completed' ? '✅' : '○' }}
+          </span>
+          <span class="milestone-title" :class="{ 'text-done': item.status === 'completed' }">{{ item.title }}</span>
+          <span class="milestone-date">
+            <template v-if="item.status === 'completed'">
+              完成：{{ item.updated_at?.slice(0, 10) || item.target_date?.slice(0, 10) || '--' }}
+            </template>
+            <template v-else>
+              截止：{{ item.target_date?.slice(0, 10) || '未设置' }}
+            </template>
+          </span>
+          <el-button size="small" text @click.stop="openEditDialog(item)">✏️</el-button>
         </div>
       </template>
       <el-empty v-if="!milestones.length" description="暂无里程碑" :image-size="60" />
+      </div>
     </div>
 
     <!-- 里程碑编辑弹窗 -->
@@ -166,6 +167,14 @@ const stats = ref<CheckinStats | null>(null)
 const alreadyChecked = ref(false)
 
 const milestones = computed(() => stats.value?.milestones ?? [])
+
+const uniformReward = computed(() => {
+  const items = milestones.value
+  const amounts = items.filter(m => m.reward_amount > 0).map(m => m.reward_amount)
+  if (amounts.length === 0) return 0
+  const first = amounts[0]
+  return amounts.every(a => a === first) ? first : 0
+})
 
 watch(milestones, (val) => {
   console.log('【折叠调试】milestones 数据变化，数量:', val?.length, '条目:', val?.map(m => ({ title: m.title?.slice(0, 20), status: m.status })))
@@ -585,29 +594,51 @@ onMounted(loadStats)
 .milestone-section {
   margin-top: 12px;
 
+  .milestone-section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
   .milestone-section-title {
     font-size: 13px;
     font-weight: 600;
-    margin-bottom: 8px;
     color: var(--el-text-color-primary);
   }
 
-  .milestone-item {
+  .uniform-reward {
+    font-size: 12px;
+    color: #e6a23c;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .milestone-list-wrapper {
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 4px;
+
+    &::-webkit-scrollbar { width: 4px; }
+    &::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+
+    .milestone-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 10px;
+    gap: 8px;
+    padding: 6px 8px;
+    flex-wrap: nowrap;
     border-bottom: 1px solid #f5f5f5;
 
     &:last-child { border-bottom: none; }
 
     &.completed {
       background: #f9fafb;
-      .milestone-name { color: #999; text-decoration: line-through; }
     }
 
     .status-icon {
-      font-size: 16px;
+      flex-shrink: 0;
+      font-size: 14px;
       cursor: pointer;
       transition: transform 0.15s;
       &:hover { transform: scale(1.2); }
@@ -615,31 +646,29 @@ onMounted(loadStats)
       &.todo { color: #ccc; }
     }
 
-    .milestone-content {
+    .milestone-title {
       flex: 1;
       min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      color: #333;
 
-      .milestone-name {
-        font-size: 13px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .milestone-meta {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 2px;
-        font-size: 12px;
-        color: #999;
+      &.text-done {
+        text-decoration: line-through;
+        color: #bbb;
       }
     }
 
-    .milestone-right {
+    .milestone-date {
       flex-shrink: 0;
+      font-size: 12px;
+      color: #999;
+      white-space: nowrap;
     }
   }
+}
 }
 
 .milestone-header {

@@ -44,6 +44,7 @@
 
         <!-- 当前时间 -->
         <div class="current-time">
+          <span class="week-info">{{ weekNumber }}</span>
           <span class="date">{{ currentDate }}</span>
           <span class="time">{{ currentTime }}</span>
         </div>
@@ -97,6 +98,7 @@ const notificationStore = useNotificationStore()
 // ============================================
 
 const currentTime = ref('')
+const weekNumber = ref('')
 const isSyncing = ref(false)
 const lastSyncTime = ref('10分钟前')
 
@@ -123,6 +125,14 @@ const currentDate = computed(() => {
 // 方法
 // ============================================
 
+const updateWeekNumber = () => {
+  const now = new Date()
+  const startOfYear = new Date(now.getFullYear(), 0, 1)
+  const days = Math.floor((now.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000))
+  const week = Math.ceil((days + startOfYear.getDay() + 1) / 7)
+  weekNumber.value = `第${week}周`
+}
+
 const updateCurrentTime = () => {
   const now = new Date()
   currentTime.value = now.toLocaleTimeString('zh-CN', {
@@ -131,6 +141,7 @@ const updateCurrentTime = () => {
     minute: '2-digit',
     second: '2-digit',
   })
+  updateWeekNumber()
 }
 
 // 进度条通用逻辑
@@ -321,6 +332,20 @@ onUnmounted(() => {
       font-size: 12px;
       color: var(--lm-text-secondary);
       font-variant-numeric: tabular-nums;
+
+      .week-info {
+        font-size: 12px;
+        color: #999;
+        background: #f0f2f5;
+        padding: 2px 8px;
+        border-radius: 10px;
+        white-space: nowrap;
+      }
+
+      .date {
+        font-size: 12px;
+        color: #999;
+      }
 
       .time {
         color: var(--lm-text-primary);

@@ -136,6 +136,10 @@ export function createHourlyWage(data: Record<string, unknown>) {
   return request({ url: '/toolkit/hourly-wage/', method: 'post', data })
 }
 
+export function updateHourlyWage(id: number, data: Record<string, unknown>) {
+  return request({ url: `/toolkit/hourly-wage/${id}/`, method: 'put', data })
+}
+
 export function deleteHourlyWage(id: number) {
   return request({ url: `/toolkit/hourly-wage/${id}/`, method: 'delete' })
 }
@@ -152,6 +156,24 @@ export function createFreeSpending(data: Record<string, unknown>) {
 
 export function deleteFreeSpending(id: number) {
   return request({ url: `/toolkit/free-spending/${id}/`, method: 'delete' })
+}
+
+// ────────── 固定开销计算 ──────────
+
+export function getFixedExpenseList(params?: Record<string, unknown>) {
+  return request({ url: '/toolkit/fixed-expenses/', method: 'get', params })
+}
+
+export function createFixedExpense(data: Record<string, unknown>) {
+  return request({ url: '/toolkit/fixed-expenses/', method: 'post', data })
+}
+
+export function updateFixedExpense(id: number, data: Record<string, unknown>) {
+  return request({ url: `/toolkit/fixed-expenses/${id}/`, method: 'put', data })
+}
+
+export function deleteFixedExpense(id: number) {
+  return request({ url: `/toolkit/fixed-expenses/${id}/`, method: 'delete' })
 }
 
 // ────────── 标签管理器 ──────────

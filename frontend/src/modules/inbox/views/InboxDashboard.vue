@@ -16,25 +16,31 @@
           <div class="stat-value pending">{{ stats.pending }}</div>
         </el-card>
       </el-col>
-      <el-col :span="5">
+      <el-col :span="4">
         <el-card class="stat-card" :class="{ active: store.filterStatus === 'hesitating' }" shadow="hover" @click="filterByStatus('hesitating')">
           <div class="stat-label">🤔 犹豫中</div>
           <div class="stat-value hesitating">{{ stats.hesitating }}</div>
         </el-card>
       </el-col>
-      <el-col :span="5">
+      <el-col :span="4">
         <el-card class="stat-card" :class="{ active: store.filterStatus === 'done' }" shadow="hover" @click="filterByStatus('done')">
           <div class="stat-label">✅ 已完成</div>
           <div class="stat-value completed">{{ stats.completed }}</div>
         </el-card>
       </el-col>
-      <el-col :span="5">
+      <el-col :span="4">
         <el-card class="stat-card" :class="{ active: store.filterStatus === 'processed' }" shadow="hover" @click="filterByStatus('processed')">
           <div class="stat-label">🔄 已处理</div>
           <div class="stat-value processed">{{ stats.processed }}</div>
         </el-card>
       </el-col>
-      <el-col :span="5">
+      <el-col :span="4">
+        <el-card class="stat-card" :class="{ active: store.filterStatus === 'abandoned' }" shadow="hover" @click="filterByStatus('abandoned')">
+          <div class="stat-label">🗑️ 已废弃</div>
+          <div class="stat-value abandoned">{{ stats.abandoned }}</div>
+        </el-card>
+      </el-col>
+      <el-col :span="4">
         <el-card class="stat-card" :class="{ active: !store.filterStatus || store.filterStatus === 'all' }" shadow="hover" @click="filterByStatus('all')">
           <div class="stat-label">📊 总条数</div>
           <div class="stat-value total">{{ stats.total }}</div>
@@ -164,7 +170,7 @@ import ConvertModal from '../components/ConvertModal.vue'
 
 const store = useInboxStore()
 
-const stats = computed(() => store.stats ?? { pending: 0, hesitating: 0, completed: 0, processed: 0, total: 0 })
+const stats = computed(() => store.stats ?? { pending: 0, hesitating: 0, completed: 0, processed: 0, abandoned: 0, total: 0 })
 
 function filterByStatus(status: string) {
   if (store.filterStatus === status || (status === 'all' && (!store.filterStatus || store.filterStatus === 'all'))) {
@@ -362,6 +368,7 @@ async function confirmComplete() {
   &.hesitating { color: #F59E0B; }
   &.completed { color: #10B981; }
   &.processed { color: #8B5CF6; }
+  &.abandoned { color: #9CA3AF; }
   &.total { color: #6B7280; }
 }
 .section {

@@ -20,6 +20,7 @@
             <el-select v-model="form.status" style="width: 100%">
               <el-option label="待处理" value="pending" />
               <el-option label="犹豫中" value="hesitating" />
+              <el-option label="已废弃" value="abandoned" />
             </el-select>
           </el-form-item>
         </el-col>
@@ -45,6 +46,10 @@
       <el-form-item v-if="form.status === 'hesitating'" label="犹豫原因">
         <el-input v-model="form.hesitate_reason" type="textarea" :rows="2"
           placeholder="是什么让你不敢开始？怕失败？怕被评价？还是不确定值不值得？" />
+      </el-form-item>
+      <el-form-item v-if="form.status === 'abandoned'" label="废弃原因">
+        <el-input v-model="form.abandon_reason" type="textarea" :rows="2"
+          placeholder="为什么不做了？不合理？时过境迁？" />
       </el-form-item>
       <el-form-item label="标签">
         <el-input v-model="form.tags" placeholder="逗号分隔，如：生活,工作" />
@@ -98,6 +103,7 @@ const form = reactive({
   due_date: '',
   tags: '',
   hesitate_reason: '',
+  abandon_reason: '',
 })
 
 const rules = {
@@ -116,6 +122,7 @@ watch(() => props.visible, (v) => {
     form.due_date = props.item.due_date ?? ''
     form.tags = props.item.tags ?? ''
     form.hesitate_reason = props.item.hesitate_reason ?? ''
+    form.abandon_reason = props.item.abandon_reason ?? ''
   } else if (v && !props.item) {
     isEdit.value = false
     form.content = ''
@@ -126,6 +133,7 @@ watch(() => props.visible, (v) => {
     form.due_date = ''
     form.tags = ''
     form.hesitate_reason = ''
+    form.abandon_reason = ''
   }
 })
 watch(visible, (v) => { emit('update:visible', v) })
@@ -143,6 +151,7 @@ async function handleSave() {
     tags: form.tags || null,
     due_date: form.due_date || null,
     hesitate_reason: form.hesitate_reason || '',
+    abandon_reason: form.abandon_reason || '',
   }
 
   if (props.item) {
