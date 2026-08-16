@@ -66,11 +66,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, nextTick } from 'vue'
+import { ref, reactive, watch, nextTick, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { LANGUAGE_OPTIONS } from '../types/quoteTypes'
 import type { Quote, QuoteFormData } from '../types/quoteTypes'
 import { createQuote, updateQuote } from '../api/quoteApi'
+import { getPresetByType } from '@/shared/api/coreApi'
 
 const props = defineProps<{
   visible: boolean
@@ -86,7 +87,7 @@ const dialogVisible = ref(false)
 const submitting = ref(false)
 const editing = ref(false)
 
-const presetTags = ['励志', '人生感悟', '写作', '成长', '情感', '职场', '哲思', '幽默', '治愈', '自律']
+const presetTags = ref<string[]>([])
 const tagList = ref<string[]>([])
 const showTagInput = ref(false)
 const newTag = ref('')
@@ -160,6 +161,17 @@ function handleClose() {
   showTagInput.value = false
   newTag.value = ''
 }
+
+async function loadPresetTags() {
+  try {
+    const res = await getPresetByType('tags')
+    presetTags.value = res.data.values || []
+  } catch {
+    presetTags.value = []
+  }
+}
+
+onMounted(loadPresetTags)
 
 async function handleSubmit() {
   if (!form.content.trim()) {

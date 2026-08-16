@@ -11,7 +11,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Notification, UserProfile
+from .models import Notification, SystemPreset, UserProfile
 
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,46 @@ class ProfileView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=400)
+
+
+class SystemPresetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemPreset
+        fields = ['preset_type', 'values', 'updated_at']
+
+
+class SystemPresetViewSet(viewsets.ReadOnlyModelViewSet):
+    """系统预设：标签 / 快捷短语，按 preset_type 存取"""
+
+    permission_classes = [AllowAny]
+    queryset = SystemPreset.objects.all()
+    serializer_class = SystemPresetSerializer
+
+    @action(detail=False, methods=['get'])
+    def by_type(self, request):
+        """按类型获取预设值，如 ?type=diary_tags"""
+        preset_type = request.query_params.get('type', '')
+        obj = SystemPreset.objects.filter(preset_type=preset_type).first()
+        if not obj:
+            return Response({'preset_type': preset_type, 'values': []})
+        return Response(self.get_serializer(obj).data)
+
+    @action(detail=False, methods=['post'])
+    def save_by_type(self, request):
+        """按类型创建/更新预设，body: {preset_type, values}"""
+        preset_type = request.data.get('preset_type', '').strip()
+        values = request.data.get('values')
+
+        if preset_type not in dict(SystemPreset.PRESET_TYPE_CHOICES):
+            return Response({'error': '无效的预设类型'}, status=400)
+        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+            return Response({'error': 'values 必须是字符串列表'}, status=400)
+
+        obj, _ = SystemPreset.objects.update_or_create(
+            preset_type=preset_type,
+            defaults={'values': values},
+        )
+        return Response(self.get_serializer(obj).data)
 
 
 class GlobalSearchView(APIView):

@@ -223,6 +223,7 @@ import { CATEGORY_OPTIONS, JOY_TYPE_OPTIONS } from '../types/sugarTypes'
 import type { SugarRecord } from '../types/sugarTypes'
 import SugarCard from '../components/SugarCard.vue'
 import { getRewardPool } from '@/modules/reward/api/rewardApi'
+import { getPresetByType } from '@/shared/api/coreApi'
 
 const store = useSugarStore()
 
@@ -273,11 +274,19 @@ const rules = {
   level_of_happiness: [{ required: true, message: '请选择快乐程度', trigger: 'change' }],
 }
 
-const presetTags = ['美食', '旅行', '人际关系', '学习成长', '工作成就', '自然', '音乐', '阅读', '运动', '意外惊喜']
-
+const presetTags = ref<string[]>([])
 const customTags = computed(() => {
-  return form.tagList.filter(t => !presetTags.includes(t))
+  return form.tagList.filter(t => !presetTags.value.includes(t))
 })
+
+async function loadPresetTags() {
+  try {
+    const res = await getPresetByType('sugar_tags')
+    presetTags.value = res.data.values || []
+  } catch {
+    presetTags.value = []
+  }
+}
 
 const happinessTexts: Record<number, string> = {
   5: '一般般', 6: '还行', 7: '还不错', 8: '挺开心', 9: '很开心', 10: '超开心',
@@ -424,6 +433,7 @@ async function refreshAll() {
 
 onMounted(() => {
   refreshAll()
+  loadPresetTags()
 })
 
 function formatMoney(v: number | string | null | undefined): string {

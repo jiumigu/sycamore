@@ -4,6 +4,7 @@ from .coverage_calculator import calculate_coverage
 from .monthly_aggregator import aggregate_monthly_days, get_daily_detail, calculate_monthly_summary
 from .review_service import get_monthly_review, get_trend_data, get_category_ranking, get_monthly_list, get_compare_data, generate_balance_info
 from .cashflow_service import get_cashflow_overview, get_asset_trend, get_snapshot_list, reconcile, create_or_update_snapshot, copy_last_month, get_cashflow_by_yearmon
+from .allocation_service import AllocationService
 
 __all__ = [
     'init_week_calendar_for_user',
@@ -27,4 +28,5 @@ __all__ = [
     'create_or_update_snapshot',
     'copy_last_month',
     'get_cashflow_by_yearmon',
+    'AllocationService',
 ]

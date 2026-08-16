@@ -1,5 +1,84 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-08-16] v3.35.0 — 资金排程 + 分配计划（分配是计划，不是记录）
+
+### ✨ 新增
+
+- **资金排程 + 分配计划看板**：新增 `/wealth/fund` 资金排程页面（`AllocationBoard.vue`，替换原 CashFlowBoard）——四张核心卡（手头现金可编辑 / 硬性承诺 / 预留分配 / 自由支配）+ 预留分配计划 + 硬性承诺 + 自由决策记录。核心语义：**分配是计划（预留），不是记录（花费）**，流程 手头现金 → 硬性承诺 → 预留分配 → 自由支配
+- **分配模型**：新增 `AllocationCategory` / `AllocationPlan` / `AllocationItem` / `Commitment` / `DecisionLog` 五表。月度计划按 `year_month` 唯一；分配项按 `(plan, category)` 唯一且 `remaining = planned - spent` 自动计算；承诺三态（待付/紧急/已付）+ 来源（账单/收件箱/手动）；决策记录自由支配的打算怎么花
+- **分配服务**：`AllocationService`——幂等 `create_plan`（事务内 upsert 分配项保留已花费、重建承诺、剔除未包含项）、`get_plan_detail` 返回全部启用类别作虚拟项（未保存即可编辑）、`calculate_commitments` 经 `wealth_bill_list` 原生 SQL 按 60 天窗口聚合支出账单
+- **分配 API**：`AllocationViewSet` 提供 `detail` / `create` / `update-allocations` / `record-spending` / `save-decision` / `categories` 六端点（前缀 `/api/wealth/allocation/`）
+- **类别初始化命令**：`manage.py init_allocation_categories` 幂等创建 5 个默认类别（投资 / 日常生活 / 精神愉悦-旅游美食 / 家居装修 / 风险预估-留底钱）
+
+### 🐛 修复
+
+- **分配计划幂等化**：`create_plan` 由「重复保存产生重复记录」改为 `update_or_create` 分配项（保留已花费）+ 删除重建承诺 + 剔除未包含项，可反复保存
+- **detail 端点冲突**：`@action` 方法命名 `detail` 与 DRF 的 `self.detail` 布尔实例属性冲突，抛 `TypeError: 'bool' object is not callable`；方法更名 `get_detail`（`url_path` 不变）
+- **formatAmount 导入路径**：前端由 `@/shared/utils/privacy` 改为 `@/shared/utils/format`（实际导出位置）
+- **账单表原生查询**：规范中的 `WealthBill` ORM 模型不存在，硬性承诺聚合改用 `wealth_bill_list` 原生 SQL
+
+### 🗑️ 删除
+
+- **移除资金池系统（v2.0 持续资金池）**：删除 `FundPool` / `FundTransaction` 模型、`fund_service.py`、`fund-*` 全部端点与 `FundDashboard.vue` / fund store/api/types，由资金排程 + 分配计划取代
+
+### 📝 文档
+
+- 更新 `wealth/README.md`（后端）：分配五模型、`allocation_service.py`、分配 API 端点、分配是计划不是记录语义；移除资金池文档
+- 更新 `wealth/README.md`（前端）：`AllocationBoard.vue` + 资金排程章节；`CashFlowBoard.vue` 移除
+
+---
+
+## [2026-08-11] v3.34.0 — 资金分配系统 v2.0（持续资金池模式）
+
+> ⚠️ 该版本的持续资金池功能已于 v3.35.0 移除，由「资金排程 + 分配计划」（分配是计划，不是记录）取代。
+
+### ✨ 新增
+
+- **持续资金池**：废弃月度预算快照模式，改为持续累积的资金池 + 流水账。池子余额 = 全部 `FundTransaction` 流水金额聚合（`Sum(amount)`），永不重置，一条流水记录对应一次 注入/分配/消费扣减/手动调整/退款
+- **资金流水模型**：新增 `FundTransaction`（池子外键 + 类型 + 金额 ± + 操作后余额 + 备注 + 关联账单 ID + 时间），替换原 `MonthlyBudget`/`PoolAllocation` 两表
+- **关联分类自动扣减**：`FundPool` 新增 `linked_categories` JSON 字段；快速记账（`BillCreateView`）写入支出账单后，`FundService.auto_deduct_from_bill()` 按分类匹配优先级最高的池子，自动写入 `spend` 流水扣减余额
+- **资金操作 API**：`fund-transactions/inject`（注入）、`allocate`（分配多池）、`adjust`（手动调整余额）、`pool/<id>`（流水列表）；`fund-overview/summary`（总资产/健康度/各池目标进度）、`balances`（余额明细）
+- **新资金分配看板**：`FundDashboard.vue` 重写为持续资金池单页——总览卡片（总资产/健康度/池子数量）+ 池子卡片网格（余额/蓄水池目标进度/关联分类标签/人生意图）+ 分配/注入/新建编辑/删除/流水详情弹窗，池子 CRUD 并入看板，删除冗余 `FundPoolManager.vue`
+- **健康度算法重做**：蓄水池达标 40 分 + 无负余额 30 分 + 池子多样性 30 分，满 100 分
+
+### 📝 文档
+
+- 更新 `wealth/README.md`（后端）：FundPool/FundTransaction 模型、`fund_service.py`、资金分配 API 端点、持续资金池与账单自动扣减语义
+- 更新 `wealth/README.md`（前端）：`FundView.vue`、`FundDashboard.vue`、fund store/api/types
+
+---
+
+## [2026-08-11] v3.33.0 — 自由职业资金分配系统 Phase 1
+
+### ✨ 新增
+
+- **资金池配置**：财富模块新增「资金分配」页面（`/wealth/fund`），支持自定义资金池管理——三种分配类型（`fixed` 固定金额 / `ratio` 收入比例 / `reservoir` 蓄水池目标），含图标、颜色、优先级、启用开关、人生意图描述。列表卡片网格 + 新增/编辑/删除弹窗。后端 `FundPool` 模型 + `FundPoolViewSet` CRUD
+- **月度资金概览**：按年月维度展示资金健康度评分（0-100）、当月总收入、已分配金额、初始注入资金，各池子进度条（已分配/已花/剩余），蓄水池达标展示「已达标/蓄水中」状态
+- **资金分配**：月度分配弹窗选择各池子分配金额，后端 `allocate_funds` 事务内写入 `PoolAllocation`，覆盖式更新，预算状态置为 `active`
+- **初始注入资金**：设置月度一次性注入的总池资金
+- **资金健康度算法**：分配执行率 25 分 + 风险缓冲达标率 30 分 + 支出偏差率 25 分 + 池子多样性 20 分，满 100 分
+- **删除保护**：资金池已有分配记录时禁止删除（`ProtectedError` → 400），提示可先停用该池子
+
+### 🐛 修复
+
+- **「新增池子」按钮无响应**：`FundPoolViewSet` 列表默认启用 DRF 分页，`GET /fund-pools/` 返回 `{count, next, previous, results}` 包装对象；前端 store 将整个对象赋给 `pools` ref，模板 `v-for :key="pool.id"` 遍历到 `null`（next/previous 键）抛出 `Cannot read properties of null`，组件渲染崩溃导致按钮无响应。修复：`FundPoolViewSet` 设置 `pagination_class = None` 返回纯数组 + store `fetchPools` 兼容 `results` 解构
+
+### 📝 文档
+
+- 更新 `wealth/README.md`（后端）：资金池三模型、`fund_service.py`、资金分配 API 端点、健康度算法与分配/删除保护语义
+- 更新 `wealth/README.md`（前端）：`FundView.vue`、`FundPoolManager.vue`、`FundDashboard.vue`、fund store/api/types
+
+---
+
+## [2026-08-09] v3.32.0 — 固定开销详情弹窗优化 + 底部状态栏周数显示
+
+### 🔧 优化
+
+- **固定开销详情弹窗排版优化**：弹窗加宽至 650px，开销项目改为 3 列对齐表格（项目名弹性占满、原始金额 150px 右对齐、折合月均 120px 右对齐加粗），月固定开销/日固定开销汇总改为纵向堆叠的 18px 加粗蓝色大数字，备注移至底部灰底区域；底部操作新增「复制并编辑」按钮复用表单填充逻辑。同时修复 `append-to-body` 挂载导致详情弹窗样式失效的遗留问题
+- **底部状态栏周数显示**：LayoutFooter 日期时间左侧新增「第N周」徽标，按 ISO 周算法随秒级时钟刷新，12px 灰底圆角样式
+
+---
+
 ## [2026-08-05] v3.31.0 — 打卡里程碑同步 + 收件箱已废弃 + 固定开销周期增强 + 时薪附加收入
 
 ### ✨ 新增

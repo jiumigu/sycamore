@@ -140,6 +140,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/wealth/views/CashFlowView.vue'),
         meta: { title: '现金盘点' },
       },
+      {
+        path: 'fund',
+        name: 'wealth-fund',
+        component: () => import('@/modules/wealth/views/AllocationBoard.vue'),
+        meta: { title: '资金排程' },
+      },
     ],
   },
   {
@@ -265,6 +271,12 @@ const routes: RouteRecordRaw[] = [
     name: 'AdminSettings',
     component: () => import('@/core/admin/views/AdminSettings.vue'),
     meta: { title: '系统设置' },
+  },
+  {
+    path: '/admin/presets',
+    name: 'AdminPresets',
+    component: () => import('@/core/admin/views/PresetManager.vue'),
+    meta: { title: '系统预设' },
   },
 
   // 连接与足迹

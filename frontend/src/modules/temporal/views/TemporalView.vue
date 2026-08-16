@@ -293,7 +293,41 @@
         </el-row>
 
         <el-form-item label="标签">
-          <el-input v-model="formData.flag" placeholder="标签" maxlength="50" />
+          <div class="tags-wrapper">
+            <span class="preset-label">常用：</span>
+            <el-tag
+              v-for="tag in presetTags"
+              :key="tag"
+              size="small"
+              :class="{ selected: tagList.includes(tag) }"
+              class="preset-tag"
+              @click="togglePresetTag(tag)"
+            >
+              {{ tag }}
+            </el-tag>
+
+            <div class="custom-tags">
+              <el-tag
+                v-for="tag in customTags"
+                :key="tag"
+                closable
+                size="small"
+                type="warning"
+                @close="removeTag(tag)"
+              >
+                {{ tag }}
+              </el-tag>
+              <el-input
+                v-if="showTagInput"
+                v-model="newTag"
+                size="small"
+                style="width: 80px"
+                @keyup.enter="addTag"
+                @blur="addTag"
+              />
+              <el-button v-else size="small" @click="showTagInput = true">+ 自定义</el-button>
+            </div>
+          </div>
         </el-form-item>
 
         <el-form-item label="备注">
@@ -323,6 +357,7 @@ import { OTYPE_OPTIONS } from '../types/temporalTypes'
 import { getYearlyHeatmap } from '../api/temporalApi'
 import type { OneDayPage } from '../types/temporalTypes'
 import LogseqViewer from '../components/LogseqViewer.vue'
+import { getPresetByType } from '@/shared/api/coreApi'
 
 const store = useTemporalStore()
 
@@ -409,9 +444,50 @@ const formData = reactive({
   otype: 'ONEDAY',
   oneday: 0,
   page: 0,
-  flag: '',
   remark: '',
 })
+
+// ── 标签（预设 + 自定义，与小确幸共用同一套预设） ──
+const tagList = ref<string[]>([])
+const showTagInput = ref(false)
+const newTag = ref('')
+
+const presetTags = ref<string[]>([])
+const customTags = computed(() => tagList.value.filter(t => !presetTags.value.includes(t)))
+
+async function loadPresetTags() {
+  try {
+    const res = await getPresetByType('diary_tags')
+    presetTags.value = res.data.values || []
+  } catch {
+    presetTags.value = []
+  }
+}
+
+function togglePresetTag(tag: string) {
+  const idx = tagList.value.indexOf(tag)
+  if (idx > -1) {
+    tagList.value.splice(idx, 1)
+  } else {
+    tagList.value.push(tag)
+  }
+}
+
+function addTag() {
+  const tag = newTag.value.trim()
+  if (tag && !tagList.value.includes(tag)) {
+    tagList.value.push(tag)
+  }
+  newTag.value = ''
+  showTagInput.value = false
+}
+
+function removeTag(tag: string) {
+  const idx = tagList.value.indexOf(tag)
+  if (idx > -1) {
+    tagList.value.splice(idx, 1)
+  }
+}
 
 const formRules = {
   begin_date: [{ required: true, message: '请选择创建日期', trigger: 'change' }],
@@ -489,8 +565,8 @@ function openCreateDialog() {
   formData.otype = 'ONEDAY'
   formData.oneday = 0
   formData.page = 0
-  formData.flag = ''
   formData.remark = ''
+  tagList.value = []
   dialogVisible.value = true
 }
 
@@ -502,8 +578,8 @@ function openEditDialog(row: OneDayPage) {
   formData.otype = row.otype
   formData.oneday = row.oneday ?? 0
   formData.page = row.page ?? 0
-  formData.flag = row.flag || ''
   formData.remark = row.remark || ''
+  tagList.value = row.flag ? row.flag.split(',').map(t => t.trim()).filter(Boolean) : []
   dialogVisible.value = true
 }
 
@@ -518,7 +594,7 @@ async function handleSubmit() {
     otype: formData.otype,
     oneday: formData.oneday,
     page: formData.page,
-    flag: formData.flag || null,
+    flag: tagList.value.length ? tagList.value.join(',') : null,
     remark: formData.remark || null,
   }
   Object.keys(data).forEach(k => { if (data[k] === null || data[k] === undefined) delete data[k] })
@@ -593,6 +669,7 @@ onMounted(() => {
   fetchData()
   store.fetchStats()
   fetchYearlyHeatmap(currentYear.value)
+  loadPresetTags()
 })
 </script>
 
@@ -777,5 +854,39 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+// ── 标签（预设 + 自定义） ──
+.tags-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.preset-label {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.preset-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover { opacity: 0.8; }
+
+  &.selected {
+    background: #ecf5ff;
+    border-color: #409eff;
+    color: #409eff;
+  }
+}
+
+.custom-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 </style>

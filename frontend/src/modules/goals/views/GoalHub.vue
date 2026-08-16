@@ -384,6 +384,7 @@ import GoalDetail from './GoalDetail.vue'
 import CreateActionDialog from '../components/CreateActionDialog.vue'
 import ActionDrawer from '../components/ActionDrawer.vue'
 import QuickGoalDialog from '../components/QuickGoalDialog.vue'
+import { getPresetByType } from '@/shared/api/coreApi'
 
 const goalStore = useGoalStore()
 const boardStore = useGoalBoardStore()
@@ -631,14 +632,16 @@ const selfReview = ref('')
 const completingDifficulty = ref('')
 const completingNextAction = ref('')
 
-const quickPhrases = [
-  '辛苦了，这段时间不容易',
-  '做得不错，继续保持',
-  '比想象中难，但坚持下来了',
-  '下次可以提前准备',
-  '这件事让我学到了...',
-  '完成了！下一个目标是什么？',
-]
+const quickPhrases = ref<string[]>([])
+
+async function loadQuickPhrases() {
+  try {
+    const res = await getPresetByType('quick_phrases')
+    quickPhrases.value = res.data.values || []
+  } catch {
+    quickPhrases.value = []
+  }
+}
 
 async function saveMilestoneDetail() {
   if (!editingMilestoneData.value) return
@@ -794,7 +797,10 @@ function onSaved() {
   refreshAll()
 }
 
-onMounted(() => { refreshAll() })
+onMounted(() => {
+  refreshAll()
+  loadQuickPhrases()
+})
 </script>
 
 <style scoped lang="scss">

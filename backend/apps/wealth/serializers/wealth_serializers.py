@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthCashFlow, WealthBalanceList
+from ..models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthCashFlow, WealthBalanceList
 
 
 class WeekCalendarSerializer(serializers.ModelSerializer):

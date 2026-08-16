@@ -1,3 +1,3 @@
 from django.contrib import admin
 
-# Register your models here.
+# wealth 模块暂未注册 admin

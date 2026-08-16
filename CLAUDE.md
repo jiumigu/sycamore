@@ -134,6 +134,7 @@ cd frontend && npm run preview      # 预览生产构建
 - **nourishment** 是纯前端模块，聚合 book/dance/sugar 后端
 - **wealth 热力图**：61年×52周 = 3172 单元格，复用 `wealth_bill_list`，支持历史(红绿) + 推演(蓝) 双层叠加
 - **wealth 月度日历**：6×7 CSS Grid + 农历/节气 + 7级颜色编码
+- **wealth 资金排程**：分配是计划（预留）不是记录（花费）——手头现金 → 硬性承诺 → 预留分配 → 自由支配，取代了已删除的持续资金池；硬性承诺聚合经 `wealth_bill_list` 原生 SQL
 - **reward 奖励池**：单例模式，通过 `RewardPoolService` 统一管理加减
 - **sugar→reward 同步**：sugar service 层直接调用 `RewardPoolService`，不经过 signal
 - **礼物自动检测**：`_check_gift_availability()` 在每次池变动后扫描 pending/waiting 状态切换

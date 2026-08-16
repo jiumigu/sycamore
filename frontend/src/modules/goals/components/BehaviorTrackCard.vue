@@ -150,6 +150,7 @@ import { ElMessageBox } from 'element-plus'
 import { Select, Calendar, ArrowDown } from '@element-plus/icons-vue'
 import { checkinAction, getCheckinStats, patchMilestone, toggleMilestone } from '../api/goalApi'
 import type { CheckinStats, CheckinMilestone } from '../types/goalTypes'
+import { getPresetByType } from '@/shared/api/coreApi'
 
 const props = defineProps<{
   goalId: number
@@ -293,14 +294,16 @@ const editForm = reactive({
   completed_note: '',
   self_review: '',
 })
-const quickPhrases = [
-  '辛苦了，这段时间不容易',
-  '做得不错，继续保持',
-  '比想象中难，但坚持下来了',
-  '下次可以提前准备',
-  '这件事让我学到了...',
-  '完成了！下一个目标是什么？',
-]
+const quickPhrases = ref<string[]>([])
+
+async function loadQuickPhrases() {
+  try {
+    const res = await getPresetByType('quick_phrases')
+    quickPhrases.value = res.data.values || []
+  } catch {
+    quickPhrases.value = []
+  }
+}
 
 const remaining = computed(() => {
   if (!stats.value) return 0
@@ -472,7 +475,10 @@ async function toggleMilestoneStatus(m: CheckinMilestone) {
   }
 }
 
-onMounted(loadStats)
+onMounted(() => {
+  loadStats()
+  loadQuickPhrases()
+})
 </script>
 
 <style scoped lang="scss">

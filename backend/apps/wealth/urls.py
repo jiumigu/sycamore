@@ -1,8 +1,14 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
 from . import views
+from .views.allocation_views import AllocationViewSet
+
+allocation_router = DefaultRouter()
+allocation_router.register(r'allocation', AllocationViewSet, basename='allocation')
 
 urlpatterns = [
+    path('', include(allocation_router.urls)),
     path('age-week/', views.CurrentAgeWeekView.as_view(), name='current-age-week'),
     path('calendar/', views.WeekCalendarView.as_view(), name='week-calendar'),
     path('weekly_summary/<int:global_week_index>/', views.WeeklySummaryView.as_view(), name='weekly-summary'),

@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 
 from apps.sugar.models import SugarRecord
+from apps.temporal.models import OneDayPage
 from apps.treasure.models import GoodThing
 from .registry import ToolRegistry
 from .serializers import (
@@ -729,6 +730,15 @@ class TagManagerView(views.APIView):
                     tags[tag]['count'] += 1
                     tags[tag]['modules'].add('💎 好东西')
 
+        for d in OneDayPage.objects.exclude(flag='').exclude(flag__isnull=True):
+            for tag in d.flag.split(','):
+                tag = tag.strip()
+                if tag:
+                    if tag not in tags:
+                        tags[tag] = {'count': 0, 'modules': set()}
+                    tags[tag]['count'] += 1
+                    tags[tag]['modules'].add('📝 日记流')
+
         sorted_tags = sorted(tags.items(), key=lambda x: -x[1]['count'])
 
         return Response({
@@ -791,6 +801,20 @@ class TagManagerView(views.APIView):
                             deduped.append(tg)
                     t.tags = ','.join(deduped)
                     t.save()
+                    affected += 1
+
+            for d in OneDayPage.objects.filter(flag__icontains=old_tag):
+                tags_list = [tg.strip() for tg in (d.flag or '').split(',')]
+                if old_tag in tags_list:
+                    tags_list = [new_tag if tg == old_tag else tg for tg in tags_list]
+                    seen = set()
+                    deduped = []
+                    for tg in tags_list:
+                        if tg not in seen:
+                            seen.add(tg)
+                            deduped.append(tg)
+                    d.flag = ','.join(deduped)
+                    d.save()
                     affected += 1
 
             return Response({'success': True, 'affected': affected})
