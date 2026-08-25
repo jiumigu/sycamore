@@ -1,6 +1,147 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-08-23] v3.42.0 — 人生样本 · 同步防重复 + Obsidian 打开修复
+
+### 🐛 修复
+
+- **Obsidian 打开失败（相对路径无法解析）**：`get_obsidian_uri` 原产出 `obsidian://open?path=<相对路径>`，Obsidian 无法解析。现改为拼上仓库绝对路径 → `obsidian://open?path=<绝对路径>`；前端打开时 URI 为空（集成未配置）则友好提示
+- **Obsidian 同步重复创建（文件重命名后）**：旧同步仅按 `obsidian_path` 精确匹配，文件重命名后路径已变 → 找不到原索引 → 重复创建。现改为四级匹配：① 路径精确匹配 → 字段变更则更新；② 文件名（不含扩展名）在已关联记录路径里包含匹配（重命名时 frontmatter name 也可能变）→ 迁移路径 + 更新内容；③ 按姓名匹配（文件已重命名或手动索引未关联）→ 迁移/补齐路径 + 更新内容，**保留 status/relevance**；④ 都找不到 → 新建。同步结果新增 `migrated` 列表（name/old_path/new_path），前端同步结果弹窗展示「🔁 迁移 X 个（路径变更）」
+- **卡片 Obsidian 路径显示过长**：仅显示文件名（`诗人_李白.md`），不再展示恒定无区分度的 `05_人生样本(LifeSamples)/` 前缀
+
+### 🗑️ 数据清理
+
+- 删除 40 条因 vault 文件批量重命名（`name.md` → `职业_姓名.md`）由旧 buggy 同步产生的重复记录（均无人工批注，保留指向现存 vault 文件的记录）；现 77 条记录全部指向真实 vault 文件，李白等重复名已收敛为单条
+
+### 📝 文档
+
+- 更新 `lifesample/README.md`（后端）：Services 增 `sync_samples` 四级匹配 + `get_obsidian_uri` 绝对路径说明、API 同步/打开端点更新
+- 更新 `lifesample/README.md`（前端）：Types 增 `SyncMigration`、SampleCard 路径显示与打开流程、API 同步/打开说明
+
+## [2026-08-21] v3.41.0 — 人生样本 · P0 状态与评级
+
+### ✨ 新增
+
+- **状态管理**：`LifeSample.status` ∈ 已收集/已核实/已审阅；`verified_at`/`reviewed_at` 由模型 `save()` 在状态推进时自动补齐（只读，防手填）；同步新建样本默认「已收集」
+- **借鉴意义评级**：`LifeSample.relevance` ∈ 高度借鉴/参考/了解 + `relevance_reason` 评级理由（卡片上以 💡 展示）
+- **状态/评级徽章组件**：`StatusBadge.vue` / `RelevanceBadge.vue`，样本卡片顶部展示；表单弹窗新增状态/评级 radio 组 + 评级理由输入
+- **统计展示**：`/samples/stats/` 返回 `status`/`relevance` 分布 dict；主页新增状态/评级统计卡，**点击即筛选**（再次点击取消，卡片高亮 is-active）
+- **列表筛选**：`GET /samples/?status=&relevance=` 支持按状态/评级过滤，前端筛选栏新增「全部状态」「全部评级」下拉
+
+### 🎨 优化
+
+- **统计区紧凑化**：13 个独立数字精简为一行 5 张核心统计卡（总样本/已收集/已核实/已审阅/已关联）+ 一行评级摘要（🔥高度借鉴/📖参考/👀了解）；点击卡片筛选、再点取消、点「总样本」清除全部筛选；筛选器紧凑化（small + 占位符）
+- **移除死代码**：`useSampleStore` 删除不再使用的 `statusCounts`/`relevanceCounts` getter
+
+### 📝 文档
+
+- 更新 `lifesample/README.md`（后端 + 前端）：Models 增状态/评级字段、API 增筛选与分布统计、Components 增徽章组件、Store 增 statusCounts/relevanceCounts、Types 增 StatusConfig/RelevanceConfig
+- 更新 `lifesample/README.md`（前端）：Views 表改为紧凑统计布局描述、Store 移除 statusCounts/relevanceCounts
+
+## [2026-08-20] v3.40.0 — 人生样本 · Obsidian 双向同步
+
+### ✨ 新增
+
+- **Obsidian 双向同步端点**：`POST /api/lifesample/samples/sync-from-obsidian/` —— 扫描样本文件夹，按 `obsidian_path` 匹配：无记录则创建、字段（name/alias/tags/summary）有变化则更新、未变化则跳过；`transaction.atomic` 包裹，返回 `{success, message, created, updated, skipped, total}`（无文件时 404 + 提示）
+- **frontmatter 解析扩展**：`ObsidianService.parse_frontmatter` 现解析 name/alias/era/region/birth_year/death_year/type/tags/summary；扫描结果含 `modified_at`/`exists`；frontmatter `type` 支持中文标签（如「历史人物」→ historical），非法值自动回退
+- **前端「同步Obsidian」**：替代原「扫描Obsidian」逐条新建逻辑，改为调用后端同步端点，同步结果弹窗展示 新增/更新/跳过 明细；无变更时仅 toast 提示
+- **系统设置 Obsidian 卡增强**：新增「测试连接」（成功 / 空文件夹 / 失败三种状态提示）、当前配置预览（完整路径 code 展示）、快速操作（📂 打开 Obsidian 仓库 / 📁 打开样本文件夹）
+- **样本文件夹默认值**：`ObsidianConfig.samples_folder` 默认改为 `05_人生样本(LifeSamples)`（与用户实际仓库一致），迁移 `lifesample.0002`
+
+### 🐛 修复
+
+- **扫描不到文件（路径重复拼接）**：仓库路径误填为含样本文件夹的完整路径时，`get_samples_folder_path` 会把 `samples_folder` 再拼一次导致路径不存在 → 扫到 0 个。现加防御：`vault` 尾部与 `samples_folder` 同名时直接返回 vault，不再重复拼接（两种配置方式均扫描正常）
+- **「测试连接」用旧配置**：扫描读数据库配置，表单里改了但没点「保存配置」时会按旧配置扫描。现「测试连接」先持久化表单当前值再扫描
+- **同步跳过「待采集名单」**：`待采集名单.md` 是待采集名单而非样本本体，`sync_samples` 现跳过该文件（`SYNC_SKIP_FILENAMES`），不再被索引为样本
+
+### 📝 文档
+
+- 更新 `lifesample/README.md`（后端）：Services 增 `parse_frontmatter`/`sync_samples`/`_normalize_type`，API 增同步端点
+- 更新 `lifesample/README.md`（前端）：Store 增 `syncing`/`syncFromObsidian`，API 增同步方法，设置卡功能说明
+
+---
+
+## [2026-08-19] v3.39.0 — 新增「人生样本」模块（Obsidian 轻量索引）
+
+### ✨ 新增
+
+- **人生样本模块**：轻量索引人生参照样本（姓名/别名/类型/标签/一句话简介/Obsidian 路径/我的笔记），深度内容存 Obsidian，Sycamore 只做索引
+- **LifeSample + ObsidianConfig 模型 + API**：`life_sample` / `obsidian_config`（单例 id=1）两表；`/api/lifesample/samples/` 提供 CRUD（不分页，?search=&type=&tag= 筛选）+ `tags` + `stats` 端点；`/api/lifesample/obsidian/config/` 配置读写、`/scan/` 扫描样本文件夹（解析 frontmatter name/summary，按 mtime 倒序）、`/open/<path>/` 生成 `obsidian://open` URI
+- **Obsidian 扫描自动关联**：`ObsidianService.scan_samples` 扫描仓库样本文件夹，前端「扫描Obsidian」按钮对未关联文件自动创建样本（默认类型「历史人物」）
+- **前端页面**：`/lifesample` —— 4 统计卡（总样本/已关联/文件数/待关联）+ 搜索姓名 + 类型/标签筛选 + 卡片墙（卡片可打开编辑弹窗）+ 扫描导入；新建/编辑共用 `SampleForm.vue` 弹窗（标签多选可回车创建）
+- **系统设置新增 Obsidian 集成配置卡**：`AdminSettings.vue` 内嵌启用开关 + 仓库路径 + 样本文件夹 + 测试扫描（实时显示扫描文件数）
+
+### 📝 文档
+
+- 新增 `lifesample/README.md`（后端）：Models / Services / API Endpoints（含不分页与 `open/<path>` 路由说明）
+- 新增 `lifesample/README.md`（前端）：Views / Components / Store / API / Types，及系统设置卡片接入方式
+
+---
+
+## [2026-08-18] v3.38.0 — 旅行模块新增「旅行计划」功能
+
+### ✨ 新增
+
+- **TravelPlan + TravelPlanItem 模型 + API**：`travel_plan` / `travel_plan_item` 两表，`/api/travel/plans/` 提供完整 CRUD + `items`（子项列表）+ `stats`（计划统计）+ `toggle-item`（勾选/取消完成，自动记录完成时间）。创建时 POST 带 `items` 明细，服务端 `TravelPlanService.recalculate_total` 自动汇总预估总费用
+- **明细四类**：美食 / 景点 / 交通 / 住宿，每项含预估费用、完成状态、备注、排序
+- **前端页面**：`TravelPlanView.vue`（路由 `/travel/plans`）——4 统计卡（计划总数 / 总预估费用 / 已完成 / 计划中）+ 新建计划弹窗（四类明细编辑器）+ 可展开计划列表（逐项勾选完成划线）
+- **侧边栏**：「连接与足迹」分组下新增「旅行计划」入口，旅行记录高亮互斥
+
+### 📝 文档
+
+- 更新 `travel/README.md`（后端）：Models / Services / API Endpoints 新增旅行计划，前端章节补 `/travel/plans`
+- 新增 `travel/README.md`（前端）：补齐旅行模块缺失的前端文档（Views / Components / Store / API / Types & Constants，含旅行计划页与明细四类）
+
+---
+
+## [2026-08-16] v3.37.0 — 工具箱新增「用电记录」工具
+
+### ✨ 新增
+
+- **用电记录工具**：工具箱新增「⚡ 用电记录」(`electricity-record`)，记录电表读数，服务端自动计算**间隔用电量 / 间隔天数 / 日均用电量 / 本月累计用电量**
+- **ElectricityRecord 模型 + API**：`toolkit_electricity_record` 表，`/api/toolkit/electricity-records/` 提供 CRUD——新增后自动算本记录，删除后 `recalculate_all` 自动重算后续记录，历史完整保留
+- **计算口径**：间隔用电 = 本次读数 − 上次读数（首条为空）；日均 = 间隔用电 ÷ 间隔天数（`Decimal` 四舍五入，与前端 `Math.round` 一致）；本月累计 = 本次读数 − 月初基准（优先取上月最后一条，无则取本月首条，本月首条为 0）
+- **前端页面**：`ElectricityRecord.vue`——4 统计卡（最新读数/本月累计/日均用电/记录次数）+ 新增表单（日期/读数/备注）+ ECharts 趋势图（读数折线 + 间隔用电柱状）+ 历史表格（全字段 + 删除）
+
+### 🐛 修复
+
+- **工具页面重复「返回工具集」按钮**：`FixedExpense.vue` / `ElectricityRecord.vue` 经兜底路由 `/toolkit/:toolKey` 渲染在 `ToolDetail.vue` 内部（外层已有返回按钮），组件自身又各写一个导致双按钮。删除两个组件内的冗余 back-bar（模板块 + `ArrowLeft` 导入 + `.back-bar` 样式），统一由 `ToolDetail.vue` 提供单个返回按钮，并加注释防回归。独立路由的工具页（时薪/决策/健康自查等）各自保留唯一按钮
+- **工具页顶部描述卡片与误导性「历史记录」按钮**：`ToolDetail.vue` 曾为所有工具渲染共享描述卡片（图标/名称/描述 + 「历史记录」按钮跳执行历史页），但数据型工具（固定开销/用电/环境校准/旅行路线等）历史存在各自数据表、不在执行历史页展示，按钮误导。删除该描述卡片（规则：数据型 = 返回 + 内容 + 自己历史列表；执行型 = 返回 + 内容 + 执行历史入口；不允许独立描述卡片），执行型工具（gif-compressor/img2gif/trad2simp）的「执行历史」入口移至返回栏右侧。为依赖卡片提供标题的 `EnvironmentAudit.vue` / `TravelRoute.vue` / `GifCompressor.vue` 及通用执行表单补自身 `page-title`
+
+### 📝 文档
+
+- 更新 `toolkit/README.md`（后端）：Models / API Endpoints / 内置工具 三表新增用电记录
+- 更新 `toolkit/README.md`（前端）：补齐独立工具组件清单（数据型/执行型分类）+ 工具页面结构约定（数据型返回+内容+自己历史；执行型返回+内容+执行历史入口；不允许独立描述卡片）
+
+---
+
+## [2026-08-16] v3.36.0 — 资金排程重构为 FundSchedule 快照式（修复金额 bug + 历史计划 + 固定开销联动）
+
+### ✨ 新增
+
+- **FundSchedule 模型 + API**：`wealth_fund_schedule` 表（JSON `reserve_items` 预留项 + 服务端 Decimal 权威计算预留合计/剩余），`/api/wealth/fund-schedule/` 提供 list / create / detail / delete（无 update，快照不可变）
+- **资金排程看板重构**：`FundScheduleBoard.vue`（替换 AllocationBoard）——手里现金 + 计划名称、硬性承诺/弹性预留可增删、汇总卡（负数红色警示 + 恒等式 `现金 = 预留 + 剩余` 兜底 alert）、历史快照列表（查看/删除）
+- **固定开销联动**：「导入固定开销」弹出固定开销历史记录选择弹窗（名称/月开销/日开销/项目数/创建日期 + 选中预览部分项目），可按需选择任意一条导入，按 365 天口径（年周期 ÷12.17）折算月金额导入为硬性承诺，带 `linked_expense_id`
+
+### 🐛 修复
+
+- **剩余可分配金额不相等 bug**：旧代码 `remainingToAllocate = free_cash - totalAllocated` 对预留合计二次扣减（少算一份）。重构后改为单一派生链 `现金 → 预留合计 → 剩余`，结构性消除该类错误
+- **负金额返回 500**：服务层 `ValidationError` 在 `serializer.create()` 内抛出未被 DRF 捕获，改为转 `serializers.ValidationError` 返回 400
+- **迁移删除组合唯一索引失败**：MySQL 删除参与唯一索引的列时用剩余列重建索引撞键（Duplicate entry），迁移先 `AlterUniqueTogether` 删索引再删列
+
+### 🗑️ 删除
+
+- **移除分配计划系统**：`AllocationCategory`/`AllocationPlan`/`AllocationItem`/`Commitment`/`DecisionLog` 五表 + `allocation_service.py` + `AllocationViewSet` + `init_allocation_categories` 命令 + `AllocationBoard.vue` + `api/allocation.ts`，由 FundSchedule 快照式取代
+
+### 📝 文档
+
+- 更新 `wealth/README.md`（后端）：FundSchedule 模型/服务/API、快照语义、固定开销 365 天换算
+- 更新 `wealth/README.md`（前端）：`FundScheduleBoard.vue` + 资金排程章节
+
+---
+
 ## [2026-08-16] v3.35.0 — 资金排程 + 分配计划（分配是计划，不是记录）
+
+> ⚠️ 该版本的分配计划系统已于 v3.36.0 移除，由 FundSchedule 快照式资金排程取代。
 
 ### ✨ 新增
 

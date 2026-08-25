@@ -2,13 +2,13 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from . import views
-from .views.allocation_views import AllocationViewSet
+from .views.fund_schedule_views import FundScheduleViewSet
 
-allocation_router = DefaultRouter()
-allocation_router.register(r'allocation', AllocationViewSet, basename='allocation')
+fund_schedule_router = DefaultRouter()
+fund_schedule_router.register(r'fund-schedule', FundScheduleViewSet, basename='fund-schedule')
 
 urlpatterns = [
-    path('', include(allocation_router.urls)),
+    path('', include(fund_schedule_router.urls)),
     path('age-week/', views.CurrentAgeWeekView.as_view(), name='current-age-week'),
     path('calendar/', views.WeekCalendarView.as_view(), name='week-calendar'),
     path('weekly_summary/<int:global_week_index>/', views.WeeklySummaryView.as_view(), name='weekly-summary'),

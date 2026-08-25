@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import TravelRecord
+from .models import TravelPlan, TravelPlanItem, TravelRecord
 
 
 class TravelRecordSerializer(serializers.Serializer):
@@ -24,3 +24,22 @@ class TravelRecordSerializer(serializers.Serializer):
         if value is not None and (value < 1 or value > 5):
             raise serializers.ValidationError('满意度评分必须在 1-5 之间')
         return value
+
+
+class TravelPlanItemSerializer(serializers.ModelSerializer):
+    """旅行计划子项序列化器"""
+
+    class Meta:
+        model = TravelPlanItem
+        fields = ['id', 'item_type', 'name', 'estimate_cost', 'is_completed', 'completed_at', 'notes', 'sort_order']
+
+
+class TravelPlanSerializer(serializers.ModelSerializer):
+    """旅行计划序列化器"""
+
+    items = TravelPlanItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = TravelPlan
+        fields = ['id', 'name', 'destination', 'start_date', 'status', 'total_estimate', 'notes', 'created_at', 'updated_at', 'items']
+        read_only_fields = ['id', 'total_estimate', 'created_at', 'updated_at']

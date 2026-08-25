@@ -79,3 +79,57 @@ export interface TravelFormData {
   companions: string
   tremark: string
 }
+
+export type TravelPlanItemType = 'food' | 'scenic' | 'transport' | 'hotel'
+
+export const TRAVEL_PLAN_ITEM_TYPES: { label: string; value: TravelPlanItemType }[] = [
+  { label: '🍽️ 美食', value: 'food' },
+  { label: '📍 景点', value: 'scenic' },
+  { label: '🚗 交通', value: 'transport' },
+  { label: '🏠 住宿', value: 'hotel' },
+]
+
+export interface TravelPlanItem {
+  id: number
+  item_type: TravelPlanItemType
+  name: string
+  estimate_cost: number
+  is_completed: boolean
+  completed_at: string | null
+  notes: string
+  sort_order: number
+}
+
+export interface TravelPlan {
+  id: number
+  name: string
+  destination: string
+  start_date: string | null
+  status: string
+  total_estimate: number
+  notes: string
+  created_at: string
+  updated_at: string
+  items: TravelPlanItem[]
+}
+
+export interface TravelPlanItemInput {
+  item_type: TravelPlanItemType
+  name: string
+  estimate_cost: number
+}
+
+export interface TravelPlanInput {
+  name: string
+  destination: string
+  start_date: string | null
+  status?: string
+  notes?: string
+  items: TravelPlanItemInput[]
+}
+
+export interface TravelPlanStats {
+  total_plans: number
+  total_estimate: number
+  completed_plans: number
+}

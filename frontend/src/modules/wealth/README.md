@@ -8,7 +8,7 @@
 | `MonthlyReviewView.vue` | 月度复盘 |
 | `RegularDeposit.vue` | 定期存款管理 |
 | `CashFlowView.vue` | 现金盘点 |
-| `AllocationBoard.vue` | 资金排程 + 分配计划看板（手头现金/硬性承诺/预留分配/自由支配 + 决策记录，路由 `/wealth/fund`） |
+| `FundScheduleBoard.vue` | 资金排程看板（手里现金/预留硬性·弹性/剩余可分配 + 历史快照列表 + 导入固定开销，路由 `/wealth/fund`） |
 | `WealthHub.vue` | 财务管理入口（子路由容器，含「资金排程」tab） |
 
 ## Components
@@ -31,14 +31,15 @@
 | `cashflow/HealthMetrics.vue` | 健康指标卡片（负债率/自由资金等） |
 | `cashflow/SnapshotHistory.vue` | 盘点历史列表（15列全字段 + 隐私脱敏 + 分页） |
 
-## 资金排程 + 分配计划（AllocationBoard）
+## 资金排程（FundScheduleBoard）
 
-核心逻辑：**分配是计划（预留），不是记录（花费）**。流程：手头现金 → 硬性承诺 → 预留分配 → 自由支配。
+核心逻辑：**预留是打算留作某用途的钱**。流程：手里现金 → 预留（硬性/弹性）→ 剩余可分配。每次保存生成一条历史快照。
 
-- 四张核心卡：手头现金（可编辑）/ 硬性承诺 / 预留分配 / 自由支配
-- 预留分配计划：5 个默认类别（投资/日常生活/精神愉悦-旅游美食/家居装修/风险预估-留底钱），可按类别设置预留金额
-- 硬性承诺：手动添加/删除（未来必须花的钱）
-- 自由决策：记录自由支配打算怎么花（save/learn/travel/home/venture）
+- 顶部：手里现金（可编辑）+ 计划名称
+- 预留项：硬性承诺（hard，红标）/ 弹性预留（soft，橙标）可增删，逐项设置名称与金额
+- 汇总：手里现金 / 预留合计 / 剩余可分配（负数红色警示）；恒等式 `现金 = 预留 + 剩余` 由单一派生链保证（结构性消除二次扣减 bug），另留 `balanceMismatch` 警示兜底
+- 保存计划 → 新增一条历史快照并清空表单
+- 历史列表：计划名称/手里现金/预留合计/剩余可分配/日期 + 查看/删除
+- 导入固定开销：弹出固定开销历史记录选择弹窗（名称/月开销/日开销/项目数/创建日期 + 选中预览部分项目），可选任意一条导入，按 365 天口径（年周期 ÷12.17）折算月金额导入为硬性承诺，带 `linked_expense_id`
 
-后端：`backend/apps/wealth/models/allocation_plan.py` + `services/allocation_service.py` + `views/allocation_views.py`，API 前缀 `/api/wealth/allocation/`（detail/create/update-allocations/record-spending/save-decision/categories）。
-分配类别通过 `manage.py init_allocation_categories` 初始化。
+后端：`backend/apps/wealth/models/fund_schedule.py` + `services/fund_schedule_service.py` + `views/fund_schedule_views.py`，API 前缀 `/api/wealth/fund-schedule/`（list/create/detail/delete，无 update）。

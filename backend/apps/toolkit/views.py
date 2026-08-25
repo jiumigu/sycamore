@@ -15,7 +15,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 
 from apps.sugar.models import SugarRecord
 from apps.temporal.models import OneDayPage
@@ -25,6 +25,7 @@ from .serializers import (
     CareerEnergyAuditSerializer,
     CityCoordinateSerializer,
     DecisionLogSerializer,
+    ElectricityRecordSerializer,
     EnvironmentAuditSerializer,
     ExecutionSerializer,
     ExecuteToolSerializer,
@@ -38,7 +39,7 @@ from .serializers import (
     ToolInfoSerializer,
     TravelRoutePresetSerializer,
 )
-from .services import calculate_health_score, collect_health_alerts, update_career_audit_decision
+from .services import ElectricityService, calculate_health_score, collect_health_alerts, update_career_audit_decision
 
 # 周期 → 天数换算：daily=1天、monthly=30天、yearly=365天
 PERIOD_DAYS = {'daily': 1, 'monthly': 30, 'yearly': 365}
@@ -673,6 +674,25 @@ class HourlyWageViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         result = self._compute_wage(serializer.validated_data)
         serializer.save(**result)
+
+
+class ElectricityRecordViewSet(viewsets.ModelViewSet):
+    """用电记录 CRUD"""
+
+    permission_classes = [AllowAny]
+    queryset = ElectricityRecord.objects.all()
+    serializer_class = ElectricityRecordSerializer
+
+    def get_queryset(self):
+        return ElectricityRecord.objects.filter(user_id=1)
+
+    def perform_create(self, serializer):
+        record = serializer.save(user_id=1)
+        ElectricityService.calculate_on_create(record)
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        ElectricityService.recalculate_all(user_id=1)
 
 
 class ReviewRecordViewSet(viewsets.ModelViewSet):

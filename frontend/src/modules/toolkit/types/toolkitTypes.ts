@@ -154,3 +154,16 @@ export interface FixedExpenseRecord {
   notes: string
   created_at: string
 }
+
+export interface ElectricityRecord {
+  id: number
+  user_id: number
+  record_date: string
+  meter_reading: string | number
+  interval_usage: string | null
+  interval_days: number | null
+  daily_avg: string | null
+  month_usage: string | number
+  notes: string
+  created_at: string
+}

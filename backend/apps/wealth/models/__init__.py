@@ -6,13 +6,7 @@ from .wealth_models import (
     WealthBalanceList,
     WealthRegularList,
 )
-from .allocation_plan import (
-    AllocationCategory,
-    AllocationPlan,
-    AllocationItem,
-    Commitment,
-    DecisionLog,
-)
+from .fund_schedule import FundSchedule
 
 __all__ = [
     'WealthLifeWeekCalendar',
@@ -21,9 +15,5 @@ __all__ = [
     'WealthCashFlow',
     'WealthBalanceList',
     'WealthRegularList',
-    'AllocationCategory',
-    'AllocationPlan',
-    'AllocationItem',
-    'Commitment',
-    'DecisionLog',
+    'FundSchedule',
 ]

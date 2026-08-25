@@ -218,6 +218,16 @@
           <el-icon><Star /></el-icon>
           <span v-if="!isCollapsed">好东西</span>
         </router-link>
+
+        <router-link
+          to="/lifesample"
+          class="nav-item"
+          :class="{ active: isRouteActive('/lifesample') }"
+          :style="getModuleStyle('lifesample')"
+        >
+          <el-icon><Collection /></el-icon>
+          <span v-if="!isCollapsed">人生样本</span>
+        </router-link>
       </div>
 
       <!-- ========== 财富管理 ========== -->
@@ -260,11 +270,21 @@
         <router-link
           to="/travel"
           class="nav-item"
-          :class="{ active: isRouteActive('/travel') }"
+          :class="{ active: isRouteActive('/travel') && !isRouteActive('/travel/plans') }"
           :style="getModuleStyle('travel')"
         >
           <el-icon><Location /></el-icon>
           <span v-if="!isCollapsed">旅行记录</span>
+        </router-link>
+
+        <router-link
+          to="/travel/plans"
+          class="nav-item sub-item"
+          :class="{ active: isRouteActive('/travel/plans') }"
+          :style="getModuleStyle('travel')"
+        >
+          <el-icon><List /></el-icon>
+          <span v-if="!isCollapsed">旅行计划</span>
         </router-link>
 
         <router-link
@@ -424,6 +444,7 @@ const moduleColors: Record<string, string> = {
   relation: '#d35400',
   inbox: '#3B82F6',
   treasure: '#F59E0B',
+  lifesample: '#7c3aed',
 }
 
 // ========== 方法 ==========

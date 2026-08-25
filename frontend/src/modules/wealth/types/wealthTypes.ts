@@ -479,3 +479,41 @@ export const FLAG_OPTIONS = [
   { value: 1, label: '已到期' },
   { value: 2, label: '已取出' },
 ] as const
+
+/** 资金排程预留项目 */
+export interface ReserveItem {
+  name: string
+  amount: number
+  type: 'hard' | 'soft'
+  linked_expense_id?: number | null
+}
+
+/** 资金排程快照记录 */
+export interface FundScheduleRecord {
+  id: number
+  plan_name: string
+  cash_on_hand: number
+  reserve_items: ReserveItem[]
+  total_reserved: number
+  remaining: number
+  created_at: string
+}
+
+/** 固定开销项目（工具箱 → 固定开销计算） */
+export interface FixedExpenseItem {
+  name: string
+  amount: number
+  period: 'daily' | 'monthly' | 'yearly'
+  icon?: string
+}
+
+/** 固定开销历史记录 */
+export interface FixedExpenseRecord {
+  id: number
+  name: string
+  items: FixedExpenseItem[]
+  total_monthly: string
+  total_daily: string
+  total_yearly: string
+  created_at: string
+}

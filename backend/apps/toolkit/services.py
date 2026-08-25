@@ -1,8 +1,8 @@
 """工具箱业务逻辑"""
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
-from .models import CareerEnergyAudit
+from .models import CareerEnergyAudit, ElectricityRecord
 
 
 def calc_career_decision(data: dict) -> tuple:
@@ -320,3 +320,61 @@ def collect_health_alerts(data: dict) -> list[str]:
         else:
             result.append(f'{system}（{items[0]}等{len(items)}项）')
     return result
+
+
+# ─── 用电记录 ────────────────────────────────────
+
+
+class ElectricityService:
+    """用电记录计算"""
+
+    @staticmethod
+    def calculate_on_create(record: ElectricityRecord) -> None:
+        """计算单条记录的间隔用电量/日均用电量/本月累计
+
+        - 间隔用电量 = 本次读数 - 最近一次更早日期的读数（首条为 None）
+        - 日均用电量 = 间隔用电量 ÷ 间隔天数（首条为 None）
+        - 本月累计 = 本次读数 - 月初基准（优先取上月最后一条，无则取本月首条；本月首条为 0）
+        """
+        qs = ElectricityRecord.objects.filter(user_id=record.user_id)
+        prev = qs.filter(record_date__lt=record.record_date).order_by('-record_date').first()
+
+        month_start = record.record_date.replace(day=1)
+        month_base = qs.filter(record_date__lt=month_start).order_by('-record_date').first()
+        if month_base is None:
+            month_base = qs.filter(record_date__gte=month_start).order_by('record_date').first()
+
+        reading = Decimal(str(record.meter_reading))
+        quantize_1dp = Decimal('0.1')
+
+        if prev:
+            prev_reading = Decimal(str(prev.meter_reading))
+            interval_usage = (reading - prev_reading).quantize(quantize_1dp, rounding=ROUND_HALF_UP)
+            interval_days = (record.record_date - prev.record_date).days
+            daily_avg = (
+                (interval_usage / interval_days).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                if interval_days > 0
+                else Decimal('0.00')
+            )
+            record.interval_usage = interval_usage
+            record.interval_days = interval_days
+            record.daily_avg = daily_avg
+        else:
+            record.interval_usage = None
+            record.interval_days = None
+            record.daily_avg = None
+
+        if month_base:
+            record.month_usage = (reading - Decimal(str(month_base.meter_reading))).quantize(
+                quantize_1dp, rounding=ROUND_HALF_UP
+            )
+        else:
+            record.month_usage = Decimal('0')
+
+        record.save()
+
+    @staticmethod
+    def recalculate_all(user_id: int = 1) -> None:
+        """按日期顺序重算全部记录（删除记录后保证后续记录联动）"""
+        for record in ElectricityRecord.objects.filter(user_id=user_id).order_by('record_date'):
+            ElectricityService.calculate_on_create(record)

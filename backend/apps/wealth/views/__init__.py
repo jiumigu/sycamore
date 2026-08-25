@@ -1,4 +1,4 @@
-from .allocation_views import AllocationViewSet
+from .fund_schedule_views import FundScheduleViewSet
 from .wealth_views import (
     calculate_current_age_week,
     CurrentAgeWeekView,
@@ -37,7 +37,7 @@ from .wealth_views import (
 )
 
 __all__ = [
-    'AllocationViewSet',
+    'FundScheduleViewSet',
     'calculate_current_age_week',
     'CurrentAgeWeekView',
     'WeekCalendarView',

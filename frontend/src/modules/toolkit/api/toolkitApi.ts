@@ -176,6 +176,20 @@ export function deleteFixedExpense(id: number) {
   return request({ url: `/toolkit/fixed-expenses/${id}/`, method: 'delete' })
 }
 
+// ────────── 用电记录 ──────────
+
+export function getElectricityRecords(params?: Record<string, unknown>) {
+  return request({ url: '/toolkit/electricity-records/', method: 'get', params })
+}
+
+export function createElectricityRecord(data: Record<string, unknown>) {
+  return request({ url: '/toolkit/electricity-records/', method: 'post', data })
+}
+
+export function deleteElectricityRecord(id: number) {
+  return request({ url: `/toolkit/electricity-records/${id}/`, method: 'delete' })
+}
+
 // ────────── 标签管理器 ──────────
 
 export function getTags() {

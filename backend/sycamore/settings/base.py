@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     'apps.relation',
     'apps.toolkit',
     'apps.travel',
+    'apps.lifesample',
     'apps.summary',
     'apps.dams',
     'apps.food',

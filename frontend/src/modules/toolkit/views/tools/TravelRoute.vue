@@ -1,45 +1,51 @@
 <template>
   <div class="travel-route">
-    <!-- 左侧折叠窄条 -->
-    <div class="sidebar-toggle" @click="drawerOpen = !drawerOpen">
-      <el-icon :size="20">
-        <ArrowRight v-if="!drawerOpen" />
-        <ArrowLeft v-else />
-      </el-icon>
-      <span v-if="!drawerOpen" class="toggle-text">路线</span>
+    <!-- 页面标题 -->
+    <div class="page-head">
+      <h2 class="page-title">🚂 旅行路线推演</h2>
+      <p class="subtitle">输入出发地和多个目的地，生成小火车沿路线逐个抵达的动画</p>
     </div>
-
-    <!-- 左侧抽屉（覆盖在地图上） -->
-    <transition name="slide">
-      <div v-if="drawerOpen" class="route-drawer">
-        <div class="drawer-header">
-          <span>📋 已保存路线</span>
-          <el-button size="small" type="primary" @click="openNewRoute">+ 新建</el-button>
-        </div>
-
-        <div class="preset-list">
-          <div
-            v-for="preset in presets"
-            :key="preset.id"
-            class="preset-item"
-            :class="{ active: selectedPreset?.id === preset.id }"
-            @click="selectPreset(preset)"
-          >
-            <div class="preset-name">{{ preset.name }}</div>
-            <div class="preset-route">{{ preset.origin }} → {{ preset.destinations.join(' → ') }}</div>
-            <div class="preset-actions" @click.stop>
-              <el-button size="small" text @click="editPreset(preset)">✏️</el-button>
-              <el-button size="small" text type="danger" @click="deletePreset(preset.id)">🗑️</el-button>
-            </div>
-          </div>
-        </div>
-
-        <el-empty v-if="presets.length === 0" description="暂无路线，点击新建" />
-      </div>
-    </transition>
 
     <!-- 地图全屏 -->
     <div class="map-container">
+      <!-- 左侧折叠窄条 -->
+      <div class="sidebar-toggle" @click="drawerOpen = !drawerOpen">
+        <el-icon :size="20">
+          <ArrowRight v-if="!drawerOpen" />
+          <ArrowLeft v-else />
+        </el-icon>
+        <span v-if="!drawerOpen" class="toggle-text">路线</span>
+      </div>
+
+      <!-- 左侧抽屉（覆盖在地图上） -->
+      <transition name="slide">
+        <div v-if="drawerOpen" class="route-drawer">
+          <div class="drawer-header">
+            <span>📋 已保存路线</span>
+            <el-button size="small" type="primary" @click="openNewRoute">+ 新建</el-button>
+          </div>
+
+          <div class="preset-list">
+            <div
+              v-for="preset in presets"
+              :key="preset.id"
+              class="preset-item"
+              :class="{ active: selectedPreset?.id === preset.id }"
+              @click="selectPreset(preset)"
+            >
+              <div class="preset-name">{{ preset.name }}</div>
+              <div class="preset-route">{{ preset.origin }} → {{ preset.destinations.join(' → ') }}</div>
+              <div class="preset-actions" @click.stop>
+                <el-button size="small" text @click="editPreset(preset)">✏️</el-button>
+                <el-button size="small" text type="danger" @click="deletePreset(preset.id)">🗑️</el-button>
+              </div>
+            </div>
+          </div>
+
+          <el-empty v-if="presets.length === 0" description="暂无路线，点击新建" />
+        </div>
+      </transition>
+
       <div ref="chartRef" class="route-map" />
 
       <!-- 空状态提示（地图中央） -->
@@ -617,6 +623,28 @@ onUnmounted(() => {
   width: 100%;
   height: calc(100vh - 80px);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-head {
+  flex-shrink: 0;
+  padding: 12px 20px 10px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+
+  .page-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    color: #1F2937;
+  }
+
+  .subtitle {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: #6B7280;
+  }
 }
 
 /* 左侧折叠窄条 */
@@ -704,8 +732,9 @@ onUnmounted(() => {
 
 /* 地图全屏 */
 .map-container {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
   position: relative;
 
   .route-map {

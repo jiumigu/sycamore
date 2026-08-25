@@ -40,7 +40,7 @@ frontend/
 │   │   ├── summary/      # 综合进度看板
 │   │   ├── temporal/     # 时间感知（日记 + 时间统计）
 │   │   ├── toolkit/      # 工具箱
-│   │   ├── travel/       # 旅行记录
+│   │   ├── travel/       # 旅行记录 + 旅行计划
 │   │   └── wealth/       # 财务管理
 │   ├── core/             # 系统基础设施
 │   │   ├── analysis/     # 分析统计

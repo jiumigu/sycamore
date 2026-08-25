@@ -1,11 +1,15 @@
+from django.utils import timezone
+
 from rest_framework import status, views
+from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.viewsets import ModelViewSet
 
-from .models import TravelRecord
-from .serializers import TravelRecordSerializer
-from .services import MapDataService, TravelStatsService, get_coordinates, get_province
+from .models import TravelPlan, TravelPlanItem, TravelRecord
+from .serializers import TravelPlanItemSerializer, TravelPlanSerializer, TravelRecordSerializer
+from .services import MapDataService, TravelPlanService, TravelStatsService, get_coordinates, get_province
 
 
 class TravelPagination(PageNumberPagination):
@@ -172,3 +176,59 @@ class YearListView(views.APIView):
             .order_by('-tyear')
         )
         return Response([{'year': y} for y in years])
+
+
+class TravelPlanViewSet(ModelViewSet):
+    """旅行计划 CRUD + 明细 + 统计"""
+
+    queryset = TravelPlan.objects.all()
+    serializer_class = TravelPlanSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return TravelPlan.objects.filter(user_id=1)
+
+    def perform_create(self, serializer):
+        plan = serializer.save(user_id=1)
+        items_data = self.request.data.get('items', [])
+        for item_data in items_data:
+            TravelPlanItem.objects.create(plan=plan, **item_data)
+        TravelPlanService.recalculate_total(plan)
+
+    def perform_update(self, serializer):
+        plan = serializer.save()
+        # 编辑时带 items 则整体替换明细，未带（如仅改状态）则保留
+        items_data = self.request.data.get('items')
+        if items_data is not None:
+            plan.items.all().delete()
+            for item_data in items_data:
+                TravelPlanItem.objects.create(plan=plan, **item_data)
+        TravelPlanService.recalculate_total(plan)
+
+    @action(detail=True, methods=['get'])
+    def items(self, request, pk=None):
+        """计划子项列表"""
+        plan = self.get_object()
+        items = plan.items.all()
+        return Response(TravelPlanItemSerializer(items, many=True).data)
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """统计所有计划费用"""
+        return Response(TravelPlanService.get_stats())
+
+    @action(detail=True, methods=['post'], url_path='toggle-item')
+    def toggle_item(self, request, pk=None):
+        """勾选/取消子项完成"""
+        item_id = request.data.get('item_id')
+        if not item_id:
+            return Response({'error': '缺少 item_id'}, status=status.HTTP_400_BAD_REQUEST)
+        plan = self.get_object()
+        try:
+            item = plan.items.get(id=item_id)
+        except TravelPlanItem.DoesNotExist:
+            return Response({'error': '子项不存在'}, status=status.HTTP_404_NOT_FOUND)
+        item.is_completed = not item.is_completed
+        item.completed_at = timezone.now() if item.is_completed else None
+        item.save()
+        return Response(TravelPlanItemSerializer(item).data)

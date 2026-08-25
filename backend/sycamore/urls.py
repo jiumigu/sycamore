@@ -15,6 +15,7 @@ urlpatterns = [
     path('api/health/', include('apps.health.urls')),
     path('api/relation/', include('apps.relation.urls')),
     path('api/travel/', include('apps.travel.urls')),
+    path('api/lifesample/', include('apps.lifesample.urls')),
     path('api/toolkit/', include('apps.toolkit.urls')),
     path('api/summary/', include('apps.summary.urls')),
     path('api/dams/', include('apps.dams.urls')),

@@ -32,6 +32,7 @@ from .wealth_serializers import (
     RegularFormSerializer,
     MatureProcessSerializer,
     ExpiringItemSerializer,
+    FundScheduleSerializer,
 )
 
 __all__ = [
@@ -68,4 +69,5 @@ __all__ = [
     'RegularFormSerializer',
     'MatureProcessSerializer',
     'ExpiringItemSerializer',
+    'FundScheduleSerializer',
 ]

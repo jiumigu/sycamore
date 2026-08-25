@@ -1,11 +1,6 @@
 <template>
   <div class="fixed-expense">
-    <div class="back-bar">
-      <el-button text @click="$router.push('/toolkit')">
-        <el-icon><ArrowLeft /></el-icon> 返回工具集
-      </el-button>
-    </div>
-
+    <!-- 返回按钮由 ToolDetail 统一提供，勿在此重复添加 -->
     <h2 class="page-title">💰 固定开销计算器</h2>
     <p class="subtitle">知道自己每天睁开眼就要花多少钱</p>
 
@@ -194,7 +189,6 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFixedExpenseList, createFixedExpense, updateFixedExpense, deleteFixedExpense } from '../../api/toolkitApi'
 import type { FixedExpenseRecord } from '../../types/toolkitTypes'
@@ -398,14 +392,6 @@ onMounted(fetchHistory)
   display: flex;
   flex-direction: column;
   gap: 16px;
-
-  .back-bar {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-bottom: 4px;
-    flex-wrap: nowrap;
-  }
 
   .page-title {
     margin: 0;

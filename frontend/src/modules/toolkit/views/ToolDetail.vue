@@ -4,23 +4,12 @@
       <el-button text @click="$router.push('/toolkit')">
         <el-icon><ArrowLeft /></el-icon> 返回工具集
       </el-button>
+      <el-button v-if="isExecutionTool" class="history-link" text @click="$router.push('/toolkit/history')">
+        <el-icon><Timer /></el-icon> 执行历史
+      </el-button>
     </div>
     <div v-loading="loading">
-      <!-- 工具信息（职业能量审计自带标题，不重复显示） -->
-      <el-card class="section-card" v-if="tool && toolKey !== 'career-energy-audit'">
-        <div class="tool-header">
-          <span class="tool-icon-large">{{ tool.icon }}</span>
-          <div class="tool-info">
-            <div class="tool-title">{{ tool.name }}</div>
-            <div class="tool-desc">{{ tool.description }}</div>
-          </div>
-          <el-button @click="$router.push('/toolkit/history')" text>
-            <el-icon><Timer /></el-icon> 历史记录
-          </el-button>
-        </div>
-      </el-card>
-
-      <!-- 独立组件 -->
+      <!-- 独立组件（页面标题由各自组件提供） -->
       <TravelRoute v-if="toolKey === 'travel-route'" />
       <EnvironmentAudit v-else-if="toolKey === 'environment-audit'" />
       <CareerEnergyAudit v-else-if="toolKey === 'career-energy-audit'" />
@@ -29,9 +18,14 @@
       <ReviewToolbox v-else-if="toolKey === 'review-toolbox'" />
       <GifCompressor v-else-if="toolKey === 'gif-compressor'" />
       <FixedExpense v-else-if="toolKey === 'fixed-expense'" />
+      <ElectricityRecord v-else-if="toolKey === 'electricity-record'" />
 
       <!-- 执行区 -->
       <template v-else>
+      <div class="tool-page-head" v-if="tool">
+        <h2 class="page-title">{{ tool.name }}</h2>
+        <p class="subtitle">{{ tool.description }}</p>
+      </div>
       <el-row :gutter="16">
         <el-col :span="result && result.success ? 14 : 24">
           <!-- 参数表单 -->
@@ -211,6 +205,7 @@ import FreeSpending from './tools/FreeSpending.vue'
 import ReviewToolbox from './tools/ReviewToolbox.vue'
 import GifCompressor from './tools/GifCompressor.vue'
 import FixedExpense from './tools/FixedExpense.vue'
+import ElectricityRecord from './tools/ElectricityRecord.vue'
 
 const route = useRoute()
 const store = useToolkitStore()
@@ -231,6 +226,14 @@ const result = computed(() => store.executionResult)
 
 const isImageTool = computed(() => tool.value?.category === 'image')
 const isTrad2Simp = computed(() => tool.value?.tool_key === 'trad2simp')
+
+// 数据型工具：历史在各页自身数据表、页面底部有自己的历史列表，不走"执行历史"页；
+// 其余（gif-compressor / img2gif / trad2simp 及通用表单工具）为执行型，执行记录进"执行历史"页
+const DATA_TOOL_KEYS = new Set([
+  'travel-route', 'environment-audit', 'career-energy-audit', 'health-self-check',
+  'free-spending', 'review-toolbox', 'fixed-expense', 'electricity-record',
+])
+const isExecutionTool = computed(() => !DATA_TOOL_KEYS.has(toolKey.value))
 
 const formFields = computed(() => {
   if (!tool.value?.input_schema?.properties) return {}
@@ -378,18 +381,18 @@ onMounted(async () => {
 .tool-detail {
   padding: 20px; background: #F5F7FA; min-height: 100vh;
 
-  .back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
+  .back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap;
+    .history-link { margin-left: auto; }
+  }
 
   .section-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 18px;
     :deep(.el-card__header) { padding: 14px 20px; font-size: 14px; font-weight: 500; border-bottom: 1px solid #f2f2f2; }
   }
 
-  .tool-header { display: flex; align-items: center; gap: 16px;
-    .tool-icon-large { font-size: 40px; }
-    .tool-info { flex: 1;
-      .tool-title { font-size: 20px; font-weight: 700; color: #1F2937; }
-      .tool-desc { font-size: 13px; color: #9CA3AF; margin-top: 4px; }
-    }
+  .tool-page-head {
+    margin-bottom: 16px;
+    .page-title { margin: 0; font-size: 20px; font-weight: 700; color: #1F2937; }
+    .subtitle { margin: 4px 0 0; font-size: 13px; color: #6B7280; }
   }
 
   .upload-area { margin-bottom: 20px;

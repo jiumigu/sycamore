@@ -7,7 +7,7 @@ from typing import Any
 
 from django.db.models import Avg, Count, Q, Sum
 
-from .models import TravelRecord
+from .models import TravelPlan, TravelRecord
 
 # ── 中国城市坐标库（省份→城市→经纬度）────────────────────────────
 # 覆盖主要城市 + 数据中已有的具体地点
@@ -357,4 +357,28 @@ class TravelStatsService:
             'yearly_trend': yearly_trend,
             'province_distribution': prov_distribution,
             'years': years,
+        }
+
+
+class TravelPlanService:
+    """旅行计划业务逻辑"""
+
+    @staticmethod
+    def recalculate_total(plan: TravelPlan) -> float:
+        """重新计算计划总费用（全部子项预估费用之和）"""
+        total = plan.items.aggregate(total=Sum('estimate_cost'))['total'] or 0
+        plan.total_estimate = total
+        plan.save(update_fields=['total_estimate', 'updated_at'])
+        return float(total)
+
+    @staticmethod
+    def get_stats() -> dict[str, Any]:
+        """统计所有计划费用"""
+        plans = TravelPlan.objects.all()
+        total_estimate = plans.aggregate(total=Sum('total_estimate'))['total'] or 0
+        completed_plans = plans.filter(status='已完成').count()
+        return {
+            'total_plans': plans.count(),
+            'total_estimate': float(total_estimate),
+            'completed_plans': completed_plans,
         }

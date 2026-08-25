@@ -13,6 +13,7 @@
 | LanguageTraining | toolkit_language_training | 语言训练记录（4种训练类型：词汇颗粒度/场景描述/语言素材/逼近修订） |
 | FixedExpense | toolkit_fixed_expense | 固定开销计算记录（自定义项目 + 按日/月/年周期统一换算日/月/年开销） |
 | HourlyWageRecord | toolkit_hourly_wage_record | 时薪计算记录（正式/自由职业双模式 + `extra_incomes` 附加收入（名称/金额/日·月·年周期）） |
+| ElectricityRecord | toolkit_electricity_record | 用电记录（电表读数 + 自动计算间隔用电量/间隔天数/日均用电量/本月累计，删除后自动重算后续记录） |
 
 ## Architecture
 
@@ -67,6 +68,9 @@ ToolkitExecution（任务记录层）
 | GET | /hourly-wage/ | 时薪计算历史列表 |
 | POST | /hourly-wage/ | 创建时薪记录（工资 + extra_incomes 附加收入 → 月总收入 ÷ 投入小时） |
 | GET/PUT/PATCH/DELETE | /hourly-wage/&lt;id&gt;/ | 时薪记录详情/更新/删除 |
+| GET | /electricity-records/ | 用电记录列表（按日期倒序，分页） |
+| POST | /electricity-records/ | 新增用电记录（自动计算间隔用电/日均/本月累计） |
+| DELETE | /electricity-records/&lt;id&gt;/ | 删除用电记录（删除后自动重算后续记录） |
 
 ## 内置工具
 
@@ -80,3 +84,4 @@ ToolkitExecution（任务记录层）
 | career_energy_audit | 职业能量审计 | 26项指标职业能量评估 + 自动判定 |
 | language_trainer | 语言训练器 | 4种训练类型（词汇颗粒度/场景描述/语言素材/逼近修订），CRUD 历史记录 |
 | fixed-expense | 固定开销计算器 | 自定义开销项目，按日/月/年周期统一换算每天/每月/每年开销 |
+| electricity-record | 用电记录 | 记录电表读数，自动计算间隔/日均/本月累计用电，删除自动重算 |

@@ -1,5 +1,9 @@
 <template>
   <div class="gif-compressor">
+    <div class="tool-page-head">
+      <h2 class="page-title">🎞️ GIF 压缩</h2>
+      <p class="subtitle">通过抽帧、压缩等级、调整尺寸来压缩 GIF 文件</p>
+    </div>
     <el-row :gutter="16">
       <el-col :span="result ? 14 : 24">
         <el-card class="section-card">
@@ -214,6 +218,12 @@ function resetForm() {
 <style scoped lang="scss">
 .gif-compressor {
   padding: 0;
+
+  .tool-page-head {
+    margin-bottom: 16px;
+    .page-title { margin: 0; font-size: 20px; font-weight: 700; color: #1F2937; }
+    .subtitle { margin: 4px 0 0; font-size: 13px; color: #6B7280; }
+  }
 
   .section-card {
     border: none;

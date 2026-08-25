@@ -10,11 +10,7 @@
 | WealthRegularList | wealth_regular_list | 定期存款 |
 | WealthCashFlow | wealth_cash_flow | 现金盘点（各账户余额月度快照 + 自动计算总现金流/总额/实有数） |
 | WealthBalanceList | wealth_balance_list | 盈亏账单（余额流水） |
-| AllocationCategory | wealth_allocation_category | 分配类别（图标/颜色/优先级/默认金额，可自定义） |
-| AllocationPlan | wealth_allocation_plan | 月度分配计划（手头现金/硬性承诺/预留分配/自由支配） |
-| AllocationItem | wealth_allocation_item | 分配明细项（计划预留金额/已花费/剩余，remaining 自动计算） |
-| Commitment | wealth_commitment | 硬性承诺（未来必须花的钱，来源：账单/收件箱/手动） |
-| DecisionLog | wealth_decision_log | 自由决策记录 |
+| FundSchedule | wealth_fund_schedule | 资金排程快照（JSON 预留项目，服务端计算预留合计/剩余） |
 
 ## Services
 
@@ -27,7 +23,7 @@
 | `services/review_service.py` | 月度复盘（趋势/分类排行/月度清单/对账/生成盈亏） |
 | `services/regular_service.py` | 定期存款完整业务逻辑 |
 | `services/cashflow_service.py` | 现金盘点（资产全景/趋势/快照CRUD/复制上月/对账） |
-| `services/allocation_service.py` | 资金排程 + 分配计划（计划 CRUD/幂等保存/记录花费/自由决策） |
+| `services/fund_schedule_service.py` | 资金排程（校验预留项 + Decimal 计算预留合计/剩余 + 快照创建） |
 
 ## API Endpoints
 
@@ -59,20 +55,15 @@
 | GET | /cashflow/snapshot/list/ | 快照列表（?page=&page_size= 分页） |
 | POST | /cashflow/copy/ | 复制上月数据 |
 | GET | /cashflow/reconcile/ | 账面与实际对账 |
-| GET | /allocation/detail/?year_month= | 获取月度分配计划详情（含全部启用类别作为明细项） |
-| POST | /allocation/create/ | 创建/更新分配计划（幂等，可反复保存） |
-| POST | /allocation/update-allocations/ | 增量更新分配项 |
-| POST | /allocation/record-spending/ | 记录某分类实际花费 |
-| POST | /allocation/save-decision/ | 保存自由决策 |
-| GET | /allocation/categories/ | 获取可用分配类别 |
+| GET/POST | /fund-schedule/ | 资金排程历史列表（分页）/ 创建快照 |
+| GET/DELETE | /fund-schedule/<id>/ | 资金排程快照详情/删除 |
 
-## 资金排程 + 分配计划
+## 资金排程（FundSchedule 快照式）
 
-核心语义：**分配是计划（预留），不是记录（花费）**。流程：手头现金 → 硬性承诺 → 预留分配 → 自由支配。
+核心语义：**预留是打算留作某用途的钱**。流程：手里现金 → 预留（硬性/弹性）→ 剩余可分配。
 
-- **月度计划**：`AllocationPlan` 按 `year_month` 唯一（`unique_together`），记录手头现金/硬性承诺合计/预留分配合计/自由支配，状态 draft/active/closed
-- **预留分配**：`AllocationItem` 按 `(plan, category)` 唯一；`save()` 自动计算 `remaining = planned - spent`；`get_plan_detail` 返回全部启用类别（未保存的为 id=null 虚拟项 + 默认金额），看板首次进入即可编辑
-- **幂等保存**：`create_plan` 在事务内 `update_or_create` 分配项（保留已花费）、删除并重建承诺、剔除未包含的分配项，可反复保存
-- **硬性承诺**：`Commitment` 待付/紧急/已付三态，来源 bill/inbox/manual；`calculate_commitments` 通过 `wealth_bill_list` 原生 SQL 按 60 天窗口聚合支出账单生成
-- **自由决策**：`DecisionLog` 记录自由支配的打算怎么花（save/learn/travel/home/venture）
-- **类别初始化**：`manage.py init_allocation_categories` 幂等创建 5 个默认类别（投资/日常生活/精神愉悦-旅游美食/家居装修/风险预估-留底钱）
+- **快照式历史**：`FundSchedule` 每次保存新增一条独立记录（无月份唯一约束），`created_at` 倒序，天然支持历史计划列表；不提供更新（PUT/PATCH 返回 405）
+- **预留项目**：`reserve_items` JSON 存储 `[{name, amount, type: hard|soft, linked_expense_id}]`；`hard` 硬性承诺（必花）、`soft` 弹性预留
+- **服务端权威合计**：`FundScheduleService.compute_totals` 用 Decimal 计算 `total_reserved = Σamount`、`remaining = cash_on_hand - total_reserved`（允许负数），序列化器中合计字段 `read_only`，客户端传值被忽略
+- **校验**：`validate_items` 逐项校验名称非空、type 仅 hard/soft、金额非负，违反返回 400
+- **固定开销联动**：前端 `getLatestFixedExpense()` 取固定开销计算器最新记录，按 365 天口径（`amount / {daily:1,monthly:30,yearly:365} × 30`，年周期 ÷12.17）折算为月金额，导入为 hard 预留项并带 `linked_expense_id`

@@ -567,3 +567,28 @@ class LanguageTraining(models.Model):
 
     def __str__(self):
         return f'{self.get_train_type_display()} {self.train_date}'
+
+
+class ElectricityRecord(models.Model):
+    """用电记录"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    record_date = models.DateField(verbose_name='记录日期')
+    meter_reading = models.DecimalField(max_digits=10, decimal_places=1, verbose_name='电表读数(度)')
+
+    # 计算结果
+    interval_usage = models.DecimalField(null=True, blank=True, max_digits=10, decimal_places=1, verbose_name='间隔用电量(度)')
+    interval_days = models.IntegerField(null=True, blank=True, verbose_name='间隔天数')
+    daily_avg = models.DecimalField(null=True, blank=True, max_digits=10, decimal_places=2, verbose_name='日均用电量(度/天)')
+    month_usage = models.DecimalField(null=True, blank=True, max_digits=10, decimal_places=1, verbose_name='本月累计用电量(度)')
+
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_electricity_record'
+        ordering = ['-record_date']
+        verbose_name = '用电记录'
+
+    def __str__(self):
+        return f'{self.record_date} 读数 {self.meter_reading}度'

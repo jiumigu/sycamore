@@ -99,6 +99,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/sugar', name: 'sugar', component: () => import('@/modules/sugar/views/SugarView.vue'), meta: { title: '小确幸' } },
   { path: '/sugar/joy-types', name: 'sugar-joy-types', component: () => import('@/modules/sugar/views/JoyTypeChart.vue'), meta: { title: '快乐偏好图谱' } },
   { path: '/treasure', name: 'treasure', component: () => import('@/modules/treasure/views/TreasureHub.vue'), meta: { title: '好东西档案馆' } },
+  { path: '/lifesample', name: 'lifesample', component: () => import('@/modules/lifesample/views/Index.vue'), meta: { title: '人生样本' } },
 
   // 财富管理
   {
@@ -143,7 +144,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'fund',
         name: 'wealth-fund',
-        component: () => import('@/modules/wealth/views/AllocationBoard.vue'),
+        component: () => import('@/modules/wealth/views/FundScheduleBoard.vue'),
         meta: { title: '资金排程' },
       },
     ],
@@ -282,6 +283,7 @@ const routes: RouteRecordRaw[] = [
   // 连接与足迹
   { path: '/food', name: 'food', component: () => import('@/modules/food/views/FoodMapView.vue'), meta: { title: '美食地图' } },
   { path: '/travel', name: 'travel', component: () => import('@/modules/travel/views/TravelDashboard.vue'), meta: { title: '旅行记录' } },
+  { path: '/travel/plans', name: 'travel-plans', component: () => import('@/modules/travel/views/TravelPlanView.vue'), meta: { title: '旅行计划' } },
   {
     path: '/relation',
     name: 'relation',

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
 from .services import _extra_income_monthly
 
 
@@ -157,3 +157,10 @@ class LanguageTrainingSerializer(serializers.ModelSerializer):
 
     def get_train_type_display(self, obj):
         return obj.get_train_type_display()
+
+
+class ElectricityRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ElectricityRecord
+        fields = '__all__'
+        read_only_fields = ['id', 'interval_usage', 'interval_days', 'daily_avg', 'month_usage', 'created_at']

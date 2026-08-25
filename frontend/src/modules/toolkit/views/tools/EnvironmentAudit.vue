@@ -1,9 +1,9 @@
 <template>
   <div class="env-audit">
-    <el-card class="audit-form" style="max-width: 100%">
-      <template #header><span>🧭 环境校准</span></template>
-      <p class="subtitle">六条特征，1-5分。身体不骗人，低于18分就是消耗。</p>
+    <h2 class="page-title">🧭 环境校准</h2>
+    <p class="subtitle">六条特征，1-5分。身体不骗人，低于18分就是消耗。</p>
 
+    <el-card class="audit-form" style="max-width: 100%">
       <el-form :model="form">
         <el-form-item label="环境名称">
           <el-input v-model="form.environment_name" placeholder="如：公司、社群、家庭" />
@@ -254,10 +254,16 @@ onMounted(fetchHistory)
   margin: 0 auto;
   padding: 20px;
 }
+.page-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1F2937;
+}
 .subtitle {
   font-size: 13px;
-  color: #9CA3AF;
-  margin: 0 0 16px;
+  color: #6B7280;
+  margin: 4px 0 16px;
 }
 .hint {
   display: block;
