@@ -10,6 +10,7 @@ class Goal(models.Model):
         ('quarter', '季度目标'),
         ('month', '月度目标'),
         ('long-term', '长期目标'),
+        ('project', '项目目标'),
     ]
 
     PRIORITY_CHOICES = [

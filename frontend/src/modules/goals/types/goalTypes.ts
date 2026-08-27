@@ -2,7 +2,7 @@ export type GoalPriority = 'p0' | 'p1' | 'p2' | 'p3'
 
 export type GoalStatus = 'planning' | 'in-progress' | 'paused' | 'completed' | 'abandoned' | 'archived'
 
-export type GoalCategory = 'year' | 'quarter' | 'month' | 'long-term'
+export type GoalCategory = 'year' | 'quarter' | 'month' | 'long-term' | 'project'
 
 export type MilestoneStatus = 'pending' | 'in-progress' | 'completed'
 
@@ -105,6 +105,7 @@ export interface Goal {
   description: string | null
   category: GoalCategory
   category_display?: string
+  days_remaining?: number | null
   tags: string[] | null
   life_dimension?: string
   action_count?: number
@@ -173,6 +174,7 @@ export const CATEGORY_OPTIONS = [
   { value: 'quarter', label: '季度目标' },
   { value: 'month', label: '月度目标' },
   { value: 'long-term', label: '长期目标' },
+  { value: 'project', label: '📋 项目目标' },
 ]
 
 export const PRIORITY_OPTIONS = [

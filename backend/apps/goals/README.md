@@ -3,7 +3,7 @@
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
-| Goal | goals_goal | 目标（年度/季度/月度/长期，P0-P3 优先级，支持 `parent_goal` 自关联父子嵌套 + `life_dimension` 人生维度必填 + `goal_completion_bonus` 完成奖励金 + 里程碑/完成双重奖励） |
+| Goal | goals_goal | 目标（年度/季度/月度/长期/项目，P0-P3 优先级，支持 `parent_goal` 自关联父子嵌套 + `life_dimension` 人生维度必填 + `goal_completion_bonus` 完成奖励金 + 里程碑/完成双重奖励） |
 | Milestone | goals_milestone | 里程碑（按序排列，含奖励同步 + `difficulty_met` 遇到的困难 + `next_action` 下一步行动 + 完成感悟） |
 | Action | goals_action | 行为记录 |
 | GoalReview | goals_review | 目标回顾（周/月/里程碑三种回顾类型） |
@@ -22,7 +22,7 @@
 
 | 方法 | 端点 | 用途 |
 |------|------|------|
-| GET/POST | /goals/ | 列表（?year=&category=&status=&priority= 筛选）/ 创建 |
+| GET/POST | /goals/ | 列表（?year=&category=&status=&priority= 筛选，含序列化计算字段 `days_remaining` 截止倒计时：无 deadline 为 null、已过期为 0）/ 创建 |
 | GET/PUT/PATCH/DELETE | /goals/&lt;pk&gt;/ | 详情/更新/删除 |
 | POST | /goals/quick_create/ | 快速创建（含批量里程碑） |
 | POST | /goals/&lt;pk&gt;/clone/ | 复制目标 |

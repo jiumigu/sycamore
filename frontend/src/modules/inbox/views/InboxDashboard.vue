@@ -5,6 +5,11 @@
         <h2>📥 收件箱</h2>
         <el-tag size="small" type="info" effect="plain">大脑的缓冲区，先存后理</el-tag>
       </div>
+      <div class="header-right">
+        <el-button @click="showImportDialog = true">
+          <el-icon><Upload /></el-icon> 导入
+        </el-button>
+      </div>
     </div>
 
     <QuickInput />
@@ -66,6 +71,7 @@
 
     <InboxForm v-model:visible="formVisible" :item="editItem" />
     <ConvertModal v-model:visible="convertVisible" :item="convertItem" />
+    <ImportDialog v-model="showImportDialog" @success="handleImportSuccess" />
 
     <!-- 完成备注弹窗 -->
     <el-dialog v-model="completionDialogVisible" title="标记完成" width="480px" :close-on-click-modal="false">
@@ -156,6 +162,7 @@
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Upload } from '@element-plus/icons-vue'
 import { useInboxStore } from '../stores/inboxStore'
 import type { InboxItem } from '../types/inboxTypes'
 import * as sugarApi from '@/modules/sugar/api/sugarApi'
@@ -167,6 +174,7 @@ import InboxList from '../components/InboxList.vue'
 import BatchActions from '../components/BatchActions.vue'
 import InboxForm from '../components/InboxForm.vue'
 import ConvertModal from '../components/ConvertModal.vue'
+import ImportDialog from '../components/ImportDialog.vue'
 
 const store = useInboxStore()
 
@@ -189,6 +197,11 @@ const convertItem = ref<InboxItem | null>(null)
 const completionDialogVisible = ref(false)
 const completingItem = ref<InboxItem | null>(null)
 const processing = ref(false)
+const showImportDialog = ref(false)
+
+function handleImportSuccess() {
+  store.fetchAll()
+}
 
 const completeForm = reactive({
   note: '',
@@ -331,6 +344,11 @@ async function confirmComplete() {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .header-left h2 {
   margin: 0;

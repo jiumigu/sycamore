@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from django.db import models
 from rest_framework import serializers
@@ -121,6 +121,7 @@ class GoalListSerializer(serializers.ModelSerializer):
     category_display = serializers.SerializerMethodField()
     priority_display = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
+    days_remaining = serializers.SerializerMethodField()
     action_count = serializers.SerializerMethodField()
     milestone_count = serializers.SerializerMethodField()
     is_tracking_mode = serializers.SerializerMethodField()
@@ -132,6 +133,7 @@ class GoalListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'category', 'category_display',
             'tags', 'priority', 'priority_display', 'status', 'status_display',
+            'days_remaining',
             'progress_percentage', 'start_date', 'deadline', 'year',
             'notes', 'reward_value', 'user_id',
             'enable_reward', 'default_reward_amount', 'goal_completion_bonus', 'total_reward_issued',
@@ -149,6 +151,15 @@ class GoalListSerializer(serializers.ModelSerializer):
 
     def get_status_display(self, obj):
         return obj.get_status_display()
+
+    def get_days_remaining(self, obj):
+        """计算距离截止日期的剩余天数；无截止日期返回 None，已过期返回 0"""
+        if not obj.deadline:
+            return None
+        today = date.today()
+        if obj.deadline < today:
+            return 0
+        return (obj.deadline - today).days
 
     def get_action_count(self, obj):
         if hasattr(obj, 'action_count'):
@@ -175,6 +186,7 @@ class GoalDetailSerializer(serializers.ModelSerializer):
     category_display = serializers.SerializerMethodField()
     priority_display = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
+    days_remaining = serializers.SerializerMethodField()
     milestones = MilestoneSerializer(many=True, read_only=True)
     actions = ActionSerializer(many=True, read_only=True)
     reviews = GoalReviewSerializer(many=True, read_only=True)
@@ -186,6 +198,7 @@ class GoalDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'category', 'category_display',
             'tags', 'priority', 'priority_display', 'status', 'status_display',
+            'days_remaining',
             'progress_percentage', 'start_date', 'deadline', 'year',
             'notes', 'reward_value', 'user_id',
             'enable_reward', 'default_reward_amount', 'goal_completion_bonus', 'total_reward_issued',
@@ -205,6 +218,15 @@ class GoalDetailSerializer(serializers.ModelSerializer):
 
     def get_status_display(self, obj):
         return obj.get_status_display()
+
+    def get_days_remaining(self, obj):
+        """计算距离截止日期的剩余天数；无截止日期返回 None，已过期返回 0"""
+        if not obj.deadline:
+            return None
+        today = date.today()
+        if obj.deadline < today:
+            return 0
+        return (obj.deadline - today).days
 
 
 class GoalCreateUpdateSerializer(serializers.ModelSerializer):

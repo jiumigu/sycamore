@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -15,7 +16,7 @@ from .serializers import (
     InboxItemSerializer,
     InboxStatsSerializer,
 )
-from .services import ConverterService
+from .services import ConverterService, InboxImportService
 from apps.goals.models import Goal, Milestone
 
 
@@ -29,6 +30,7 @@ class InboxViewSet(viewsets.ModelViewSet):
 
     queryset = InboxItem.objects.all()
     permission_classes = [AllowAny]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['content', 'description', 'tags']
     ordering_fields = ['created_at', 'due_date', 'priority', 'updated_at']
@@ -177,6 +179,47 @@ class InboxViewSet(viewsets.ModelViewSet):
             'goal_title': goal.title,
             'milestone_count': len(milestones),
             'converted_count': len(items),
+        })
+
+    @action(detail=False, methods=['post'], url_path='import')
+    def import_items(self, request):
+        """批量导入待办事项（CSV / Markdown / 纯文本）"""
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'success': False, 'error': '请上传文件'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            content = file.read().decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                file.seek(0)
+                content = file.read().decode('gbk')
+            except UnicodeDecodeError:
+                return Response(
+                    {'success': False, 'error': '文件编码不支持，请使用 UTF-8 或 GBK'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        file_name = (file.name or '').lower()
+        if file_name.endswith('.csv'):
+            items = InboxImportService.parse_csv(content)
+        elif file_name.endswith('.md'):
+            items = InboxImportService.parse_markdown_tasks(content)
+        else:
+            items = InboxImportService.parse_plain_text(content)
+
+        if not items:
+            return Response({'success': False, 'error': '未识别到有效的待办事项'}, status=status.HTTP_400_BAD_REQUEST)
+
+        result = InboxImportService.import_items(1, items)
+
+        return Response({
+            'success': result['failed_count'] == 0,
+            'created': result['created'],
+            'failed': result['failed'],
+            'total': result['total'],
+            'success_count': result['success_count'],
+            'failed_count': result['failed_count'],
         })
 
     @action(detail=False, methods=['get'])

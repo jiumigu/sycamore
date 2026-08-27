@@ -73,6 +73,7 @@
         <!-- 元数据行：紧凑排列 -->
         <div class="goal-meta">
           <span>{{ goal.start_date?.slice(0, 10) || '' }} ~ {{ goal.deadline?.slice(0, 10) || '不限' }}</span>
+          <CountdownBadge v-if="goal.days_remaining !== undefined && goal.days_remaining !== null" :days="goal.days_remaining" />
           <el-divider direction="vertical" />
           <span>{{ goal.category_display || goal.category }}</span>
           <el-divider direction="vertical" />
@@ -152,6 +153,7 @@ import { PRIORITY_OPTIONS, STATUS_OPTIONS, DIMENSION_OPTIONS } from '../types/go
 import type { Goal, GoalStatus, Milestone } from '../types/goalTypes'
 import MilestoneBoard from './MilestoneBoard.vue'
 import BehaviorTrackCard from './BehaviorTrackCard.vue'
+import CountdownBadge from './CountdownBadge.vue'
 
 const props = defineProps<{
   goal: Goal

@@ -1,5 +1,5 @@
 import request from '@/shared/utils/request'
-import type { InboxItem, InboxStats, BatchActionPayload } from '../types/inboxTypes'
+import type { InboxItem, InboxStats, BatchActionPayload, ImportResult } from '../types/inboxTypes'
 
 export function getInboxItems(params?: Record<string, unknown>) {
   return request<{ count: number; results: InboxItem[] }>({
@@ -33,6 +33,11 @@ export function convertInboxItem(id: number, data: Record<string, unknown>) {
 
 export function batchAction(data: BatchActionPayload) {
   return request({ url: '/inbox/items/batch/', method: 'post', data })
+}
+
+/** 批量导入待办事项（CSV/Markdown/纯文本） */
+export function importInboxItems(formData: FormData) {
+  return request<ImportResult>({ url: '/inbox/items/import/', method: 'post', data: formData })
 }
 
 /** 获取今日待办（未完成且已到期） */

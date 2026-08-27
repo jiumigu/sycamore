@@ -55,6 +55,15 @@ export interface BatchActionPayload {
   target_id?: number
 }
 
+export interface ImportResult {
+  success: boolean
+  created: Array<{ id: number; content: string }>
+  failed: Array<{ content: string; error: string }>
+  total: number
+  success_count: number
+  failed_count: number
+}
+
 export const CATEGORY_OPTIONS = [
   { value: 'todo', label: '待办', icon: '✅' },
   { value: 'idea', label: '想法', icon: '💡' },

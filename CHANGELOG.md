@@ -1,5 +1,18 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-08-25] v3.43.0 — 备考优化 · 项目目标 + 收件箱导入 + 截止倒计时
+
+### ✨ 新增
+
+- **目标类型新增「项目目标」**：`Goal.category` 增加 `project`（迁移 0015），目标类型下拉框新增「📋 项目目标」选项
+- **收件箱批量导入**：`POST /api/inbox/items/import/`（multipart 文件上传），支持 CSV / Markdown 任务列表 / 纯文本三种格式自动识别；中文列名与中文标签（待办/已完成等）自动归一化为合法 code；导入项自动标记 `source='import'`；前端导入弹窗含格式说明、拖拽上传、预览、CSV 模板下载
+- **目标卡片截止倒计时**：`Goal` 列表/详情序列化新增计算字段 `days_remaining`（无截止日期为 null、已过期为 0）；卡片上按剩余天数分级着色（🔥≤3天 / ⚠️≤7天 / 📅N天 / ⏰已过期）
+
+### 📝 文档
+
+- 更新 `inbox/README.md`（后端 + 前端）：Services 增 `InboxImportService`、API 增 `/items/import/`、Components 增 `ImportDialog.vue`
+- 更新 `goals/README.md`（后端 + 前端）：Goal 模型增项目目标、API 增 `days_remaining` 说明、Components 增 `CountdownBadge.vue`；goals 前端 README 全面整理（移除已删除文件 GoalForm/MilestoneForm/ActionList/CloneDialog/output* 的过时条目、修正重复的 Views 节、补全现有文件）
+
 ## [2026-08-23] v3.42.0 — 人生样本 · 同步防重复 + Obsidian 打开修复
 
 ### 🐛 修复
