@@ -85,26 +85,15 @@
         </div>
       </template>
       <div class="heatmap-body">
-        <div class="heatmap-grid">
-          <div v-for="month in 12" :key="month" class="heatmap-month">
-            <div class="month-label">{{ month }}月</div>
-            <div class="month-days">
-              <div
-                v-for="day in daysInMonth(month)"
-                :key="day"
-                class="heatmap-day"
-                :style="{ backgroundColor: getDayColor(month, day) }"
-                :title="getDayTooltip(month, day)"
-              ></div>
-            </div>
-          </div>
-        </div>
-        <div class="heatmap-footer">
-          <span class="legend-label">少</span>
-          <span v-for="level in 5" :key="level" class="legend-block" :style="{ backgroundColor: colorScale[level - 1] }"></span>
-          <span class="legend-label">多</span>
-          <span class="legend-summary">共 <strong>{{ Object.keys(heatmapData).length }}</strong> 天有记录</span>
-        </div>
+        <ContributionGraph
+          v-if="graphList.length"
+          :data="graphList"
+          :min-year="currentYear"
+          :max-year="currentYear"
+          :title="`${currentYear} 年日记字数`"
+          :unit-label="'字'"
+        />
+        <el-empty v-else-if="!loadingHeatmap" description="该年暂无日记" />
       </div>
     </el-card>
 
@@ -129,11 +118,23 @@
         <el-select v-model="searchForm.otype" placeholder="类型" clearable @change="handleSearch" class="filter-select">
           <el-option v-for="o in OTYPE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
         </el-select>
+        <el-input
+          v-model="searchForm.flag"
+          placeholder="按标签筛选，如：待回顾"
+          clearable
+          class="filter-select"
+          @input="handleSearch"
+        >
+          <template #prefix><el-icon><CollectionTag /></el-icon></template>
+        </el-input>
         <el-button type="danger" :disabled="!selectedIds.length" @click="handleBulkDelete" class="bulk-delete-btn">
           <el-icon><Delete /></el-icon>
           批量删除
         </el-button>
         <div class="filter-actions">
+          <el-button @click="$router.push('/temporal/oneday/contrib')">
+            📊 贡献图
+          </el-button>
           <el-button type="primary" @click="openCreateDialog">
             <el-icon><Plus /></el-icon>
             新增日记
@@ -177,6 +178,16 @@
             <el-tag :type="getTypeTagType(row.otype)" size="small">
               {{ row.otype_display }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="标签" width="150">
+          <template #default="{ row }">
+            <template v-if="row.flag">
+              <el-tag v-for="t in row.flag.split(',').map((x: string) => x.trim()).filter(Boolean)" :key="t" size="small" class="flag-tag">
+                {{ t }}
+              </el-tag>
+            </template>
+            <span v-else class="flag-empty">—</span>
           </template>
         </el-table-column>
         <el-table-column prop="oneday" label="OneDay" width="90" sortable>
@@ -350,11 +361,12 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Search, Refresh, Plus, Delete, Edit, ArrowLeft, ArrowRight,
-  Document, EditPen, Calendar, RefreshRight, Link,
+  Document, EditPen, Calendar, RefreshRight, Link, CollectionTag,
 } from '@element-plus/icons-vue'
 import { useTemporalStore } from '../stores/temporalStore'
 import { OTYPE_OPTIONS } from '../types/temporalTypes'
 import { getYearlyHeatmap } from '../api/temporalApi'
+import ContributionGraph from '@/shared/components/ContributionGraph.vue'
 import type { OneDayPage } from '../types/temporalTypes'
 import LogseqViewer from '../components/LogseqViewer.vue'
 import { getPresetByType } from '@/shared/api/coreApi'
@@ -383,12 +395,18 @@ const viewingLogseqPath = ref('')
 
 const currentYear = ref(new Date().getFullYear())
 const heatmapData = ref<Record<string, { count: number; title: string }>>({})
+const loadingHeatmap = ref(false)
 
-const colorScale = ['#EBEDF0', '#9BE9A8', '#40C463', '#30A14E', '#216E39']
-
-const daysInMonth = (month: number) => new Date(currentYear.value, month, 0).getDate()
+// 当年热图数据 → 贡献图格式 [{date, value}]
+const graphList = computed(() =>
+  Object.entries(heatmapData.value).map(([k, v]) => ({
+    date: `${currentYear.value}-${k}`,
+    value: v.count,
+  })),
+)
 
 async function fetchYearlyHeatmap(year: number) {
+  loadingHeatmap.value = true
   try {
     const res = await getYearlyHeatmap(year)
     const map: Record<string, { count: number; title: string }> = {}
@@ -399,24 +417,9 @@ async function fetchYearlyHeatmap(year: number) {
     heatmapData.value = map
   } catch {
     heatmapData.value = {}
+  } finally {
+    loadingHeatmap.value = false
   }
-}
-
-function getDayColor(month: number, day: number): string {
-  const key = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-  const data = heatmapData.value[key]
-  if (!data) return colorScale[0]       // 灰色：无记录
-  if (data.count === 0) return colorScale[1]  // 浅绿：有日记但当天 0 字
-  if (data.count < 500) return colorScale[2]
-  if (data.count < 1000) return colorScale[3]
-  return colorScale[4]
-}
-
-function getDayTooltip(month: number, day: number): string {
-  const key = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-  const data = heatmapData.value[key]
-  if (!data) return `${month}月${day}日：无记录`
-  return `${month}月${day}日：${data.count} 字 — ${data.title || '无标题'}`
 }
 
 function prevYear() { currentYear.value--; fetchYearlyHeatmap(currentYear.value) }
@@ -435,6 +438,7 @@ const searchForm = reactive({
   years: '',
   otype: '',
   title: '',
+  flag: '',
 })
 
 const formData = reactive({
@@ -543,6 +547,7 @@ function resetSearch() {
   searchForm.years = ''
   searchForm.otype = ''
   searchForm.title = ''
+  searchForm.flag = ''
   handleSearch()
 }
 
@@ -554,6 +559,7 @@ async function fetchData() {
   if (searchForm.years) params.years = searchForm.years
   if (searchForm.otype) params.otype = searchForm.otype
   if (searchForm.title) params.title = searchForm.title
+  if (searchForm.flag) params.flag = searchForm.flag
   await store.fetchOneDayList(params)
 }
 
@@ -813,6 +819,8 @@ onMounted(() => {
 
   .search-input { width: 200px; }
   .filter-select { width: 120px; }
+  .flag-tag { margin-right: 4px; }
+  .flag-empty { color: #c0c4cc; }
 
   .filter-actions {
     display: flex;

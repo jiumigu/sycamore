@@ -1,7 +1,7 @@
 from collections import Counter
 
 from django.db import models, transaction
-from django.db.models import Avg, Count, F, Q
+from django.db.models import Avg, Case, Count, F, IntegerField, Prefetch, Q, When
 from django.utils import timezone
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
@@ -63,10 +63,24 @@ class GoalViewSet(viewsets.ModelViewSet):
         return GoalDetailSerializer
 
     def get_queryset(self):
+        # 嵌套 milestones 用 Prefetch 注入智能排序（目标详情/列表展开都生效）
+        milestone_qs = Milestone.objects.annotate(
+            _sort_active=Case(
+                When(status__in=['pending', 'in-progress'], then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
+            _sort_has_date=Case(
+                When(target_date__isnull=False, then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
+        ).order_by('_sort_active', '_sort_has_date', 'target_date', 'order_num', 'id')
+
         qs = super().get_queryset().annotate(
             action_count=Count('actions', distinct=True),
             milestone_count=Count('milestones', distinct=True),
-        )
+        ).prefetch_related(Prefetch('milestones', queryset=milestone_qs))
         params = self.request.query_params
 
         year = params.get('year')
@@ -537,7 +551,19 @@ class MilestoneViewSet(viewsets.ModelViewSet):
             qs = qs.filter(target_date__year=target_year)
         if target_month:
             qs = qs.filter(target_date__month=target_month)
-        return qs
+        # 排序：未完成在前 → 有截止日期在前 → 截止日期最近在前 → 手排/ID 兜底
+        return qs.annotate(
+            _sort_active=Case(
+                When(status__in=['pending', 'in-progress'], then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
+            _sort_has_date=Case(
+                When(target_date__isnull=False, then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
+        ).order_by('_sort_active', '_sort_has_date', 'target_date', 'order_num', 'id')
 
     def perform_create(self, serializer):
         goal_id = self.request.data.get('goal')

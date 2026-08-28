@@ -14,10 +14,9 @@
       <EnvironmentAudit v-else-if="toolKey === 'environment-audit'" />
       <CareerEnergyAudit v-else-if="toolKey === 'career-energy-audit'" />
       <HealthSelfCheck v-else-if="toolKey === 'health-self-check'" />
-      <FreeSpending v-else-if="toolKey === 'free-spending'" />
+      <FinanceCalculators v-else-if="toolKey === 'finance-calculators'" />
       <ReviewToolbox v-else-if="toolKey === 'review-toolbox'" />
       <GifCompressor v-else-if="toolKey === 'gif-compressor'" />
-      <FixedExpense v-else-if="toolKey === 'fixed-expense'" />
       <ElectricityRecord v-else-if="toolKey === 'electricity-record'" />
 
       <!-- 执行区 -->
@@ -32,33 +31,8 @@
           <el-card class="section-card" v-if="tool">
             <template #header><span>⚙️ 参数设置</span></template>
 
-            <!-- 文件上传（image类工具） -->
-            <div v-if="isImageTool" class="upload-area">
-              <el-upload
-                ref="uploadRef"
-                v-model:file-list="uploadedFiles"
-                multiple
-                :auto-upload="false"
-                accept="image/jpeg,image/png,image/bmp,image/webp"
-                list-type="picture-card"
-              >
-                <el-icon><Plus /></el-icon>
-                <template #file="{ file }">
-                  <div>
-                    <img class="el-upload-list__item-thumbnail" :src="file.url" alt="" />
-                    <span class="el-upload-list__item-actions">
-                      <span class="el-upload-list__item-delete" @click="removeFile(file)">
-                        <el-icon><Delete /></el-icon>
-                      </span>
-                    </span>
-                  </div>
-                </template>
-              </el-upload>
-              <div class="upload-hint">支持 JPG、PNG、BMP、WEBP 格式</div>
-            </div>
-
             <!-- 文件上传（繁简转换） -->
-            <div v-else-if="isTrad2Simp" class="file-convert-area">
+            <div v-if="isTrad2Simp" class="file-convert-area">
               <div class="file-upload-zone">
                 <el-upload
                   ref="fileUploadRef"
@@ -154,7 +128,7 @@
             <div v-if="result.output_file" class="result-file">
               <div class="file-preview">
                 <span class="file-icon">📄</span>
-                <span>{{ result.filename || '转换后文件' }}</span>
+                <span>{{ resultFilename }}</span>
               </div>
               <div v-if="result.preview" class="preview-box">
                 <div class="preview-label">内容预览</div>
@@ -194,17 +168,16 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Plus, Delete, CaretRight, Download, CopyDocument, Refresh, Timer, UploadFilled, Document } from '@element-plus/icons-vue'
+import { ArrowLeft, CaretRight, Download, CopyDocument, Refresh, Timer, UploadFilled, Document } from '@element-plus/icons-vue'
 import { useToolkitStore } from '../stores/toolkitStore'
 import type { ToolDefinition, SchemaProperty } from '../types/toolkitTypes'
 import TravelRoute from './tools/TravelRoute.vue'
 import EnvironmentAudit from './tools/EnvironmentAudit.vue'
 import CareerEnergyAudit from './tools/CareerEnergyAudit.vue'
 import HealthSelfCheck from './tools/HealthSelfCheck.vue'
-import FreeSpending from './tools/FreeSpending.vue'
+import FinanceCalculators from './FinanceCalculators.vue'
 import ReviewToolbox from './tools/ReviewToolbox.vue'
 import GifCompressor from './tools/GifCompressor.vue'
-import FixedExpense from './tools/FixedExpense.vue'
 import ElectricityRecord from './tools/ElectricityRecord.vue'
 
 const route = useRoute()
@@ -214,8 +187,6 @@ const toolKey = computed(() => route.params.toolKey as string)
 const tool = ref<ToolDefinition | null>(null)
 const loading = ref(false)
 const errorMsg = ref('')
-const uploadedFiles = ref<any[]>([])
-const uploadRef = ref()
 const fileUploadRef = ref()
 const formData = ref<Record<string, any>>({})
 
@@ -224,14 +195,20 @@ const convertMode = ref('t2s')
 
 const result = computed(() => store.executionResult)
 
-const isImageTool = computed(() => tool.value?.category === 'image')
+const resultFilename = computed(() => {
+  const f = store.executionResult?.filename || ''
+  if (f) return f
+  const p = store.executionResult?.output_file || ''
+  return p ? p.split('/').pop() || '转换后文件' : '转换后文件'
+})
 const isTrad2Simp = computed(() => tool.value?.tool_key === 'trad2simp')
 
 // 数据型工具：历史在各页自身数据表、页面底部有自己的历史列表，不走"执行历史"页；
-// 其余（gif-compressor / img2gif / trad2simp 及通用表单工具）为执行型，执行记录进"执行历史"页
+// 其余（gif-compressor / trad2simp 及通用表单工具）为执行型，执行记录进"执行历史"页
 const DATA_TOOL_KEYS = new Set([
   'travel-route', 'environment-audit', 'career-energy-audit', 'health-self-check',
   'free-spending', 'review-toolbox', 'fixed-expense', 'electricity-record',
+  'finance-calculators',
 ])
 const isExecutionTool = computed(() => !DATA_TOOL_KEYS.has(toolKey.value))
 
@@ -274,28 +251,20 @@ function formatStat(v: unknown): string {
 }
 
 function buildFormData() {
-  const data: Record<string, any> = { ...formData.value }
-  if (isImageTool.value && uploadedFiles.value.length > 0) {
-    data.images = uploadedFiles.value.map(f => f.name)
-  }
-  return data
+  return { ...formData.value }
 }
 
 // 通用执行
 async function handleExecute() {
   errorMsg.value = ''
   store.resetExecution()
-  if (isImageTool.value && uploadedFiles.value.length === 0) {
-    ElMessage.warning('请上传图片')
-    return
-  }
   try {
     await store.runTool(toolKey.value, buildFormData())
     if (!store.executionResult?.success && store.executionStatus === 'failed') {
       errorMsg.value = '工具执行失败'
     }
   } catch (e: any) {
-    errorMsg.value = e?.response?.data?.error || '执行失败'
+    errorMsg.value = e?.response?.data?.error || e?.response?.data?.detail || e?.message || '执行失败'
   }
 }
 
@@ -328,24 +297,18 @@ function resetConvert() {
 }
 
 function downloadFile(path: string) {
-  const a = document.createElement('a')
-  a.href = path
-  a.download = path.split('/').pop() || 'download'
-  a.click()
+  // 服务器绝对路径 → 相对 MEDIA_ROOT → 后端下载端点（浏览器无法直接访问本地路径）
+  const mediaIdx = path.indexOf('/media/')
+  const rel = mediaIdx > -1 ? path.slice(mediaIdx + '/media/'.length) : path
+  window.open(`/api/toolkit/files/${rel}`, '_blank')
 }
 
 function copyResult(text: string) {
   navigator.clipboard.writeText(text).then(() => ElMessage.success('已复制'))
 }
 
-function removeFile(file: any) {
-  const idx = uploadedFiles.value.findIndex(f => f.uid === file.uid)
-  if (idx > -1) uploadedFiles.value.splice(idx, 1)
-}
-
 function resetForm() {
   formData.value = getDefaultFormData()
-  uploadedFiles.value = []
 }
 
 function resetExecution() {
@@ -366,6 +329,10 @@ function getDefaultFormData(): Record<string, any> {
 onMounted(async () => {
   loading.value = true
   try {
+    if (toolKey.value === 'finance-calculators') {
+      // 聚合工具：无独立后端详情，直接渲染聚合页（FinanceCalculators）
+      return
+    }
     const t = await store.fetchToolDetail(toolKey.value)
     tool.value = t
     formData.value = getDefaultFormData()

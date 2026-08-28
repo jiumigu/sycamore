@@ -225,3 +225,7 @@ export function updateBill(id: number, data: Record<string, unknown>) {
 export function deleteBill(id: number) {
   return request({ url: `/wealth/bills/${id}/`, method: 'delete' })
 }
+
+export function getBillContrib() {
+  return request({ url: '/wealth/bills/contrib/', method: 'get' })
+}

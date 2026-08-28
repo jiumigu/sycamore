@@ -1,10 +1,6 @@
 <template>
   <div class="free-spending">
-    <div class="back-bar">
-      <el-button text @click="$router.push('/toolkit')">
-        <el-icon><ArrowLeft /></el-icon> 返回工具集
-      </el-button>
-    </div>
+    <!-- 返回按钮由 ToolDetail 统一提供，勿在此重复添加 -->
     <el-card class="calc-card">
       <template #header>
         <div class="card-header">

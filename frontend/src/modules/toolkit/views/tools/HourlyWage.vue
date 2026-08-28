@@ -1,11 +1,5 @@
 <template>
   <div class="hourly-wage">
-    <div class="back-bar">
-      <el-button text @click="$router.push('/toolkit')">
-        <el-icon><ArrowLeft /></el-icon> 返回工具集
-      </el-button>
-    </div>
-
     <h2>⏱️ 时薪计算器</h2>
     <p class="subtitle">月薪 ÷ 真实投入时间 = 时薪。看清自己的时间价值。</p>
 

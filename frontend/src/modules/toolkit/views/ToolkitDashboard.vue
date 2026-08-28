@@ -61,11 +61,11 @@ const toolCategoryMap: Record<string, string> = {
   'career-energy-audit': '环境侦查',
   'environment-audit': '环境侦查',
   'decision-log': '环境侦查',
-  'img2gif': '图片处理',
   'trad2simp': '文字',
   'free-spending': '财务',
   'hourly-wage': '财务',
   'fixed-expense': '财务',
+  'finance-calculators': '财务',
   'quote-tool': '文字',
   'health-self-check': '健康',
 }
@@ -74,8 +74,24 @@ function getToolCategory(tool: { tool_key: string }): string {
   return toolCategoryMap[tool.tool_key] || '其他'
 }
 
+// 三个财务计算器折叠为一个「💰 财务计算器」入口（跳聚合页 FinanceCalculators）
+const CALC_KEYS = ['fixed-expense', 'free-spending', 'hourly-wage']
+
 const filteredTools = computed(() => {
   let list = store.tools
+  // 折叠
+  const calcItems = list.filter(t => CALC_KEYS.includes(t.tool_key))
+  const otherItems = list.filter(t => !CALC_KEYS.includes(t.tool_key))
+  if (calcItems.length > 0) {
+    otherItems.push({
+      tool_key: 'finance-calculators',
+      name: '💰 财务计算器',
+      description: '固定开销 / 自由支配额度 / 时薪 合一',
+      icon: calcItems[0].icon || '💰',
+      category: 'other',
+    } as any)
+  }
+  list = otherItems
   if (activeFilter.value) {
     list = list.filter(t => getToolCategory(t) === activeFilter.value)
   }

@@ -105,3 +105,11 @@ export function updateTask(id: number, data: Record<string, unknown>) {
 export function deleteTask(id: number) {
   return request({ url: `/temporal/tasks/${id}/`, method: 'delete' })
 }
+
+export function getTaskContrib() {
+  return request({ url: '/temporal/tasks/contrib/', method: 'get' })
+}
+
+export function getOnedayContrib() {
+  return request({ url: '/temporal/oneday/contrib/', method: 'get' })
+}

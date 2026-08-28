@@ -63,3 +63,27 @@ class TestRelationStats:
         assert q == 'nourishing'
         rel.refresh_from_db()
         assert rel.current_quality == 'nourishing'
+
+
+@pytest.mark.django_db
+class TestDueRemindersExcludeCoworker:
+    def test_coworker_excluded_from_reminders(self):
+        """当时身份为同事的关系不进入待跟进提醒"""
+        from datetime import timedelta
+        from django.utils import timezone
+        from rest_framework.test import APIClient
+        now = timezone.now()
+        coworker = Relationship.objects.create(user_id=1, name='老同事', current_quality='neutral',
+                                               current_status='active', tags='', identity_then='同事')
+        friend = Relationship.objects.create(user_id=1, name='老朋友', current_quality='neutral',
+                                             current_status='active', tags='', identity_then='同学')
+        # 两者都超过 30 天未互动
+        Interaction.objects.create(relationship=coworker, user_id=1, energy_score=1,
+                                   happened_at=now - timedelta(days=60))
+        Interaction.objects.create(relationship=friend, user_id=1, energy_score=1,
+                                   happened_at=now - timedelta(days=60))
+        c = APIClient()
+        r = c.get('/api/relation/stats/due_reminders/')
+        names = [x['name'] for x in r.data]
+        assert '老朋友' in names
+        assert '老同事' not in names

@@ -1,5 +1,23 @@
-# Sycamore 人生管理系统 - 更新日志
+## [2026-08-30] v3.45.0 — 贡献图 · 标签检索 · 计算器聚合 · 高频直达
 
+### ✨ 新增
+
+- **高频工具直达菜单**：用电记录、摘录管理 加入左侧菜单栏（工具箱分组，`menuConfig.ts` 新增 `toolkit_electricity`/`toolkit_quotes`，path 分别直达 `/toolkit/electricity-record` 与 `/toolkit/quotes`），自动纳入菜单管理（可排序/归档/分组）
+- **财务计算器三合一**：固定开销 / 自由支配额度 / 时薪 三个计算器合并为一个「💰 财务计算器」入口（工具箱列表折叠显示，`ToolDetail` 渲染聚合页 `FinanceCalculators.vue` 用 tab 切换）；聚合页默认定位固定开销，子组件去掉各自「返回工具集」按钮（对齐 FixedExpense 规范）；顺带接上此前未被引用的 HourlyWage 组件（原走空表单）
+- **移除「图片转GIF」功能**：多轮调试后使用效果不佳（macOS 预览兼容性反复出问题），决定整体下线——删除 img2gif 后端工具、`POST /api/toolkit/execute_files/` 多文件上传执行端点、前端图片上传/参数表单/FormData 执行链路（api.executeToolFiles / store.runToolFormData / ToolDetail 图片分支）、相关测试与 22 条执行记录；`GIF 下载端点 FileDownloadView`（通用）保留；工具箱「GIF 压缩」等其他工具不受影响
+- **四大模块贡献图（Roam 风格年度热力图）**：时间/日记流/财富/健康各新增贡献图页面（`/temporal/contrib`、`/temporal/oneday/contrib`、财富 tab「贡献图」、`/health/contrib`），多年 × 12 月网格、色阶深浅=当日活跃度（时间=持续小时数 / 日记流=总字数 / 财富=收支净值红收绿支 / 健康=折算步数），初始年份取各模块最早数据年（时间 2024 / 日记流 2021 / 财富 2014 / 健康 2021）；通用组件 `shared/components/ContributionGraph.vue` + 4 个后端 contrib 聚合端点（单表 GROUP BY + Cast 规避 CONVERT_TZ）；前端 localStorage 按模块+年缓存 30 分钟 + 手动刷新；性能实测 4 查询合计 34ms 不固化（未来 >500 万条再物化）；新增 4 条 contrib pytest（96 passed）
+- **日记流标签列 + 标签检索**：列表新增「标签」列（flag 逗号分隔拆分为多个 el-tag 展示）；筛选栏新增标签输入框（如"待回顾"），后端 `flag__icontains` 子串检索支持多标签命中；重置会清空标签筛选；新增 pytest 检索用例（89 passed）
+- **里程碑列表智能排序**：未完成（pending/in-progress）排前 → 有截止日期（target_date）排前 → 截止日期最近排最前 → 手排/ID 兜底；`MilestoneViewSet.get_queryset` 用 Case/When 生成排序键；新增 pytest 排序用例（86 passed）
+- **待跟进提醒排除同事**：`get_due_reminders` 排除 `identity_then='同事'` 的关系（32 条同事不再提醒）；新增 pytest 用例（97 passed）
+
+### ✅ 测试
+
+- **测试用例扩充 46 → 85（新增 39 条）**：覆盖资金排程子表、账单清单 CRUD/时间筛选、好朋友跟踪（结束日期/持续天数/12 个月口径）、健康统计 ORM 化、时间追踪任务 CRUD、oneday stats 列名回归、关系统计 ORM 化、summary/goals services 跨类引用回归；conftest 补 7 张外部表镜像（task/oneday/step/relationship/interaction/balance/travel），测试库结构变更需 DROP test_sycamore 重建
+- **测试暴露并修复产品 bug**：relation 能量趋势/互动频率按月分组的 `ExtractYear/Month` 受 CONVERT_TZ 影响 period 全为 `0000-00`，改 `TruncMonth(Cast(...))` 修复
+
+### 🐛 修复
+
+- **里程碑截止日期被编辑清空修复**：`GoalHub.saveMilestoneDate` 中 `editingMilestoneDate.value || null` 在输入为空时把 target_date 置 null——改为未改动不提交（新旧值相同直接关闭），仅显式清空才传 null；新增 3 条「编辑不丢失未改动字段」pytest 回归用例（92 passed）
 ## [2026-08-27] v3.44.0 — 菜单管理系统 · 补测试 · 数据库清理
 
 ### ✨ 新增
@@ -17,10 +35,6 @@
 - **补充测试（pytest + pytest-django）**：新增 6 个测试文件 46 个用例，覆盖财富周聚合/现金流推演（日利息复利）/固定开销/CSV 导入去重、里程碑奖励发放与防重复/取消与删除扣回/目标完成奖励金（顺序无关/幂等）、小确幸奖励金额=快乐程度；配套 `pytest.ini`（--no-migrations + 测试库外部表 conftest 建表）
 - **系统体检报告**：`docs/Sycamore-系统体检报告-2026-08-27.docx`（三位一体审计 + 数据取证）
 
-### ✅ 测试
-
-- **测试用例扩充 46 → 85（新增 39 条）**：覆盖资金排程子表、账单清单 CRUD/时间筛选、好朋友跟踪（结束日期/持续天数/12 个月口径）、健康统计 ORM 化、时间追踪任务 CRUD、oneday stats 列名回归、关系统计 ORM 化、summary/goals services 跨类引用回归；conftest 补 7 张外部表镜像（task/oneday/step/relationship/interaction/balance/travel），测试库结构变更需 DROP test_sycamore 重建
-- **测试暴露并修复产品 bug**：relation 能量趋势/互动频率按月分组的 `ExtractYear/Month` 受 CONVERT_TZ 影响 period 全为 `0000-00`，改 `TruncMonth(Cast(...))` 修复
 
 ### 🐛 修复
 
@@ -197,7 +211,7 @@
 ### 🐛 修复
 
 - **工具页面重复「返回工具集」按钮**：`FixedExpense.vue` / `ElectricityRecord.vue` 经兜底路由 `/toolkit/:toolKey` 渲染在 `ToolDetail.vue` 内部（外层已有返回按钮），组件自身又各写一个导致双按钮。删除两个组件内的冗余 back-bar（模板块 + `ArrowLeft` 导入 + `.back-bar` 样式），统一由 `ToolDetail.vue` 提供单个返回按钮，并加注释防回归。独立路由的工具页（时薪/决策/健康自查等）各自保留唯一按钮
-- **工具页顶部描述卡片与误导性「历史记录」按钮**：`ToolDetail.vue` 曾为所有工具渲染共享描述卡片（图标/名称/描述 + 「历史记录」按钮跳执行历史页），但数据型工具（固定开销/用电/环境校准/旅行路线等）历史存在各自数据表、不在执行历史页展示，按钮误导。删除该描述卡片（规则：数据型 = 返回 + 内容 + 自己历史列表；执行型 = 返回 + 内容 + 执行历史入口；不允许独立描述卡片），执行型工具（gif-compressor/img2gif/trad2simp）的「执行历史」入口移至返回栏右侧。为依赖卡片提供标题的 `EnvironmentAudit.vue` / `TravelRoute.vue` / `GifCompressor.vue` 及通用执行表单补自身 `page-title`
+- **工具页顶部描述卡片与误导性「历史记录」按钮**：`ToolDetail.vue` 曾为所有工具渲染共享描述卡片（图标/名称/描述 + 「历史记录」按钮跳执行历史页），但数据型工具（固定开销/用电/环境校准/旅行路线等）历史存在各自数据表、不在执行历史页展示，按钮误导。删除该描述卡片（规则：数据型 = 返回 + 内容 + 自己历史列表；执行型 = 返回 + 内容 + 执行历史入口；不允许独立描述卡片），执行型工具（gif-compressor/trad2simp）的「执行历史」入口移至返回栏右侧。为依赖卡片提供标题的 `EnvironmentAudit.vue` / `TravelRoute.vue` / `GifCompressor.vue` 及通用执行表单补自身 `page-title`
 
 ### 📝 文档
 

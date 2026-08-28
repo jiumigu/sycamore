@@ -3,6 +3,9 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from django.db.models import DateField, Sum
+from django.db.models.functions import Cast
+
 from .models import HealthRecord, MenstrualRecord, WeightGoal, WeightGoalAdjustment, WeightMilestone, WeightRecord, UserBodyInfo
 from .serializers import (
     HealthRecordSerializer,
@@ -46,6 +49,27 @@ class HealthRecordViewSet(viewsets.ModelViewSet):
         return qs
 
     # ─── 统计接口 ───
+
+    @action(detail=False, methods=['get'])
+    def contrib(self, request):
+        """贡献图：单日步数（折算后 total）聚合"""
+        rows = list(
+            HealthRecord.objects.exclude(total__isnull=True)
+            .annotate(d=Cast('time', DateField()))
+            .values('d')
+            .annotate(v=Sum('total'))
+            .order_by('d')
+            .values_list('d', 'v')
+        )
+        data = [{'date': d.isoformat(), 'value': round(float(v), 2)} for d, v in rows]
+        min_year = min((d.year for d, _ in rows), default=2026)
+        max_year = max((d.year for d, _ in rows), default=2026)
+        summary = {
+            'total_days': len(data),
+            'max_date': max(data, key=lambda x: x['value'])['date'] if data else None,
+            'max_value': max((x['value'] for x in data), default=0),
+        }
+        return Response({'min_year': min_year, 'max_year': max_year, 'data': data, 'summary': summary})
 
     @action(detail=False, methods=['get'])
     def summary(self, request):

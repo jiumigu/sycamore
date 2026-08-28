@@ -201,6 +201,23 @@ class ExecuteToolView(views.APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+from django.http import FileResponse, Http404
+
+
+class FileDownloadView(views.APIView):
+    """工具产物文件下载——仅允许 MEDIA_ROOT 内文件（防路径穿越）"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, filepath):
+        media_root = os.path.abspath(settings.MEDIA_ROOT)
+        target = os.path.abspath(os.path.join(media_root, filepath))
+        if not target.startswith(media_root + os.sep) or not os.path.isfile(target):
+            raise Http404
+        return FileResponse(open(target, 'rb'), as_attachment=True,
+                            filename=os.path.basename(target))
+
+
 _TOOL_ALLOWED_EXTS = {
     'trad2simp': {'.txt'},
     'gif-compressor': {'.gif'},
@@ -211,7 +228,7 @@ def _build_tool_params(form_data) -> dict:
     """将 multipart 表单字段转为工具参数，数值字符串自动转换类型"""
     params = {}
     for key, value in form_data.items():
-        if key in ('tool_key', 'file'):
+        if key in ('tool_key', 'file', 'files'):
             continue
         if isinstance(value, str):
             try:

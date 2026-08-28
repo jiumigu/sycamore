@@ -21,6 +21,9 @@
         <el-button type="primary" size="default" @click="taskDialogVisible = true; loadTasks()">
           📋 任务清单
         </el-button>
+        <el-button size="default" @click="$router.push('/temporal/contrib')">
+          📊 贡献图
+        </el-button>
       </div>
     </div>
 

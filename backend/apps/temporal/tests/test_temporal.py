@@ -60,3 +60,74 @@ class TestOneDayStats:
         assert r.data['total_count'] == 2
         assert r.data['total_words'] == 450
         assert len(r.data['month_stats']) >= 1
+
+
+@pytest.mark.django_db
+class TestOneDayFlagFilter:
+    def test_flag_substring_filter(self):
+        """flag 多标签（逗号分隔）子串检索：flag=待回顾 应命中 '待回顾,美食'"""
+        from datetime import date
+        from rest_framework.test import APIClient
+        OneDayPage.objects.create(title='需要回顾', begin_date=date(2026, 8, 22), flag='待回顾,美食')
+        OneDayPage.objects.create(title='普通', begin_date=date(2026, 8, 23), flag=None)
+        OneDayPage.objects.create(title='其他标签', begin_date=date(2026, 8, 24), flag='思考')
+        c = APIClient()
+        r = c.get('/api/temporal/oneday/?flag=待回顾')
+        rows = r.data.get('results') or r.data
+        titles = [x['title'] for x in rows]
+        assert '需要回顾' in titles, titles
+        assert '普通' not in titles and '其他标签' not in titles, titles
+
+    def test_no_flag_param_returns_all(self):
+        from datetime import date
+        from rest_framework.test import APIClient
+        OneDayPage.objects.create(title='A', begin_date=date(2026, 8, 22), flag='待回顾')
+        OneDayPage.objects.create(title='B', begin_date=date(2026, 8, 23), flag=None)
+        c = APIClient()
+        rows = c.get('/api/temporal/oneday/').data.get('results') or []
+        # list 会经 DailyLogAutoService 自动生成今日默认日记，因此 >= 2 且含 A/B
+        titles = [x['title'] for x in rows]
+        assert len(rows) >= 2
+        assert 'A' in titles and 'B' in titles
+
+
+@pytest.mark.django_db
+class TestContribEndpoints:
+    def test_task_contrib(self):
+        from datetime import date
+        from rest_framework.test import APIClient
+        TemporalTask.objects.create(task_name='T1', start_time=datetime.fromisoformat('2026-08-01 09:00:00'), duration_hours=2.5)
+        TemporalTask.objects.create(task_name='T2', start_time=datetime.fromisoformat('2026-08-01 14:00:00'), duration_hours=1.5)
+        TemporalTask.objects.create(task_name='T3', start_time=datetime.fromisoformat('2026-08-02 09:00:00'), duration_hours=3)
+        d = APIClient().get('/api/temporal/tasks/contrib/').data
+        day1 = next(x for x in d['data'] if x['date'] == '2026-08-01')
+        assert day1['value'] == 4.0
+        assert d['min_year'] == 2026 and d['summary']['total_days'] == 2
+
+    def test_oneday_contrib(self):
+        from datetime import date
+        from rest_framework.test import APIClient
+        OneDayPage.objects.create(title='D1', begin_date=date(2026, 8, 1), oneday=100, page=50)
+        OneDayPage.objects.create(title='D2', begin_date=date(2026, 8, 1), oneday=200, page=0)
+        d = APIClient().get('/api/temporal/oneday/contrib/').data
+        day1 = next(x for x in d['data'] if x['date'] == '2026-08-01')
+        assert day1['value'] == 350.0  # total = oneday + page
+
+    def test_bill_contrib_net_value(self):
+        from datetime import datetime
+        from rest_framework.test import APIClient
+        from apps.wealth.models import WealthBillList
+        now = datetime.now()
+        WealthBillList.objects.create(transaction_type='收入', date=now, amount=1000, user_id=1, created_at=now, updated_at=now)
+        WealthBillList.objects.create(transaction_type='支出', date=now, amount=300, user_id=1, created_at=now, updated_at=now)
+        d = APIClient().get('/api/wealth/bills/contrib/').data
+        day1 = next(x for x in d['data'] if x['date'] == now.strftime('%Y-%m-%d'))
+        assert day1['value'] == 700.0  # 收入-支出净值
+
+    def test_health_contrib(self):
+        from datetime import datetime
+        from rest_framework.test import APIClient
+        from apps.health.models import HealthRecord
+        HealthRecord.objects.create(time=datetime.now(), total=8000, htype=1)
+        d = APIClient().get('/api/health/records/contrib/').data
+        assert d['summary']['total_days'] >= 1

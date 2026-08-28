@@ -35,6 +35,8 @@ const routes: RouteRecordRaw[] = [
   },
 
   // 目标与项目
+  { path: '/temporal/contrib', name: 'temporal-contrib', component: () => import('@/modules/temporal/views/contrib/TemporalContribView.vue'), meta: { title: '时间贡献图' } },
+  { path: '/temporal/oneday/contrib', name: 'oneday-contrib', component: () => import('@/modules/temporal/views/contrib/OnedayContribView.vue'), meta: { title: '日记流贡献图' } },
   { path: '/goals', name: 'goals', component: () => import('@/modules/goals/views/GoalHub.vue'), meta: { title: '人生目标' } },
   { path: '/goals/dimension-chart', name: 'DimensionChart', component: () => import('@/modules/goals/views/DimensionChart.vue'), meta: { title: '人生维度分布' } },
   { path: '/output', name: 'output', component: () => import('@/modules/output/views/OutputDashboard.vue'), meta: { title: '个人良品率' } },
@@ -90,6 +92,7 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+  { path: '/health/contrib', name: 'health-contrib', component: () => import('@/modules/health/views/contrib/HealthContribView.vue'), meta: { title: '健康贡献图' } },
   { path: '/dance', name: 'dance', component: () => import('@/modules/dance/views/DanceView.vue'), meta: { title: '舞蹈记录' } },
 
   // 精神滋养
@@ -145,6 +148,12 @@ const routes: RouteRecordRaw[] = [
         name: 'wealth-fund',
         component: () => import('@/modules/wealth/views/FundScheduleBoard.vue'),
         meta: { title: '资金排程' },
+      },
+      {
+        path: 'contrib',
+        name: 'wealth-contrib',
+        component: () => import('@/modules/wealth/views/contrib/WealthContribView.vue'),
+        meta: { title: '贡献图' },
       },
     ],
   },

@@ -32,7 +32,7 @@
 | 文件 | 工具 |
 |------|------|
 | `GifCompressor.vue` | GIF 压缩 |
-| 通用表单 | 图片转GIF `img2gif` / 繁简转换 `trad2simp`（经 `ToolDetail.vue` 动态表单执行） |
+| 通用表单 | 繁简转换 `trad2simp`（经 `ToolDetail.vue` 动态表单执行） |
 
 ## 页面结构约定
 

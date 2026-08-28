@@ -24,6 +24,7 @@ urlpatterns = [
     path('tools/<str:tool_key>/', views.ToolDetailView.as_view(), name='toolkit-tool-detail'),
     path('execute/', views.ExecuteToolView.as_view(), name='toolkit-execute'),
     path('convert_file/', views.FileToolUploadView.as_view(), name='toolkit-convert-file'),
+    path('files/<path:filepath>', views.FileDownloadView.as_view(), name='toolkit-file-download'),
     path('task/<int:execution_id>/', views.TaskStatusView.as_view(), name='toolkit-task-status'),
     path('history/', views.HistoryListView.as_view(), name='toolkit-history'),
     path('register/', views.RegisterToolsView.as_view(), name='toolkit-register'),

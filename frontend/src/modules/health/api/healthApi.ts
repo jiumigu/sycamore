@@ -123,3 +123,7 @@ export function getMenstrualStats() {
 export function getMenstrualTrend() {
   return request({ url: '/health/menstrual/trend/', method: 'get' })
 }
+
+export function getStepContrib() {
+  return request({ url: '/health/records/contrib/', method: 'get' })
+}

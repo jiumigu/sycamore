@@ -4,10 +4,14 @@ from django.conf import settings
 from rest_framework import status
 from rest_framework.generics import ListAPIView, RetrieveAPIView, CreateAPIView
 from rest_framework import filters, viewsets
+from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from django.db.models import Case, DateField, DecimalField, F, Q, Sum, Value, When
+from django.db.models.functions import Cast
 
 from ..models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthBillList
 from ..serializers import (
@@ -855,6 +859,19 @@ class BillImportView(APIView):
         })
 
 
+def _build_contrib_response(rows):
+    """rows: [(date, value), ...] → 贡献图统一响应"""
+    data = [{'date': d.isoformat(), 'value': round(float(v), 2)} for d, v in rows]
+    min_year = min((d.year for d, _ in rows), default=datetime.now().year)
+    max_year = max((d.year for d, _ in rows), default=datetime.now().year)
+    summary = {
+        'total_days': len(data),
+        'max_date': max(data, key=lambda x: x['value'])['date'] if data else None,
+        'max_value': max((abs(x['value']) for x in data), default=0),
+    }
+    return {'min_year': min_year, 'max_year': max_year, 'data': data, 'summary': summary}
+
+
 class BillViewSet(viewsets.ModelViewSet):
     """账单清单 CRUD（列表/新增/编辑/删除，备注 notes 可编辑）"""
 
@@ -882,6 +899,29 @@ class BillViewSet(viewsets.ModelViewSet):
         if category:
             qs = qs.filter(category=category)
         return qs
+
+    @action(detail=False, methods=['get'])
+    def contrib(self, request):
+        """贡献图：单日收支净值（收入 - 支出）聚合"""
+        rows = list(
+            WealthBillList.objects
+            .annotate(d=Cast('date', DateField()))
+            .values('d')
+            .annotate(
+                v=Sum(
+                    Case(
+                        When(transaction_type='收入', then=F('amount')),
+                        When(transaction_type='支出', then=-F('amount')),
+                        default=Value(0),
+                        output_field=DecimalField(max_digits=14, decimal_places=2),
+                    )
+                )
+            )
+            .order_by('d')
+            .values_list('d', 'v')
+        )
+        resp = _build_contrib_response(rows)
+        return Response(resp)
 
     def perform_create(self, serializer):
         serializer.save(user_id=1)

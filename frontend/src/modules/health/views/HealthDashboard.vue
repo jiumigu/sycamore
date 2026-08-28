@@ -16,6 +16,9 @@
         <el-button @click="refreshData">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
+        <el-button size="default" @click="$router.push('/health/contrib')">
+          📊 贡献图
+        </el-button>
       </div>
     </div>
 

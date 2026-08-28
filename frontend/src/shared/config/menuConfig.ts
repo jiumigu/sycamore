@@ -58,6 +58,8 @@ export const allMenuItems: MenuItem[] = [
 
   // ── 工具箱 ──
   { key: 'toolkit', path: '/toolkit', label: '工具箱', icon: 'Tools', group: 'tools' },
+  { key: 'toolkit_electricity', path: '/toolkit/electricity-record', label: '用电记录', icon: 'Lightning', group: 'tools' },
+  { key: 'toolkit_quotes', path: '/toolkit/quotes', label: '摘录管理', icon: 'Collection', group: 'tools' },
   { key: 'toolkit_history', path: '/toolkit/history', label: '执行历史', icon: 'Timer', group: 'tools' },
 
   // ── 系统运维 ──

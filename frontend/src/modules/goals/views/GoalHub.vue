@@ -776,9 +776,16 @@ function editMilestoneDate(milestone: Milestone) {
 
 async function saveMilestoneDate() {
   if (!editingMilestone.value) return
+  const newDate = editingMilestoneDate.value || null
+  const oldDate = editingMilestone.value.target_date || null
+  // 未改动（或原值本就是空）：不提交，避免空串被转成 null 清空截止日期
+  if (newDate === oldDate) {
+    showDateDialog.value = false
+    return
+  }
   try {
     await goalApi.patchMilestone(editingMilestone.value.id, {
-      target_date: editingMilestoneDate.value || null,
+      target_date: newDate,
     })
     showDateDialog.value = false
     // 刷新当前里程碑列表

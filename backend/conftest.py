@@ -174,6 +174,25 @@ CREATE TABLE IF NOT EXISTS `travel_list_info` (
   PRIMARY KEY (`tid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
+# toolkit_definition（ToolkitDefinition managed=False 镜像）
+_CREATE_TOOLKIT_DEF_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS `toolkit_definition` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `tool_key` varchar(100) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `description` text,
+  `icon` varchar(50) DEFAULT '?',
+  `category` varchar(50) DEFAULT 'other',
+  `input_schema` json NOT NULL,
+  `output_type` varchar(50) DEFAULT 'file',
+  `is_enabled` tinyint DEFAULT 1,
+  `is_async` tinyint DEFAULT 1,
+  `timeout_seconds` int DEFAULT 300,
+  `user_id` int DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
 
 
 @pytest.fixture(scope='session')
@@ -189,3 +208,4 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_INTERACTION_TABLE_SQL)
             cursor.execute(_CREATE_BALANCE_TABLE_SQL)
             cursor.execute(_CREATE_TRAVEL_TABLE_SQL)
+            cursor.execute(_CREATE_TOOLKIT_DEF_TABLE_SQL)

@@ -1,0 +1,109 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# 环境配置
+.env
+.env.*
+!.env.example
+config.local.*
+secrets.py
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# 日志
+*.log
+logs/
+*.sqlite3
+*.db
+
+# 软链接目录（如果你有）
+analysis_notes/
+private_notes/
+
+# 临时文件
+*.tmp
+*.bak
+*.orig
+backend/media/
+
+# Django 媒体和静态文件（用户上传）
+backend/media/
+backend/staticfiles/
+backend/static/
+
+# 数据库文件
+*.sqlite3
+*.db
+db.sqlite3
+
+# 日志文件
+*.log
+logs/
+backend/logs/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+
+# 前端构建产物
+frontend/dist/
+frontend/.vite/
+frontend/node_modules/
+
+# 环境变量（包含密钥）
+.env
+.env.local
+.env.*.local
+backend/sycamore/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 临时文件
+*.tmp
+*.bak
+*.orig
+
+# 软链接目录（指向笔记）
+analysis_notes/
+private_notes/
+.claude/
+obs_notes/
+obs_notes
+sync_obsidian.py
+
+# AI 工作记忆（含敏感信息，永不提交）
+.workbuddy/
+
+# 敏感目录与文件（公开仓库永不提交）
+db_backups/
+docs/
+.claudeignore
+.dockerignore

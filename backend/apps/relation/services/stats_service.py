@@ -137,6 +137,7 @@ class StatsService:
         cutoff = timezone.now() - timedelta(days=DUE_REMINDER_DAYS)
         rows = (
             Relationship.objects.filter(user_id=user_id, current_status='active')
+            .exclude(identity_then='同事')  # 当时身份为同事的不做待跟进提醒
             .annotate(last_interaction=Max('interactions__happened_at'))
             .filter(Q(last_interaction__isnull=True) | Q(last_interaction__lte=cutoff))
             .order_by('last_interaction')

@@ -77,7 +77,6 @@ ToolkitExecution（任务记录层）
 | tool_key | 名称 | 用途 |
 |----------|------|------|
 | trad2simp | 繁简转换 | 繁体/简体文本互转 |
-| img2gif | 动图合成 | 多张图片合成 GIF |
 | gif-compressor | GIF压缩 | 抽帧/缩放/减色/质量压缩 GIF |
 | travel_route | 旅行路线推演 | 地图可视化路线推演 |
 | environment_audit | 环境校准 | 六维度环境健康评分 + 判定

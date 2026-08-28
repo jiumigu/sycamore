@@ -11,7 +11,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from django.db.models import Sum
+from django.db.models import DateField, Sum
+from django.db.models.functions import Cast
 
 from .models import OneDayPage, TemporalTask, WeeklyTimeCache
 from .serializers import (
@@ -19,6 +20,19 @@ from .serializers import (
     TemporalTaskSerializer,
 )
 from .services import CSVImportService, DailyLogAutoService, OneDayPageService, TemporalStatsService
+
+
+def _build_contrib_response(rows):
+    """rows: [(date, value), ...] → 贡献图统一响应"""
+    data = [{'date': d.isoformat(), 'value': round(float(v), 2)} for d, v in rows]
+    min_year = min((d.year for d, _ in rows), default=datetime.now().year)
+    max_year = max((d.year for d, _ in rows), default=datetime.now().year)
+    summary = {
+        'total_days': len(data),
+        'max_date': max(data, key=lambda x: x['value'])['date'] if data else None,
+        'max_value': max((x['value'] for x in data), default=0),
+    }
+    return {'min_year': min_year, 'max_year': max_year, 'data': data, 'summary': summary}
 
 
 class TemporalTaskViewSet(viewsets.ModelViewSet):
@@ -62,6 +76,19 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
             qs = qs.filter(start_time__lte=datetime.combine(datetime.strptime(date_to, '%Y-%m-%d').date(), datetime.max.time()))
 
         return qs
+
+    @action(detail=False, methods=['get'])
+    def contrib(self, request):
+        """贡献图：单日持续小时数聚合"""
+        rows = list(
+            TemporalTask.objects.exclude(start_time__isnull=True)
+            .annotate(d=Cast('start_time', DateField()))
+            .values('d')
+            .annotate(v=Sum('duration_hours'))
+            .order_by('d')
+            .values_list('d', 'v')
+        )
+        return Response(_build_contrib_response(rows))
 
     @action(detail=False, methods=['get'])
     def task_names(self, request):
@@ -221,6 +248,11 @@ class OneDayPageViewSet(viewsets.ModelViewSet):
         if otype:
             qs = qs.filter(otype=otype)
 
+        flag = params.get('flag')
+        if flag:
+            # 子串匹配（flag 为逗号分隔多标签，如"待回顾,美食"）
+            qs = qs.filter(flag__icontains=flag)
+
         years = params.get('years')
         if years:
             qs = qs.filter(years=years)
@@ -256,6 +288,17 @@ class OneDayPageViewSet(viewsets.ModelViewSet):
                 pass
 
         return qs
+
+    @action(detail=False, methods=['get'])
+    def contrib(self, request):
+        """贡献图：当日总字数聚合"""
+        rows = list(
+            OneDayPage.objects.values('begin_date')
+            .annotate(v=Sum('total'))
+            .order_by('begin_date')
+            .values_list('begin_date', 'v')
+        )
+        return Response(_build_contrib_response(rows))
 
     @action(detail=False, methods=['get'])
     def stats(self, request):

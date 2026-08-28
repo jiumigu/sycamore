@@ -29,7 +29,7 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
-  Grid, Calendar, DataAnalysis, Money, Timer, Wallet,
+  Grid, Calendar, DataAnalysis, Money, Timer, Wallet, TrendCharts,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -42,6 +42,7 @@ const tabs = [
   { name: 'wealth-regular', label: '定期存款', icon: Timer },
   { name: 'wealth-cashflow', label: '现金盘点', icon: Money },
   { name: 'wealth-fund', label: '资金排程', icon: Wallet },
+  { name: 'wealth-contrib', label: '贡献图', icon: TrendCharts },
 ]
 
 const activeTab = computed(() => {
