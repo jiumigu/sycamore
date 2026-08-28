@@ -98,7 +98,7 @@ defineEmits<{
 
 const page = ref(props.page)
 
-function formatMoney(_row: Record<string, unknown>, _column: Record<string, unknown>, value: unknown): string {
+function formatMoney(_row: Record<string, unknown>, _column: Record<string, unknown> | null, value: unknown): string {
   if (value === null || value === undefined) return '-'
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
 }

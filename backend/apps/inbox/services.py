@@ -47,10 +47,12 @@ class ConverterService:
         milestone = Milestone.objects.create(
             goal=goal,
             title=milestone_name,
-            description=extra.get('description', '') or inbox_item.content,
+            # 详细描述兜底链：前端显式传的 > 待办详细描述 > 待办内容
+            description=extra.get('description') or inbox_item.description or inbox_item.content,
             status='pending',
             order_num=max_order + 1,
-            target_date=extra.get('target_date') or None,
+            # 截止日期兜底链：前端显式传的 > 待办截止日期
+            target_date=extra.get('target_date') or inbox_item.due_date or None,
         )
 
         GoalProgressService.recalculate(goal)
@@ -123,28 +125,17 @@ class ConverterService:
 class InboxImportService:
     """收件箱批量导入服务"""
 
-    # CSV 列名（含别名）→ 模型字段
-    _CSV_FIELD_ALIASES = {
-        'content': ('content', 'title', '内容', '事项'),
-        'category': ('category', '类别'),
-        'due_date': ('due_date', 'target_date', '截止日期', '日期'),
-        'status': ('status', '状态'),
-        'priority': ('priority', '优先级'),
-        'description': ('description', 'note', '备注', '描述'),
-    }
+    # 优先级 code → 中文标签（写入备注）
+    _PRIORITY_LABEL = {'high': '高', 'medium': '中', 'low': '低'}
 
     @staticmethod
-    def _normalize_category(value):
-        """中文标签/合法 code → 合法 code，非法回退 other"""
-        label_map = {
-            '待办': 'todo', '想法': 'idea', '痛点': 'pain',
-            '提醒': 'reminder', '工作': 'work', '其他': 'other',
-        }
-        value = (value or '').strip()
-        if value in label_map:
-            return label_map[value]
-        valid = {code for code, _ in InboxItem.CATEGORY_CHOICES}
-        return value if value in valid else 'other'
+    def _first_value(row, aliases):
+        """取行中第一个非空别名对应的值，无则返回空串"""
+        for alias in aliases:
+            val = row.get(alias)
+            if val and str(val).strip():
+                return str(val).strip()
+        return ''
 
     @staticmethod
     def _normalize_status(value):
@@ -170,44 +161,85 @@ class InboxImportService:
 
     @staticmethod
     def _parse_date(value):
-        """解析 YYYY-MM-DD，非法返回 None"""
+        """解析多格式日期，非法返回 None
+
+        支持：2026-08-25 / 2026/8/25 / 2026年8月25日 / 2026.8.25 /
+        20260825 / 8/25/2026，最后回退 dateutil 模糊解析
+        """
         if not value:
             return None
+        raw = str(value).strip()
+        if not raw:
+            return None
+        for fmt in (
+            '%Y-%m-%d', '%Y/%m/%d', '%Y年%m月%d日', '%Y.%m.%d',
+            '%Y%m%d', '%m/%d/%Y', '%d/%m/%Y',
+        ):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
         try:
-            return datetime.strptime(str(value).strip(), '%Y-%m-%d').date()
-        except ValueError:
+            from dateutil import parser as dateutil_parser
+            return dateutil_parser.parse(raw, fuzzy=True).date()
+        except Exception:
             return None
 
     @staticmethod
     def parse_csv(content: str) -> list:
-        """解析 CSV 内容
+        """解析 CSV 内容（类别统一为「学习」，阶段信息存入标签与备注）
 
-        Args:
-            content: CSV 全文（首行为列名）
+        备考导入设计：
+        - 类别固定为 `study`（学习），不沿用原 category 列
+        - category/阶段 列作为备考阶段 → 标签 tags（`备考,基础期`）+ 备注 `[阶段: 基础期]`
+        - 优先级显式且非「中」→ 备注 `[优先级: 高]`（同时写入 priority 字段）
+        - 截止日期多格式解析，状态归一化
 
         Returns:
-            [{content, category, due_date, status, priority, description}]
+            [{content, category, tags, due_date, status, priority, description}]
         """
         reader = csv.DictReader(StringIO(content))
         items = []
         for row in reader:
-            item = {}
-            for field, aliases in InboxImportService._CSV_FIELD_ALIASES.items():
-                for alias in aliases:
-                    raw = row.get(alias)
-                    if raw is not None:
-                        item[field] = str(raw).strip()
-                        break
-            content_val = item.get('content', '')
-            if content_val:
-                items.append({
-                    'content': content_val,
-                    'category': InboxImportService._normalize_category(item.get('category', '其他')),
-                    'due_date': InboxImportService._parse_date(item.get('due_date')),
-                    'status': InboxImportService._normalize_status(item.get('status', '待处理')),
-                    'priority': InboxImportService._normalize_priority(item.get('priority', '中')),
-                    'description': item.get('description', ''),
-                })
+            title = InboxImportService._first_value(row, ('content', 'title', '内容', '事项'))
+            if not title:
+                continue
+
+            stage = InboxImportService._first_value(row, ('category', '阶段', '类别'))
+            date_str = InboxImportService._first_value(row, ('due_date', 'target_date', '截止日期', '日期'))
+            status_raw = InboxImportService._first_value(row, ('status', '状态'))
+            priority_raw = InboxImportService._first_value(row, ('priority', '优先级'))
+            description = InboxImportService._first_value(row, ('description', 'note', '备注', '描述'))
+
+            status = (
+                'done' if status_raw in ('已完成', '完成', '已办', 'done')
+                else InboxImportService._normalize_status(status_raw)
+            )
+            priority = InboxImportService._normalize_priority(priority_raw)
+
+            note_parts = []
+            if stage:
+                note_parts.append(f'[阶段: {stage}]')
+            if priority_raw and priority != 'medium':
+                note_parts.append(f'[优先级: {InboxImportService._PRIORITY_LABEL.get(priority, priority)}]')
+            if description:
+                note_parts.append(description)
+            note = ' '.join(note_parts)
+
+            tags_parts = ['备考']
+            if stage:
+                tags_parts.append(stage)
+            tags = ','.join(tags_parts)
+
+            items.append({
+                'content': title,
+                'category': 'study',
+                'tags': tags,
+                'due_date': InboxImportService._parse_date(date_str) if date_str else None,
+                'status': status,
+                'priority': priority,
+                'description': note,
+            })
         return items
 
     @staticmethod
@@ -258,7 +290,7 @@ class InboxImportService:
 
     @staticmethod
     def import_items(user_id: int, items: list) -> dict:
-        """批量创建收件箱条目
+        """批量创建收件箱条目（支持 tags / priority）
 
         Args:
             user_id: 用户ID
@@ -273,9 +305,10 @@ class InboxImportService:
             try:
                 inbox_item = InboxItem.objects.create(
                     user_id=user_id,
-                    content=item_data['content'],
+                    content=item_data['content'][:500],
                     description=item_data.get('description', ''),
-                    category=item_data.get('category', 'other'),
+                    category=item_data.get('category', 'study'),
+                    tags=item_data.get('tags', '') or None,
                     due_date=item_data.get('due_date'),
                     status=item_data.get('status', 'pending'),
                     priority=item_data.get('priority', 'medium'),

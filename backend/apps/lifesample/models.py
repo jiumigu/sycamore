@@ -72,6 +72,12 @@ class LifeSample(models.Model):
     class Meta:
         db_table = 'life_sample'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['obsidian_path'], name='idx_ls_obsidian_path'),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['obsidian_path'], name='uq_ls_obsidian_path'),
+        ]
 
     def __str__(self) -> str:
         return f"{self.get_sample_type_display()} · {self.name}"

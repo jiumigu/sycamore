@@ -1,5 +1,7 @@
 <template>
   <div class="output-page">
+    <!-- 归档提示 -->
+    <el-alert title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
     <div class="page-header">
       <h2>📊 个人良品率</h2>
       <el-tag size="small" type="info" effect="plain">把自我要求从道德问题变成质量管理问题</el-tag>

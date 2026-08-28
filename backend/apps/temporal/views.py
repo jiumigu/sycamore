@@ -21,8 +21,8 @@ from .serializers import (
 from .services import CSVImportService, DailyLogAutoService, OneDayPageService, TemporalStatsService
 
 
-class TemporalTaskViewSet(viewsets.ReadOnlyModelViewSet):
-    """任务时间记录视图集"""
+class TemporalTaskViewSet(viewsets.ModelViewSet):
+    """任务时间记录视图集（清单 CRUD：列表/新增/编辑/删除，备注 notes 可编辑）"""
 
     queryset = TemporalTask.objects.all()
     permission_classes = [AllowAny]
@@ -54,11 +54,12 @@ class TemporalTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
         date_from = params.get('date_from')
         if date_from:
-            qs = qs.filter(start_time__date__gte=date_from)
+            # datetime 区间直接比较（规避 __date 触发 CONVERT_TZ 时区转换返回 NULL）
+            qs = qs.filter(start_time__gte=datetime.combine(datetime.strptime(date_from, '%Y-%m-%d').date(), datetime.min.time()))
 
         date_to = params.get('date_to')
         if date_to:
-            qs = qs.filter(start_time__date__lte=date_to)
+            qs = qs.filter(start_time__lte=datetime.combine(datetime.strptime(date_to, '%Y-%m-%d').date(), datetime.max.time()))
 
         return qs
 

@@ -241,6 +241,8 @@ export interface MenstrualRecord {
   year: number
   month: string
   start_date: string
+  end_date: string | null
+  duration_days: number | null
   offset: number
   cycle_days: number
   notes: string
@@ -254,6 +256,7 @@ export interface MenstrualStats {
   predicted_next: string | null
   min_cycle: number
   max_cycle: number
+  avg_duration: number | null
 }
 
 export interface MenstrualTrendItem {

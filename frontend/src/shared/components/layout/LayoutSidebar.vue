@@ -7,393 +7,57 @@
       <el-icon v-else><Fold /></el-icon>
     </div>
 
-    <!-- 模块导航菜单 -->
+    <!-- 模块导航菜单（由 menuConfig + 用户偏好动态渲染） -->
     <div class="module-navigation">
-
-      <!-- ========== 总览 ========== -->
-      <div class="nav-group nav-group--overview">
-
-        <router-link
-          to="/dashboard"
-          class="nav-item"
-          :class="{ active: isRouteActive('/dashboard') }"
+      <template v-for="group in visibleGroups" :key="group.group_key">
+        <div
+          v-if="groupMenus(group.group_key).length > 0"
+          class="nav-group"
+          :class="`nav-group--${group.group_key}`"
         >
-          <el-icon><DataAnalysis /></el-icon>
-          <span v-if="!isCollapsed">仪表盘</span>
-        </router-link>
+          <div class="group-title" v-if="!isCollapsed">{{ group.group_name }}</div>
+          <router-link
+            v-for="item in groupMenus(group.group_key)"
+            :key="item.key"
+            :to="item.path"
+            class="nav-item"
+            :class="{ active: isRouteActive(item.path) }"
+          >
+            <el-icon><component :is="iconMap[item.icon]" /></el-icon>
+            <span v-if="!isCollapsed">{{ item.label }}</span>
+            <el-badge
+              v-if="item.key === 'inbox' && inboxStats.pending > 0 && !isCollapsed"
+              :value="inboxStats.pending"
+              :max="99"
+              class="nav-badge"
+            />
+          </router-link>
+        </div>
+      </template>
 
-        <router-link
-          to="/summary"
-          class="nav-item"
-          :class="{ active: isRouteActive('/summary') && route.path === '/summary' }"
-        >
-          <el-icon><PieChart /></el-icon>
-          <span v-if="!isCollapsed">汇总总览</span>
-        </router-link>
-
-
-        <router-link
-          to="/summary/profile"
-          class="nav-item"
-          :class="{ active: isRouteActive('/summary/profile') }"
-        >
-          <el-icon><User /></el-icon>
-          <span v-if="!isCollapsed">个人画像</span>
-        </router-link>
-
-        <router-link
-          to="/inbox"
-          class="nav-item"
-          :class="{ active: isRouteActive('/inbox') }"
-          :style="getModuleStyle('inbox')"
-        >
-          <el-icon><MessageBox /></el-icon>
-          <span v-if="!isCollapsed">收件箱</span>
-          <el-badge
-            v-if="inboxStats.pending > 0 && !isCollapsed"
-            :value="inboxStats.pending"
-            :max="99"
-            class="nav-badge"
-          />
-        </router-link>
-      </div>
-
-      <!-- ========== 时间感知 ========== -->
-      <div class="nav-group nav-group--temporal">
-
-        <router-link
-          to="/temporal/daily"
-          class="nav-item"
-          :class="{ active: isRouteActive('/temporal/daily') }"
-          :style="getModuleStyle('temporal')"
-        >
-          <el-icon><Calendar /></el-icon>
-          <span v-if="!isCollapsed">日记流</span>
-        </router-link>
-
-        <router-link
-          to="/temporal"
-          class="nav-item"
-          :class="{ active: isRouteActive('/temporal') && !isRouteActive('/temporal/daily') }"
-          :style="getModuleStyle('temporal')"
-        >
-          <el-icon><Timer /></el-icon>
-          <span v-if="!isCollapsed">时间统计</span>
-        </router-link>
-
-
-        <router-link
-          to="/temporal/schedule"
-          class="nav-item"
-          :class="{ active: isRouteActive('/temporal/schedule') }"
-          :style="getModuleStyle('temporal')"
-        >
-          <el-icon><Calendar /></el-icon>
-          <span v-if="!isCollapsed">日程视图</span>
-        </router-link>
-      </div>
-
-      <!-- ========== 目标与项目 ========== -->
-      <div class="nav-group nav-group--goals">
-
-        <router-link
-          to="/goals"
-          class="nav-item"
-          :class="{ active: isRouteActive('/goals') }"
-          :style="getModuleStyle('goals')"
-        >
-          <el-icon><Flag /></el-icon>
-          <span v-if="!isCollapsed">人生目标</span>
-        </router-link>
-
-        <!-- 快乐银行 -->
-        <router-link
-          to="/reward"
-          class="nav-item"
-          :class="{ active: isRouteActive('/reward') && !isRouteActive('/reward/gifts') }"
-          :style="getModuleStyle('reward')"
-        >
-          <el-icon>
-            <component :is="Trophy" />
+      <!-- 归档菜单折叠区（系统运维分组下方，可展开） -->
+      <div v-if="archivedMenus.length > 0" class="archived-section">
+        <div class="archived-toggle" @click="showArchived = !showArchived">
+          <el-icon><Box /></el-icon>
+          <span v-if="!isCollapsed">归档菜单 ({{ archivedMenus.length }})</span>
+          <el-icon v-if="!isCollapsed" class="archived-arrow">
+            <ArrowUp v-if="showArchived" /><ArrowDown v-else />
           </el-icon>
-          <span v-if="!isCollapsed">快乐银行</span>
-        </router-link>
-
-        <!-- 礼物清单（独立同级） -->
-        <router-link
-          to="/reward/gifts"
-          class="nav-item"
-          :class="{ active: isRouteActive('/reward/gifts') }"
-          :style="getModuleStyle('reward')"
-        >
-          <el-icon><Present /></el-icon>
-          <span v-if="!isCollapsed">礼物清单</span>
-        </router-link>
-
-        <router-link
-          to="/output"
-          class="nav-item"
-          :class="{ active: isRouteActive('/output') }"
-          :style="getModuleStyle('goals')"
-        >
-          <el-icon><Briefcase /></el-icon>
-          <span v-if="!isCollapsed">个人良品率</span>
-        </router-link>
+        </div>
+        <div v-show="showArchived && !isCollapsed" class="archived-body">
+          <router-link
+            v-for="item in archivedMenus"
+            :key="item.key"
+            :to="item.path"
+            class="nav-item archived-item"
+            :class="{ active: isRouteActive(item.path) }"
+          >
+            <el-icon><component :is="iconMap[item.icon]" /></el-icon>
+            <span>{{ item.label }}</span>
+            <el-tag size="small" type="info" class="archived-tag">归档</el-tag>
+          </router-link>
+        </div>
       </div>
-
-      <!-- ========== 身心健康 ========== -->
-      <div class="nav-group nav-group--health">
-
-        <router-link
-          to="/health"
-          class="nav-item"
-          :class="{ active: isRouteActive('/health') }"
-          :style="getModuleStyle('health')"
-        >
-          <el-icon><FirstAidKit /></el-icon>
-          <span v-if="!isCollapsed">健康管理</span>
-        </router-link>
-
-        <router-link
-          to="/health/weight"
-          class="nav-item"
-          :class="{ active: isRouteActive('/health/weight') }"
-          :style="getModuleStyle('health')"
-        >
-          <el-icon><TrendCharts /></el-icon>
-          <span v-if="!isCollapsed">体重管理</span>
-        </router-link>
-
-        <router-link
-          to="/health/menstrual"
-          class="nav-item"
-          :class="{ active: isRouteActive('/health/menstrual') }"
-          :style="getModuleStyle('health')"
-        >
-          <el-icon><FirstAidKit /></el-icon>
-          <span v-if="!isCollapsed">好朋友跟踪</span>
-        </router-link>
-
-        <router-link
-          to="/dance"
-          class="nav-item archived-item"
-          :class="{ active: isRouteActive('/dance') }"
-          :style="getModuleStyle('dance')"
-        >
-          <el-icon><Star /></el-icon>
-          <span v-if="!isCollapsed">舞蹈记录</span>
-          <el-tag v-if="!isCollapsed" size="small" type="info" class="archived-tag">归档</el-tag>
-        </router-link>
-      </div>
-
-      <!-- ========== 精神滋养 ========== -->
-      <div class="nav-group nav-group--nourishment">
-
-        <router-link
-          to="/books"
-          class="nav-item"
-          :class="{ active: isRouteActive('/books') }"
-          :style="getModuleStyle('book')"
-        >
-          <el-icon><Reading /></el-icon>
-          <span v-if="!isCollapsed">书籍阅读</span>
-        </router-link>
-
-        <router-link
-          to="/sugar"
-          class="nav-item"
-          :class="{ active: isRouteActive('/sugar') }"
-          :style="getModuleStyle('sugar')"
-        >
-          <el-icon><Present /></el-icon>
-          <span v-if="!isCollapsed">小确幸</span>
-        </router-link>
-
-        <router-link
-          to="/treasure"
-          class="nav-item"
-          :class="{ active: isRouteActive('/treasure') }"
-          :style="getModuleStyle('treasure')"
-        >
-          <el-icon><Star /></el-icon>
-          <span v-if="!isCollapsed">好东西</span>
-        </router-link>
-
-        <router-link
-          to="/lifesample"
-          class="nav-item"
-          :class="{ active: isRouteActive('/lifesample') }"
-          :style="getModuleStyle('lifesample')"
-        >
-          <el-icon><Collection /></el-icon>
-          <span v-if="!isCollapsed">人生样本</span>
-        </router-link>
-      </div>
-
-      <!-- ========== 财富管理 ========== -->
-      <div class="nav-group nav-group--wealth">
-
-        <router-link
-          to="/wealth"
-          class="nav-item"
-          :class="{ active: isRouteActive('/wealth') }"
-          :style="getModuleStyle('wealth')"
-        >
-          <el-icon><Money /></el-icon>
-          <span v-if="!isCollapsed">财务管理</span>
-        </router-link>
-
-        <router-link
-          to="/dams"
-          class="nav-item"
-          :class="{ active: isRouteActive('/dams') }"
-          :style="getModuleStyle('dams')"
-        >
-          <el-icon><Cpu /></el-icon>
-          <span v-if="!isCollapsed">数字资产</span>
-        </router-link>
-      </div>
-
-      <!-- ========== 连接与足迹 ========== -->
-      <div class="nav-group nav-group--connection">
-
-        <router-link
-          to="/food"
-          class="nav-item"
-          :class="{ active: isRouteActive('/food') }"
-          :style="getModuleStyle('food')"
-        >
-          <el-icon><Food /></el-icon>
-          <span v-if="!isCollapsed">美食地图</span>
-        </router-link>
-
-        <router-link
-          to="/travel"
-          class="nav-item"
-          :class="{ active: isRouteActive('/travel') && !isRouteActive('/travel/plans') }"
-          :style="getModuleStyle('travel')"
-        >
-          <el-icon><Location /></el-icon>
-          <span v-if="!isCollapsed">旅行记录</span>
-        </router-link>
-
-        <router-link
-          to="/travel/plans"
-          class="nav-item sub-item"
-          :class="{ active: isRouteActive('/travel/plans') }"
-          :style="getModuleStyle('travel')"
-        >
-          <el-icon><List /></el-icon>
-          <span v-if="!isCollapsed">旅行计划</span>
-        </router-link>
-
-        <router-link
-          to="/relation"
-          class="nav-item"
-          :class="{ active: isRouteActive('/relation') && route.path === '/relation' }"
-          :style="getModuleStyle('relation')"
-        >
-          <el-icon><User /></el-icon>
-          <span v-if="!isCollapsed">关系管理</span>
-        </router-link>
-
-        <router-link
-          to="/relation/conflicts"
-          class="nav-item sub-item"
-          :class="{ active: isRouteActive('/relation/conflicts') }"
-          :style="getModuleStyle('relation')"
-        >
-          <el-icon><Sunny /></el-icon>
-          <span v-if="!isCollapsed">成长记录</span>
-        </router-link>
-      </div>
-
-      <!-- ========== 工具箱 ========== -->
-      <div class="nav-group nav-group--tools">
-
-        <router-link
-          to="/toolkit"
-          class="nav-item"
-          :class="{ active: isRouteActive('/toolkit') }"
-        >
-          <el-icon><Tools /></el-icon>
-          <span v-if="!isCollapsed">工具箱</span>
-        </router-link>
-
-        <router-link
-          to="/toolkit/history"
-          class="nav-item sub-item"
-          :class="{ active: isRouteActive('/toolkit/history') }"
-        >
-          <el-icon><Timer /></el-icon>
-          <span v-if="!isCollapsed">执行历史</span>
-        </router-link>
-
-        <router-link
-          to="/toolkit/decision-log"
-          class="nav-item sub-item"
-          :class="{ active: isRouteActive('/toolkit/decision-log') }"
-        >
-          <el-icon><WarningFilled /></el-icon>
-          <span v-if="!isCollapsed">决策日志</span>
-        </router-link>
-        <router-link
-          to="/toolkit/free-spending"
-          class="nav-item sub-item"
-          :class="{ active: isRouteActive('/toolkit/free-spending') }"
-        >
-          <el-icon><Money /></el-icon>
-          <span v-if="!isCollapsed">自由支配额度</span>
-        </router-link>
-        <router-link
-          to="/toolkit/review-toolbox"
-          class="nav-item sub-item"
-          :class="{ active: isRouteActive('/toolkit/review-toolbox') }"
-        >
-          <el-icon><List /></el-icon>
-          <span v-if="!isCollapsed">复盘工具箱</span>
-        </router-link>
-        <router-link
-          to="/toolkit/language-trainer"
-          class="nav-item sub-item"
-          :class="{ active: isRouteActive('/toolkit/language-trainer') }"
-        >
-          <el-icon><EditPen /></el-icon>
-          <span v-if="!isCollapsed">语言训练器</span>
-        </router-link>
-      </div>
-
-      <!-- ========== 系统运维 ========== -->
-      <div class="nav-group nav-group--admin">
-
-        <router-link
-          to="/admin/tag-manager"
-          class="nav-item"
-          :class="{ active: isRouteActive('/admin/tag-manager') }"
-        >
-          <el-icon><PriceTag /></el-icon>
-          <span v-if="!isCollapsed">标签管理器</span>
-        </router-link>
-
-        <router-link
-          to="/admin/settings"
-          class="nav-item"
-          :class="{ active: isRouteActive('/admin/settings') }"
-        >
-          <el-icon><Setting /></el-icon>
-          <span v-if="!isCollapsed">系统设置</span>
-        </router-link>
-
-        <router-link
-          to="/admin/presets"
-          class="nav-item"
-          :class="{ active: isRouteActive('/admin/presets') }"
-        >
-          <el-icon><Collection /></el-icon>
-          <span v-if="!isCollapsed">系统预设</span>
-        </router-link>
-      </div>
-
     </div>
 
     <!-- 折叠提示 -->
@@ -404,48 +68,58 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import type { Component } from 'vue'
+import * as ElementPlusIcons from '@element-plus/icons-vue'
+// 模板中直接使用的固定图标（script setup 需显式注册）
+import { Expand, Fold, Box, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import request from '@/shared/utils/request'
-import {
-  Expand, Fold, DataAnalysis, PieChart,
-  Calendar, Timer, TrendCharts, Check,
-  Flag, Briefcase,
-  FirstAidKit, Star,
-  Sunny, Reading, Trophy, Present,
-  Money, Cpu,
-  Location, User, Tools, Food, WarningFilled, PriceTag, Setting, Collection,
-  Histogram, Connection, MessageBox, List, EditPen,
-} from '@element-plus/icons-vue'
+import { allMenuItems, defaultGroups, type MenuItem } from '@/shared/config/menuConfig'
+import { getMenuPrefs, getMenuGroups, type MenuGroupData } from '@/shared/api/coreApi'
 
 const route = useRoute()
 
 // ========== 响应式数据 ==========
 const isCollapsed = ref(false)
-
-// 模拟数据（后续从各模块 store 获取）
+const showArchived = ref(true)
 const inboxStats = ref({ pending: 0 })
 
-// ========== 模块颜色映射 ==========
-const moduleColors: Record<string, string> = {
-  temporal: '#3498db',
-  goals: '#8e44ad',
-  projects: '#e67e22',
-  health: '#2ecc71',
-  dance: '#16a085',
-  nourishment: '#e74c3c',
-  book: '#9b59b6',
-  sugar: '#e67e22',
-  wealth: '#f39c12',
-  reward: '#e74c3c',
-  dams: '#34495e',
-  food: '#F59E0B',
-  travel: '#e74c3c',
-  relation: '#d35400',
-  inbox: '#3B82F6',
-  treasure: '#F59E0B',
-  lifesample: '#7c3aed',
+/** 用户菜单偏好：menu_key -> { is_favorite, sort_order } */
+const menuPrefs = ref<Record<string, { is_favorite: boolean; sort_order?: number }>>({})
+/** 分组配置（后端权威），加载失败时回退 defaultGroups */
+const groups = ref<(MenuGroupData & { group_name: string })[]>([])
+
+// ========== 图标映射 ==========
+const iconMap = ElementPlusIcons as Record<string, Component>
+
+// ========== 计算属性 ==========
+/** 可见分组（按 sort_order 排序，过滤隐藏组） */
+const visibleGroups = computed(() => {
+  const list = groups.value.length > 0
+    ? groups.value
+    : defaultGroups.map(g => ({ group_key: g.key, group_name: g.name, sort_order: g.sort, is_visible: true }))
+  return list
+    .filter(g => g.is_visible !== false)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+})
+
+/** 是否归档：有偏好记录看记录；无记录看 defaultArchived */
+const isArchived = (item: MenuItem): boolean => {
+  const pref = menuPrefs.value[item.key]
+  if (pref) return !pref.is_favorite
+  return !!item.defaultArchived
 }
+
+/** 某分组下的常用菜单 */
+const groupMenus = (groupKey: string): MenuItem[] => {
+  return allMenuItems.filter(m => m.group === groupKey && !isArchived(m))
+}
+
+/** 全部归档菜单 */
+const archivedMenus = computed<MenuItem[]>(() => {
+  return allMenuItems.filter(m => isArchived(m))
+})
 
 // ========== 方法 ==========
 const toggleCollapse = () => {
@@ -457,12 +131,21 @@ const isRouteActive = (path: string) => {
   return route.path.startsWith(path)
 }
 
-const getModuleStyle = (module: string) => {
-  const color = moduleColors[module] || '#3498db'
-  return {
-    '--module-color': color,
-    '--module-color-light': `${color}20`,
-    '--module-color-dark': `${color}40`
+// ========== 数据加载 ==========
+const fetchMenuData = async () => {
+  try {
+    const [prefsRes, groupsRes] = await Promise.all([
+      getMenuPrefs(),
+      getMenuGroups(),
+    ])
+    const prefs: Record<string, { is_favorite: boolean; sort_order?: number }> = {}
+    ;(prefsRes.data as Array<{ menu_key: string; is_favorite: boolean; sort_order?: number }>).forEach(p => {
+      prefs[p.menu_key] = { is_favorite: p.is_favorite, sort_order: p.sort_order }
+    })
+    menuPrefs.value = prefs
+    groups.value = groupsRes.data?.results?.length ? groupsRes.data.results : groupsRes.data || []
+  } catch (e) {
+    console.error('加载菜单配置失败，使用默认配置', e)
   }
 }
 
@@ -472,6 +155,7 @@ onMounted(() => {
   if (savedState) {
     isCollapsed.value = savedState === 'true'
   }
+  fetchMenuData()
   // 收件箱未处理数
   request<{ pending: number }>({ url: '/inbox/items/stats/', method: 'get' })
     .then(r => { inboxStats.value = { pending: r.data.pending } })
@@ -583,7 +267,14 @@ watch(isCollapsed, (newVal) => {
     &--wealth { background: rgba(243, 156, 18, 0.06); }
     &--connection { background: rgba(211, 84, 0, 0.06); }
     &--tools { background: rgba(0, 0, 0, 0.03); }
-    &--admin { background: rgba(0, 0, 0, 0.02); }
+    &--system { background: rgba(0, 0, 0, 0.02); }
+  }
+
+  .group-title {
+    font-size: 11px;
+    color: var(--lm-text-secondary);
+    padding: 4px 8px 6px;
+    letter-spacing: 1px;
   }
 
   .nav-item {
@@ -671,6 +362,44 @@ watch(isCollapsed, (newVal) => {
       font-size: 10px;
       transform: scale(0.85);
     }
+  }
+
+  // ========== 归档折叠区 ==========
+  .archived-section {
+    border-radius: 8px;
+    padding: 6px;
+    margin-bottom: 8px;
+    background: rgba(0, 0, 0, 0.015);
+  }
+
+  .archived-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--lm-text-secondary);
+    font-size: 13px;
+    transition: all 0.3s;
+
+    &:hover {
+      background: var(--lm-bg-secondary);
+      color: var(--lm-primary-color);
+    }
+
+    .el-icon {
+      font-size: 16px;
+    }
+
+    .archived-arrow {
+      margin-left: auto;
+      font-size: 12px;
+    }
+  }
+
+  .archived-body {
+    padding-top: 4px;
   }
 }
 

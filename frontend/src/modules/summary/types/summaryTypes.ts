@@ -7,6 +7,7 @@ export interface ModulePoint {
   points: number
   raw_value: number
   unit: string
+  percent?: number
 }
 
 export interface YearlyOverview {

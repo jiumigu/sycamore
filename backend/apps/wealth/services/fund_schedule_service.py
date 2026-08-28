@@ -3,7 +3,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError
 
-from ..models import FundSchedule
+from ..models import FundSchedule, FundScheduleItem
 
 ITEM_TYPES = {'hard', 'soft'}
 
@@ -57,14 +57,27 @@ class FundScheduleService:
         reserve_items: list[dict] | None,
         user_id: int = 1,
     ) -> FundSchedule:
-        """创建资金排程快照（校验 + 计算合计 + 落库）"""
+        """创建资金排程快照（校验 + 计算合计 + 落库；预留项写子表，JSON 保留 deprecated 双写）"""
         cleaned = FundScheduleService.validate_items(reserve_items)
         total_reserved, remaining = FundScheduleService.compute_totals(cash_on_hand, cleaned)
-        return FundSchedule.objects.create(
+        schedule = FundSchedule.objects.create(
             user_id=user_id,
             plan_name=plan_name,
             cash_on_hand=Decimal(str(cash_on_hand or 0)).quantize(Decimal('0.01')),
-            reserve_items=cleaned,
             total_reserved=total_reserved,
             remaining=remaining,
         )
+        # 预留项写入独立子表（唯一存储；JSON 字段已移除）
+        if cleaned:
+            FundScheduleItem.objects.bulk_create([
+                FundScheduleItem(
+                    schedule=schedule,
+                    name=item['name'],
+                    amount=Decimal(str(item['amount'])),
+                    item_type=item['type'],
+                    linked_expense_id=item.get('linked_expense_id'),
+                    sort_order=i,
+                )
+                for i, item in enumerate(cleaned)
+            ])
+        return schedule

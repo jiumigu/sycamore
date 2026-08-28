@@ -64,3 +64,16 @@ export function convertToGoal(data: {
     converted_count: number
   }>({ url: '/inbox/items/convert_to_goal/', method: 'post', data })
 }
+
+export function convertToMilestone(data: {
+  item_ids: number[]
+  goal_id: number
+}) {
+  return request<{
+    goal_id: number
+    goal_title: string
+    milestone_count: number
+    converted_count: number
+    failed_count: number
+  }>({ url: '/inbox/items/convert-to-milestone/', method: 'post', data })
+}

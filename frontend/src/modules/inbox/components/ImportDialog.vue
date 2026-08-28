@@ -4,7 +4,7 @@
       <div class="import-hint">
         <p><strong>支持格式：</strong></p>
         <ul>
-          <li><strong>CSV</strong>：包含 content/category/due_date/status/priority 列（兼容 title/target_date/note 等别名与中文列名）</li>
+          <li><strong>CSV</strong>：content/category/due_date/status/priority 列（兼容 title/target_date/note 与中文列名）。类别统一为「学习」；category 列作为备考阶段（基础期/强化期/冲刺期）存入标签与备注</li>
           <li><strong>Markdown</strong>：任务列表 <code>- [ ] 任务名</code>，行尾 <code>(2026-09-01)</code> 识别为截止日期</li>
           <li><strong>纯文本</strong>：每行一个任务</li>
         </ul>
@@ -154,7 +154,7 @@ const parsePreview = async (file: File) => {
 
 const downloadTemplate = () => {
   const blob = new Blob(
-    ['content,category,due_date,status,priority,description\n学习系统架构设计,待办,2026-09-01,待处理,中,第1章\n'],
+    ['content,category,due_date,status,priority,description\nDay1 软件工程基础,基础期,2026-08-25,待处理,高,精读笔记\n'],
     { type: 'text/csv' },
   )
   const url = URL.createObjectURL(blob)

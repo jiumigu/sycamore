@@ -46,6 +46,9 @@ export interface InboxStats {
   abandoned: number
   by_category: Record<string, number>
   by_priority: Record<string, number>
+  /** 后端暂未返回，前端预留（显示为 0） */
+  done_this_week?: number
+  overdue?: number
 }
 
 export interface BatchActionPayload {
@@ -70,6 +73,7 @@ export const CATEGORY_OPTIONS = [
   { value: 'pain', label: '痛点', icon: '😫' },
   { value: 'reminder', label: '提醒', icon: '⏰' },
   { value: 'work', label: '工作', icon: '💼' },
+  { value: 'study', label: '学习', icon: '📚' },
   { value: 'other', label: '其他', icon: '📌' },
 ] as const
 

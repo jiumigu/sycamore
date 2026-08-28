@@ -178,3 +178,22 @@ class MenstrualRecordSerializer(serializers.ModelSerializer):
         model = MenstrualRecord
         fields = '__all__'
         read_only_fields = ['id', 'created_at']
+
+    def _auto_duration(self, validated_data: dict) -> dict:
+        """持续天数自动计算：未显式提供时由 end_date - start_date 得出"""
+        if validated_data.get('duration_days') is None:
+            start = validated_data.get('start_date') or getattr(self.instance, 'start_date', None)
+            end = validated_data.get('end_date')
+            if end is None:
+                end = getattr(self.instance, 'end_date', None)
+            if start and end:
+                validated_data['duration_days'] = (end - start).days
+        return validated_data
+
+    def create(self, validated_data):
+        validated_data = self._auto_duration(validated_data)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data = self._auto_duration(validated_data)
+        return super().update(instance, validated_data)

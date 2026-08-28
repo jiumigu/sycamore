@@ -1,5 +1,84 @@
 # Sycamore 人生管理系统 - 更新日志
 
+## [2026-08-27] v3.44.0 — 菜单管理系统 · 补测试 · 数据库清理
+
+### ✨ 新增
+
+- **时间追踪任务 + 账单清单 CRUD**：
+  - `temporal_time_atracker_tasks_list`（时间追踪任务）：`TemporalTaskViewSet` 由只读改为完整 ModelViewSet（列表/新增/编辑/删除）；前端「年度周度时间追踪」页新增「📋 任务清单」入口——清单弹窗（任务/开始时间/时长/分类/备注列 + 分页）+ 新增/编辑弹窗（含备注 notes 填写完善）+ 删除确认
+  - `wealth_bill_list`（账单）：新增 `WealthBillList` ORM 模型（managed=False 映射外部遗留表）+ `BillViewSet`（`/api/wealth/bills/` CRUD，按类型/日期范围筛选）+ `BillSerializer`（自动补 created_at/updated_at/year/month/day，备注 notes 可编辑）；前端「现金实时盘点」页新增「📋 账单清单」入口——清单弹窗（日期/类型/金额/分类/商户/备注列 + 类型/日期筛选 + 分页）+ 新增/编辑弹窗（含备注 notes 填写完善）+ 删除确认
+  - ⚠️ 前端 `createBill` 与原有快速记账同名冲突，新增的改名 `createBillRecord`
+  - ⚠️ **拆分遗留跨类引用修复**：services 拆包时漏 import 兄弟类（quarterly_workbench 引用 ProgressAggregator、goal_clone/quick_goal 引用 GoalProgressService）导致季度报告/目标克隆运行时 NameError，已补 import（pytest 未覆盖该类路径，教训：拆包后需显式排查跨类引用）
+- **收件箱批量「转为里程碑」**：整理模式勾选多条待办后新增「🏁 转为里程碑」操作——弹窗选择已有目标，全部条目转入同一目标成为里程碑（标题=各条内容，截止日期/详细描述随各条待办自动带过去，复用转换兜底链）；后端新增 `POST /api/inbox/items/convert-to-milestone/`（body `{item_ids, goal_id}`，返回转换/失败计数），转换后待办标记为已处理
+- **菜单管理系统（可管理动态侧边栏）**：
+  - 后端：`MenuPreference`（`core_menu_preference`：菜单常用/归档 + 排序）+ `MenuGroup`（`core_menu_group`：分组名称/排序/显隐）模型（迁移 0005）；API `GET /api/core/menus/user_prefs/`、`POST /api/core/menus/batch_update/`、`/api/core/menu-groups/` 分组 CRUD（list 惰性 seed 9 个默认分组，新增分组自动排最后）
+  - 前端：`shared/config/menuConfig.ts` 全量 32 个菜单项（key/path/label/icon/group/defaultArchived）；`LayoutSidebar.vue` 重写为菜单配置驱动——常用菜单留在原分组、归档菜单统一收进「归档菜单 (N)」折叠区（系统运维下方，可展开）；`core/admin/views/MenuManager.vue` 菜单管理页（分组重命名/排序/显隐/增删 + 菜单常用/归档开关 + 保存全部，取消归档自动回到原分组，删除分组时组内菜单自动转归档）；路由 `/admin/menus` + 侧边栏「菜单管理」入口
+  - 偏好持久化到数据库，刷新保持；无偏好记录时按 `defaultArchived` 兜底（第一轮归档的 5 模块 + 舞蹈记录默认归档）
+- **补充测试（pytest + pytest-django）**：新增 6 个测试文件 46 个用例，覆盖财富周聚合/现金流推演（日利息复利）/固定开销/CSV 导入去重、里程碑奖励发放与防重复/取消与删除扣回/目标完成奖励金（顺序无关/幂等）、小确幸奖励金额=快乐程度；配套 `pytest.ini`（--no-migrations + 测试库外部表 conftest 建表）
+- **系统体检报告**：`docs/Sycamore-系统体检报告-2026-08-27.docx`（三位一体审计 + 数据取证）
+
+### ✅ 测试
+
+- **测试用例扩充 46 → 85（新增 39 条）**：覆盖资金排程子表、账单清单 CRUD/时间筛选、好朋友跟踪（结束日期/持续天数/12 个月口径）、健康统计 ORM 化、时间追踪任务 CRUD、oneday stats 列名回归、关系统计 ORM 化、summary/goals services 跨类引用回归；conftest 补 7 张外部表镜像（task/oneday/step/relationship/interaction/balance/travel），测试库结构变更需 DROP test_sycamore 重建
+- **测试暴露并修复产品 bug**：relation 能量趋势/互动频率按月分组的 `ExtractYear/Month` 受 CONVERT_TZ 影响 period 全为 `0000-00`，改 `TruncMonth(Cast(...))` 修复
+
+### 🐛 修复
+
+- **好朋友跟踪：平均周期按最近 12 个月 + 新增本次结束日期**：
+  - `stats` 接口统一 12 个月口径（按自然月精确回推 `start_date >= since`）：avg_cycle / avg_offset / min_cycle / max_cycle / predicted_next 全部基于最近 12 个月记录
+  - `MenstrualRecord` 新增 `end_date`（本次结束日期）+ `duration_days`（持续天数，可编辑）字段（迁移 0006）；serializer 自动计算：未显式传 `duration_days` 时由 `end_date - start_date` 得出，用户可手动覆盖
+  - 前端记录列表新增「结束日期」「持续」两列；表单新增「结束日期」（填后自动算）+「持续天数」（自动计算可手动改）；统计卡「总记录数」改为「持续时间」（`avg_duration` 12 个月口径平均持续天数，恒 12 条无信息量的记录数卡片下线）
+  - 验证：自动算 5 天 ✓、手动覆盖 2 ✓、12 个月口径 stats ✓、pytest 46 passed、type-check 0 错误
+- **侧边栏图标组件未注册**：`LayoutSidebar` 重写后模板直接使用的 `Expand/Fold/Box/ArrowUp/ArrowDown` 未在 script setup 显式导入，导致「归档菜单」折叠箭头与折叠按钮不渲染（Vue warn: Failed to resolve component）
+- **收件箱转换异常防护**：单条「转为里程碑」未选目标/目标已失效时原抛 500，现返回友好 400（`转为里程碑需要指定目标ID` / `转换失败，请检查所选目标是否仍有效`）
+- **收件箱「转为里程碑」丢失截止日期与详细描述**：转换逻辑改为兜底链——`target_date` 前端显式传的 > 待办 `due_date`；`description` 前端显式传的 > 待办 `description` > 待办 `content`。前端转换弹窗「截止日期」默认预填待办 `due_date`、「详细描述」默认预填待办 `description`（均可手动覆盖）
+- **取消完成里程碑未扣减目标累计发奖**：`goals/views.py` 取消完成（completed→pending）分支补 `total_reward_issued - reward_amount`（与 `sync_on_delete` 行为对齐）
+- **views「首次完成」路径未增加累计发奖**：与 service 路径行为不一致，补 `total_reward_issued + reward_amount`
+- **前端 43 个既有类型错误全部修复**（11 个文件）：BehaviorTrackCard 联合类型判别收窄、SnapshotHistory formatMoney 参数允许 null、CareerEnergyAudit/ModulePoint/TrendChart/InboxStats/MonthlySummaryTab/RelationView/MonthlyReviewView/FoodForm 类型补齐与安全转换
+- **temporal/travel 迁移缺陷**：`RunSQL ALTER TABLE`（假设生产外部表已存在）改为 `CREATE TABLE IF NOT EXISTS`（完整结构），全新空库可完整 migrate（73 张表），生产库无副作用
+- 清除 BehaviorTrackCard 的 7 条【折叠调试】console.log 残留
+
+### 🗑️ 数据清理与重构
+
+- **旧库 sycamore_db 彻底移除**：50 张表逐表核实（25 张精确 0 行 + 3 张旧系统表 + 6 张已迁移业务表直接删除；含疑似未迁移数据的表经用户确认后删除），最终 `DROP DATABASE sycamore_db`；数据库仅剩 `sycamore`（唯一业务库）+ `test_sycamore`；备份留存 `db_backups/`（旧库全量 + 备份表 + 迁移前生产库）
+- **备份表清理**：删除 `wealth_cash_flow_backup_20260710`（主表已覆盖）；`temporal_..._backup_20260604`（698 条独立历史数据）经用户确认后一并删除
+- **迁移文件 squash：86 → 45**：core 4→1、wealth 9→1、goals 15→1、toolkit 18→2（净效果迁移 + replaces，toolkit 0016 RunPython 回填独立保留）；生产库 migrate no-op、全新库可一键部署
+- **projects 空壳模块彻底删除**：后端 `apps/projects/`、前端 `modules/projects/`、路由、侧边栏颜色映射、README/CLAUDE.md 文档全清（数据库本无表）
+- **侧边栏瘦身（第一轮）**：个人良品率/数字资产/美食地图/旅行计划/成长记录归档弱化，决策日志/自由支配额度/复盘工具箱/语言训练器移出独立入口
+
+### 🎨 优化
+
+- **拆分大 services.py（summary/health/goals）**：
+  - `summary/services.py`（814 行）→ `summary/services/` 包 3 文件：progress_aggregator（358）/ quarterly_workbench（369）/ body_mind_correlation（84）
+  - `health/services.py`（639 行）→ `health/services/` 包 2 文件：health_stats（372）/ weight_service（281）
+  - `goals/services.py`（476 行）→ `goals/services/` 包 5 文件：goal_progress（88）/ milestone_reward（166）/ quick_goal（138）/ goal_clone（52）/ streak（52）
+  - 对外接口不变：`__init__.py` 重新导出，views 的 `from .services import X` **零改动**；踩坑：① 拆包后 `from .models` 相对导入层级变深需改 `..models`；② GoalProgressService 交叉引用 MilestoneRewardService 需显式 import；③ 切分时曾误 git checkout 覆盖第二轮 health ORM 化改动，已按 memory 重做并验证（active_days 371/2026-08 7065.0）
+  - 验证：pytest 46 passed、manage.py check 0、核心 API 冒烟 200（summary/goals/health records/weight）
+  - ⏳ 其他超 300 行 services 待拆：temporal 457 / travel 384 / toolkit 380 / inbox 330（下轮）
+- **技术债清理：原生 SQL + 驼峰字段（第二轮）**：
+  - **原生 SQL 64 → 33 处**：relation services（stats_service 14 + quality_service 5）与 health services（12）共 31 处全部 ORM 化——统计聚合改 aggregate/annotate、按月分组改 ExtractYear/Month、按日分组改 `Cast('time', DateField())`（规避 USE_TZ 下 `__date` 生成 CONVERT_TZ 而 MySQL 无时区表返回 NULL 的问题）；剩余 27 处为 `wealth_bill_list` 外部遗留表（无 ORM 模型，原生 SQL 是唯一访问方式，已加注释）+ 6 处测试辅助
+  - **驼峰 db_column 6 处清理**：temporal `beginDate→begin_date`/`updateDate→update_date`（外部表 RunSQL 迁移 0004，索引自动跟随）、wealth `wageIncome→wageincome`/`otherIncome→otherincome`（RunSQL 迁移 0012）、book `createDate→created_at`/`updateDate→updated_at`（迁移 0003）；前端 API 字段均无感（序列化输出字段名不变）；另 4 处 FK 显式 snake_case 声明（file_id/template_id 等）本就合规无需改
+  - **时间筛选/统计 CONVERT_TZ 全家桶修复**：USE_TZ + MySQL 无时区表导致 DateTimeField 的 `__date`/`__year`/`__month`/`TruncDate` 查询返回 NULL（筛选全空、统计为 0）——账单清单时间筛选、时间追踪任务筛选、小确幸能量统计（周/月/连续打卡）、关系本月互动数 4 处全部改 datetime 区间或 `Cast`；DateField 的 `__year` 无时区正常未动；账单 8 月筛出 25 条、任务 8 月 22 条验证通过
+  - **驼峰重命名后遗症修复**：`temporal/services.py` 的 `get_stats` 原生 SQL（`DATE_FORMAT(beginDate,...)`）漏改旧列名导致 `/api/temporal/oneday/stats/` 500（Unknown column 'beginDate'），已改 `begin_date`；一次性历史迁移命令（migrate_oneday/migrate_books）保留旧列名（源数据在旧表，不可改）
+  - 验证：manage.py check 0、pytest 46 passed、前端 type-check 0 错误；备份 `db_backups/backup_before_round2_20260827.sql`
+  - ⚠️ book `readDate` 为字段名驼峰（非 db_column，API 契约被前端 6 处引用），建议保留或下轮独立评估
+- **资金排程 reserve_items JSON 字段拆分（完成两轮）**：
+  - 第一轮：新增子表 `wealth_fund_schedule_item`（FundScheduleItem，迁移 0010），数据迁移命令 `migrate_json_to_tables`（1 条排程 20 项已迁，幂等），保存写子表 + 读取从子表组装（JSON 保留 deprecated）
+  - 第二轮：**删除 `FundSchedule.reserve_items` JSON 字段**（迁移 0011，子表为唯一存储）；serializer 的 reserve_items 改为 write_only 入参、读取经 to_representation 从子表组装；service 不再写 JSON
+  - 验证：创建写子表（201/合计正确）、旧记录子表读 20 项、响应结构不变前端无感；pytest 46 passed、type-check 0 错误
+  - ⚠️ 任务描述中的 `FundPool.linked_categories` 不适用：FundPool 模型与表已于 0007 迁移删除
+- **四张核心表补充业务索引（10 个）**：
+  - `life_sample.obsidian_path` 唯一索引 `uq_ls_obsidian_path` + 普通索引 `idx_ls_obsidian_path`（Obsidian 同步精确匹配从全表扫描 → const 查找，O(1)）
+  - `reward_transaction` 4 索引：`idx_reward_type`（按交易类型筛选）、`idx_reward_source`（source_type+source_id 查重）、`idx_reward_created`（时间倒序）、`idx_reward_type_created`（类型+时间复合，最高频）
+  - `temporal_oneday_page_list` 3 索引（外部表，RunSQL 迁移 0003）：`idx_oneday_date`（beginDate 按日查重）、`idx_oneday_type_date`（otype+日期）、`idx_oneday_year_date`（years+日期）
+  - `health_step_info` 1 索引（外部表，RunSQL 迁移 0005）：`idx_health_time`（时间序列范围查询）
+  - EXPLAIN 验证：全部从全表扫描（ALL）变为 Index lookup / Covering index / Index range scan
+- **归档体验**：归档页面保留「此模块已归档，随时可重新启用」提示条；侧边栏归档入口统一折叠（菜单系统落地后）
+
+### 📝 文档
+
+- 更新 `README.md`（模块归档说明）、`CLAUDE.md`（移除 projects 描述）
+
 ## [2026-08-25] v3.43.0 — 备考优化 · 项目目标 + 收件箱导入 + 截止倒计时
 
 ### ✨ 新增

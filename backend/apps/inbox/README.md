@@ -8,7 +8,12 @@
 
 ## Services
 - `ConverterService`：统一转换入口，支持转为 Goal / Milestone / Sugar(EnergyTemplate) / Complete / Archive
-- `InboxImportService`：批量导入（parse_csv / parse_markdown_tasks / parse_plain_text + import_items），中文标签自动归一化为合法 code，导入项 `source='import'`
+- `InboxImportService`：批量导入（parse_csv / parse_markdown_tasks / parse_plain_text + import_items），导入项 `source='import'`
+  - CSV 列名双兼容：`content`/`title`、`due_date`/`target_date` 及中文别名（内容/事项、类别/阶段、截止日期、状态、优先级、备注/描述）
+  - 备考导入映射：类别固定为 `study`（学习）；原 category/阶段 列作为备考阶段 → 标签 `tags`（`备考,基础期`）+ 备注 `[阶段: 基础期]`
+  - 优先级显式且非「中」→ 备注 `[优先级: 高/低]`（同时写入 priority 字段）；中优先级只写字段不写备注
+  - 日期多格式解析：`2026-08-25` / `2026/8/25` / `2026年8月25日` / `2026.8.25` / `20260825`，失败回退 dateutil 模糊解析
+  - 状态归一化：已完成/完成/已办/done → done，其余中文标签 → 对应 code
 - 标记完成时可联动创建小确幸记录和快乐银行奖励（前端处理，非 `ConverterService` 职责）
 
 ## API Endpoints

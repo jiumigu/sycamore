@@ -225,8 +225,24 @@ class MenstrualViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
-        """统计：平均周期、平均偏移、下次预测"""
-        records = MenstrualRecord.objects.filter(user_id=1).order_by('-start_date')
+        """统计：平均周期、平均偏移、下次预测（统一按最近 12 个月口径）"""
+        from datetime import date, timedelta
+        import calendar
+
+        # 最近 12 个月起点（按自然月精确回推）
+        today = date.today()
+        y, m = today.year, today.month
+        m -= 12
+        y += m // 12
+        m %= 12
+        if m == 0:
+            m = 12
+            y -= 1
+        since = today.replace(year=y, month=m, day=min(today.day, calendar.monthrange(y, m)[1]))
+
+        records = MenstrualRecord.objects.filter(
+            user_id=1, start_date__gte=since
+        ).order_by('-start_date')
         total = records.count()
         if total == 0:
             return Response({
@@ -236,14 +252,15 @@ class MenstrualViewSet(viewsets.ModelViewSet):
 
         cycles = [r.cycle_days for r in records if r.cycle_days > 0]
         offsets = [r.offset for r in records]
+        durations = [r.duration_days for r in records if r.duration_days is not None]
 
         avg_cycle = round(sum(cycles) / len(cycles)) if cycles else 0
         avg_offset = round(sum(offsets) / len(offsets)) if offsets else 0
         min_cycle = min(cycles) if cycles else 0
         max_cycle = max(cycles) if cycles else 0
+        avg_duration = round(sum(durations) / len(durations)) if durations else None
 
         latest = records.first()
-        from datetime import timedelta
         predicted_next = (latest.start_date + timedelta(days=avg_cycle)).isoformat() if avg_cycle else None
 
         return Response({
@@ -253,6 +270,7 @@ class MenstrualViewSet(viewsets.ModelViewSet):
             'predicted_next': predicted_next,
             'min_cycle': min_cycle,
             'max_cycle': max_cycle,
+            'avg_duration': avg_duration,
         })
 
     @action(detail=False, methods=['get'])

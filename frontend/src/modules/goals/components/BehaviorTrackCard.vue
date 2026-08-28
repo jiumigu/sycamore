@@ -178,7 +178,6 @@ const uniformReward = computed(() => {
 })
 
 watch(milestones, (val) => {
-  console.log('【折叠调试】milestones 数据变化，数量:', val?.length, '条目:', val?.map(m => ({ title: m.title?.slice(0, 20), status: m.status })))
 }, { immediate: true, deep: true })
 
 interface FoldPlaceholder {
@@ -188,7 +187,9 @@ interface FoldPlaceholder {
   foldCount: number
 }
 
-type FoldedItem = CheckinMilestone | FoldPlaceholder
+type FoldedItem =
+  | (CheckinMilestone & { isFoldPlaceholder?: false })
+  | (FoldPlaceholder & { isFoldPlaceholder: true })
 
 const expandedGroups = ref<Set<string>>(new Set())
 
@@ -217,12 +218,9 @@ const normalizeName = (name: string) => {
 }
 
 const foldedMilestones = computed<FoldedItem[]>(() => {
-  console.log('【折叠调试】foldedMilestones computed 被调用')
   const items = milestones.value
-  console.log('【折叠调试】输入数量:', items?.length)
 
   if (!items || items.length === 0) {
-    console.log('【折叠调试】无数据，返回空')
     return []
   }
 
@@ -245,12 +243,10 @@ const foldedMilestones = computed<FoldedItem[]>(() => {
         }
       }
       const sameCount = j - i
-      console.log(`【折叠调试】位置${i}: "${curTitle}" 连续${sameCount}条（原始标题示例: "${current.title.slice(0, 40)}"）`)
 
       if (sameCount >= 3) {
         const groupKey = `fold_${curTitle}_${i}`
         const expanded = expandedGroups.value.has(groupKey)
-        console.log(`【折叠调试】触发折叠！共${sameCount}条，展开=${expanded}`)
 
         if (expanded) {
           // 展开状态：全部显示
@@ -277,7 +273,6 @@ const foldedMilestones = computed<FoldedItem[]>(() => {
     i++
   }
 
-  console.log('【折叠调试】原始数量:', items.length, '→ 折叠后:', result.length)
   return result
 })
 

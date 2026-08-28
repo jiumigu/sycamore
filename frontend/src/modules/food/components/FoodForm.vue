@@ -243,7 +243,7 @@ watch(() => props.record, (record) => {
       taste_level: record.taste_level || 'good',
       eat_date: record.eat_date || '',
       rating: record.rating ?? undefined,
-      price: record.price ?? undefined,
+      price: record.price != null ? Number(record.price) : undefined,
       notes: record.notes || '',
       tags: record.tags || '',
       want_visit_again: record.want_visit_again ?? false,

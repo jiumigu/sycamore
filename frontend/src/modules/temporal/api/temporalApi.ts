@@ -93,3 +93,15 @@ export function getWeeklyTracking(params?: Record<string, unknown>) {
 export function refreshWeeklyCache() {
   return request({ url: '/temporal/weekly-tracking/refresh/', method: 'post' })
 }
+
+export function createTask(data: Record<string, unknown>) {
+  return request({ url: '/temporal/tasks/', method: 'post', data })
+}
+
+export function updateTask(id: number, data: Record<string, unknown>) {
+  return request({ url: `/temporal/tasks/${id}/`, method: 'patch', data })
+}
+
+export function deleteTask(id: number) {
+  return request({ url: `/temporal/tasks/${id}/`, method: 'delete' })
+}

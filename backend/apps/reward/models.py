@@ -94,6 +94,12 @@ class RewardTransaction(models.Model):
         verbose_name = '奖励流水'
         verbose_name_plural = '奖励流水'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['transaction_type'], name='idx_reward_type'),
+            models.Index(fields=['source_type', 'source_id'], name='idx_reward_source'),
+            models.Index(fields=['created_at'], name='idx_reward_created'),
+            models.Index(fields=['transaction_type', 'created_at'], name='idx_reward_type_created'),
+        ]
 
     def __str__(self):
         return f'{self.get_transaction_type_display()} {self.amount}'

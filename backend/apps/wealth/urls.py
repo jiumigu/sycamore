@@ -6,6 +6,7 @@ from .views.fund_schedule_views import FundScheduleViewSet
 
 fund_schedule_router = DefaultRouter()
 fund_schedule_router.register(r'fund-schedule', FundScheduleViewSet, basename='fund-schedule')
+fund_schedule_router.register(r'bills', views.BillViewSet, basename='bills')
 
 urlpatterns = [
     path('', include(fund_schedule_router.urls)),

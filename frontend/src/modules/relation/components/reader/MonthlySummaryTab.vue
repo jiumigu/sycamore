@@ -134,6 +134,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, reactive, ref, computed } from 'vue'
 import { useReaderStore } from '../../stores/readerStore'
 import * as readerApi from '../../api/readerApi'
+import type { ReaderMonthlySummary, ReaderGroup } from '../../types/readerTypes'
 
 const store = useReaderStore()
 
@@ -176,7 +177,7 @@ function handleAdd() {
   showDialog.value = true
 }
 
-function handleEdit(row: typeof store.monthlySummaries.value[number]) {
+function handleEdit(row: ReaderMonthlySummary) {
   editingId.value = row.id
   defaultGroupId.value = row.reader_group
   form.yearmon = `${row.year}-${String(row.month).padStart(2, '0')}`
@@ -260,7 +261,9 @@ async function handleDelete(row: { id: number }) {
 onMounted(async () => {
   // 默认选中"公众号读者"
   const res = await readerApi.getReaderGroups()
-  const groups = Array.isArray(res.data) ? res.data : (res.data.results || [])
+  const groups: ReaderGroup[] = Array.isArray(res.data)
+    ? res.data
+    : (res.data as { results?: ReaderGroup[] })?.results || []
   const defaultGroup = groups.find((g: { name: string }) => g.name === '公众号读者')
   if (defaultGroup) {
     defaultGroupId.value = defaultGroup.id

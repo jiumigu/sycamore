@@ -13,19 +13,10 @@ def backfill_total_yearly(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('toolkit', '0015_fixedexpense'),
+        ('toolkit', '0001_squashed_0018'),
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='fixedexpense',
-            name='total_yearly',
-            field=models.DecimalField(decimal_places=2, default=0, max_digits=10, verbose_name='年固定开销'),
-        ),
-        migrations.AlterField(
-            model_name='fixedexpense',
-            name='items',
-            field=models.JSONField(default=list, help_text='[{name, amount, period, icon}]，period 支持 daily/monthly/yearly', verbose_name='开销项目列表'),
-        ),
+        # 注：AddField total_yearly / AlterField items 已并入 0001_squashed_0018（净效果），此处仅保留数据回填
         migrations.RunPython(backfill_total_yearly, migrations.RunPython.noop),
     ]

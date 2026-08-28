@@ -56,55 +56,37 @@ class Migration(migrations.Migration):
         migrations.SeparateDatabaseAndState(
             state_operations=state_operations,
             database_operations=[
-                # Add new columns to travel_list_info
                 migrations.RunSQL(
-                    sql='ALTER TABLE travel_list_info '
-                        'ADD COLUMN duration_days int DEFAULT NULL COMMENT "停留天数" '
-                        'AFTER tcost',
-                    reverse_sql='ALTER TABLE travel_list_info DROP COLUMN duration_days',
-                    state_operations=None,
-                ),
-                migrations.RunSQL(
-                    sql='ALTER TABLE travel_list_info '
-                        'ADD COLUMN rating int DEFAULT NULL COMMENT "满意度评分(1-5)" '
-                        'AFTER duration_days',
-                    reverse_sql='ALTER TABLE travel_list_info DROP COLUMN rating',
-                    state_operations=None,
-                ),
-                migrations.RunSQL(
-                    sql='ALTER TABLE travel_list_info '
-                        'ADD COLUMN companions varchar(200) DEFAULT NULL COMMENT "同行伙伴" '
-                        'AFTER rating',
-                    reverse_sql='ALTER TABLE travel_list_info DROP COLUMN companions',
-                    state_operations=None,
-                ),
-                migrations.RunSQL(
-                    sql='ALTER TABLE travel_list_info '
-                        'ADD COLUMN latitude decimal(10,6) DEFAULT NULL COMMENT "纬度" '
-                        'AFTER companions',
-                    reverse_sql='ALTER TABLE travel_list_info DROP COLUMN latitude',
-                    state_operations=None,
-                ),
-                migrations.RunSQL(
-                    sql='ALTER TABLE travel_list_info '
-                        'ADD COLUMN longitude decimal(10,6) DEFAULT NULL COMMENT "经度" '
-                        'AFTER latitude',
-                    reverse_sql='ALTER TABLE travel_list_info DROP COLUMN longitude',
-                    state_operations=None,
-                ),
-                # Create china_city_coord table
-                migrations.RunSQL(
-                    sql='CREATE TABLE china_city_coord ('
-                        'id int NOT NULL AUTO_INCREMENT, '
-                        'province varchar(50) NOT NULL COMMENT "省份", '
-                        'city varchar(100) NOT NULL COMMENT "城市", '
-                        'latitude decimal(10,6) NOT NULL COMMENT "纬度", '
-                        'longitude decimal(10,6) NOT NULL COMMENT "经度", '
-                        'level tinyint DEFAULT 2 COMMENT "级别: 1省会/2地级市/3区县", '
-                        'PRIMARY KEY (id), '
-                        'UNIQUE KEY uk_city (city)'
-                        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT="中国城市坐标库"',
-                    reverse_sql='DROP TABLE IF EXISTS china_city_coord',
+                    sql="""
+                        CREATE TABLE IF NOT EXISTS `travel_list_info` (
+                          `tid` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
+                          `parentnode` varchar(50) DEFAULT NULL COMMENT '上一级',
+                          `tname` varchar(255) DEFAULT NULL COMMENT '城市/地点',
+                          `tyear` int DEFAULT NULL COMMENT '年份',
+                          `tcost` float DEFAULT NULL COMMENT '花费',
+                          `duration_days` int DEFAULT NULL COMMENT '停留天数',
+                          `rating` int DEFAULT NULL COMMENT '满意度',
+                          `companions` varchar(200) DEFAULT NULL COMMENT '同行伙伴',
+                          `latitude` decimal(10,6) DEFAULT NULL COMMENT '纬度',
+                          `longitude` decimal(10,6) DEFAULT NULL COMMENT '经度',
+                          `ttime` date DEFAULT NULL COMMENT '旅行日期',
+                          `tremark` varchar(255) DEFAULT NULL COMMENT '备注',
+                          `user_id` int DEFAULT NULL COMMENT '用户ID',
+                          `district` varchar(100) DEFAULT '' COMMENT '区/县级市',
+                          PRIMARY KEY (`tid`)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                        CREATE TABLE IF NOT EXISTS `china_city_coord` (
+                          `id` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
+                          `province` varchar(50) NOT NULL COMMENT '省份',
+                          `city` varchar(100) NOT NULL COMMENT '城市',
+                          `latitude` decimal(10,6) NOT NULL COMMENT '纬度',
+                          `longitude` decimal(10,6) NOT NULL COMMENT '经度',
+                          `level` tinyint DEFAULT '2' COMMENT '级别',
+                          PRIMARY KEY (`id`),
+                          UNIQUE KEY `uk_city` (`city`)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                    """,
+                    reverse_sql="",
                     state_operations=None,
                 ),
             ],

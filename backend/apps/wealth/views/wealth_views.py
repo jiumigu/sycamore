@@ -3,17 +3,18 @@ from datetime import date, datetime, timedelta
 from django.conf import settings
 from rest_framework import status
 from rest_framework.generics import ListAPIView, RetrieveAPIView, CreateAPIView
+from rest_framework import filters, viewsets
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory
+from ..models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthBillList
 from ..serializers import (
     WeekCalendarSerializer, CurrentScenarioSerializer, ScenarioHistorySerializer,
     CoverageInputSerializer, LifeSummarySerializer,
     MonthlyCalendarSerializer, DailyDetailSerializer, MonthlySummarySerializer,
-    BillCreateSerializer,
+    BillCreateSerializer, BillSerializer,
     MonthlyReviewSerializer, TrendDataSerializer, CategoryRankingSerializer,
     MonthlyListSerializer, CompareSerializer, BalanceInfoSerializer,
     CashFlowOverviewSerializer, AssetTrendItemSerializer,
@@ -246,6 +247,7 @@ class BillsByWeekView(APIView):
         if not week:
             return Response({'error': 'week not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        # wealth_bill_list 为外部遗留表（无 ORM 模型），原生 SQL 为唯一访问方式
         from django.db import connection
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -851,3 +853,35 @@ class BillImportView(APIView):
             'total': created + skipped + duplicated,
             'errors': errors[:10],
         })
+
+
+class BillViewSet(viewsets.ModelViewSet):
+    """账单清单 CRUD（列表/新增/编辑/删除，备注 notes 可编辑）"""
+
+    queryset = WealthBillList.objects.all()
+    serializer_class = BillSerializer
+    permission_classes = [AllowAny]
+    filter_backends = [filters.OrderingFilter, filters.SearchFilter]
+    search_fields = ['notes', 'merchant', 'category']
+    ordering = ['-date']
+
+    def get_queryset(self):
+        qs = super().get_queryset().filter(user_id=1)
+        params = self.request.query_params
+        date_from = params.get('date_from')
+        if date_from:
+            # datetime 区间直接比较（规避 __date 触发 CONVERT_TZ 时区转换返回 NULL）
+            qs = qs.filter(date__gte=datetime.combine(datetime.strptime(date_from, '%Y-%m-%d').date(), datetime.min.time()))
+        date_to = params.get('date_to')
+        if date_to:
+            qs = qs.filter(date__lte=datetime.combine(datetime.strptime(date_to, '%Y-%m-%d').date(), datetime.max.time()))
+        ttype = params.get('transaction_type')
+        if ttype:
+            qs = qs.filter(transaction_type=ttype)
+        category = params.get('category')
+        if category:
+            qs = qs.filter(category=category)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(user_id=1)

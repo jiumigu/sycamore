@@ -45,7 +45,7 @@
       <el-tab-pane label="💬 关系列表" name="list">
         <!-- 统计卡片 -->
         <div class="stats-section">
-          <div class="total-stat">共计 <strong>{{ store.overview?.total_relationships || 0 }}</strong> 个关系 · 累计能量 <strong>{{ store.overview?.total_energy > 0 ? '+' : '' }}{{ store.overview?.total_energy || 0 }}</strong></div>
+          <div class="total-stat">共计 <strong>{{ store.overview?.total_relationships || 0 }}</strong> 个关系 · 累计能量 <strong>{{ (store.overview?.total_energy ?? 0) > 0 ? '+' : '' }}{{ store.overview?.total_energy || 0 }}</strong></div>
           <el-row :gutter="12" class="stats-row">
             <el-col :span="6" v-for="card in statCards" :key="card.key">
               <el-card class="stat-card" :class="'stat-' + card.key" shadow="hover" @click="filterByType(card.key)">

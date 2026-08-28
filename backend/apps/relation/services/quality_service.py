@@ -1,6 +1,7 @@
-from django.db import connection
+from django.utils import timezone
 
 from ..constants import ENERGY_REVIEW_DAYS, ENERGY_THRESHOLDS
+from ..models import Interaction, Relationship
 
 
 class QualityService:
@@ -9,17 +10,13 @@ class QualityService:
     @staticmethod
     def update_relationship_quality(relationship_id: int, user_id: int) -> str | None:
         """根据最近N条互动的平均能量分，更新关系质量"""
-        cursor = connection.cursor()
-        cursor.execute(
-            """
-            SELECT energy_score FROM relationship_interaction
-            WHERE relationship_id = %s AND user_id = %s
-            ORDER BY happened_at DESC
-            LIMIT %s
-            """,
-            [relationship_id, user_id, ENERGY_REVIEW_DAYS],
+        scores = list(
+            Interaction.objects.filter(
+                relationship_id=relationship_id, user_id=user_id
+            )
+            .order_by('-happened_at')
+            .values_list('energy_score', flat=True)[:ENERGY_REVIEW_DAYS]
         )
-        scores = [r[0] for r in cursor.fetchall()]
         if not scores:
             return None
 
@@ -34,20 +31,18 @@ class QualityService:
         else:
             new_quality = 'toxic'
 
-        cursor.execute(
-            "UPDATE relationship_relationship SET current_quality = %s, updated_at = NOW() WHERE id = %s",
-            [new_quality, relationship_id],
+        Relationship.objects.filter(id=relationship_id).update(
+            current_quality=new_quality,
+            updated_at=timezone.now(),
         )
         return new_quality
 
     @staticmethod
     def recalculate_all(user_id: int = 1) -> int:
         """重新计算所有关系质量"""
-        cursor = connection.cursor()
-        cursor.execute(
-            "SELECT id FROM relationship_relationship WHERE user_id = %s", [user_id]
+        ids = list(
+            Relationship.objects.filter(user_id=user_id).values_list('id', flat=True)
         )
-        ids = [r[0] for r in cursor.fetchall()]
         for rid in ids:
             QualityService.update_relationship_quality(rid, user_id)
         return len(ids)

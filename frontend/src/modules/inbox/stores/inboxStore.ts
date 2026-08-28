@@ -157,6 +157,19 @@ export const useInboxStore = defineStore('inbox', () => {
     }
   }
 
+  async function convertToMilestone(itemIds: number[], goalId: number) {
+    saving.value = true
+    try {
+      const res = await inboxApi.convertToMilestone({ item_ids: itemIds, goal_id: goalId })
+      items.value = items.value.filter(i => !itemIds.includes(i.id))
+      selectedIds.value = new Set()
+      await fetchStats()
+      return res.data
+    } finally {
+      saving.value = false
+    }
+  }
+
   async function batchAction(data: { ids: number[]; action: string }) {
     try {
       await inboxApi.batchAction(data as Parameters<typeof inboxApi.batchAction>[0])
@@ -183,7 +196,7 @@ export const useInboxStore = defineStore('inbox', () => {
     currentPage, pageSize, total,
     fetchItems, fetchStats, fetchAll,
     createItem, updateItem, deleteItem,
-    completeItem, convertItem, convertToGoal, batchAction,
+    completeItem, convertItem, convertToGoal, convertToMilestone, batchAction,
     handlePageChange, resetPage, search,
   }
 })

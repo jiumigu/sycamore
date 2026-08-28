@@ -397,7 +397,7 @@ class OneDayPageService:
         ).order_by('-years'))
 
         month_stats = list(OneDayPage.objects.extra(
-            select={'month': "DATE_FORMAT(beginDate, '%%Y-%%m')"},
+            select={'month': "DATE_FORMAT(begin_date, '%%Y-%%m')"},
         ).values('month').annotate(
             count=Count('oid'),
             total_oneday=Sum('oneday'),

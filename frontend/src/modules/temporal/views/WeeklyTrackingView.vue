@@ -7,6 +7,9 @@
           <el-icon><Refresh /></el-icon>
           刷新缓存
         </el-button>
+        <el-button type="primary" size="small" @click="taskDialogVisible = true; loadTasks()">
+          📋 任务清单
+        </el-button>
         <span>基准小时/周：</span>
         <el-input-number v-model="benchmark" :min="10" :max="80" :step="5" @change="fetchData" />
         <span class="hint">百分比 = 实际小时 / 基准小时 × 100%</span>
@@ -79,11 +82,84 @@
       </div>
     </el-card>
   </div>
+
+  <!-- 任务清单弹窗 -->
+  <el-dialog v-model="taskDialogVisible" title="📋 时间追踪任务清单" width="920px" :close-on-click-modal="false">
+    <div style="margin-bottom:10px">
+      <el-button size="small" type="primary" @click="openTaskForm()">+ 新增任务</el-button>
+      <span class="hint" style="margin-left:8px">共 {{ taskTotal }} 条 · 备注可在此编辑完善</span>
+    </div>
+    <el-table :data="tasks" v-loading="tasksLoading" stripe size="small" max-height="420">
+      <el-table-column label="任务" prop="task_name" min-width="130" show-overflow-tooltip />
+      <el-table-column label="开始时间" width="140">
+        <template #default="{ row }">{{ (row.start_time || '').slice(0, 16) }}</template>
+      </el-table-column>
+      <el-table-column label="时长" width="70">
+        <template #default="{ row }">{{ row.duration_display || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="分类" width="90" prop="category_level1" />
+      <el-table-column label="类型" width="80" prop="task_type" />
+      <el-table-column label="备注" min-width="170" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.notes || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="110" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" link @click="openTaskForm(row)">编辑</el-button>
+          <el-button size="small" link type="danger" @click="handleDeleteTask(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <el-pagination v-model:current-page="taskPage" :page-size="20" :total="taskTotal" layout="prev, pager, next" small
+      style="margin-top:12px;justify-content:center" @current-change="loadTasks" />
+  </el-dialog>
+
+  <!-- 任务新增/编辑弹窗 -->
+  <el-dialog v-model="taskFormVisible" :title="taskEditingId ? '编辑任务' : '新增任务'" width="520px">
+    <el-form :model="taskForm" label-width="80px" size="small">
+      <el-form-item label="任务名称" required>
+        <el-input v-model="taskForm.task_name" />
+      </el-form-item>
+      <el-form-item label="描述">
+        <el-input v-model="taskForm.task_description" type="textarea" :rows="2" />
+      </el-form-item>
+      <el-row :gutter="10">
+        <el-col :span="12">
+          <el-form-item label="开始时间">
+            <el-date-picker v-model="taskForm.start_time" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" style="width:100%" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="时长(时)">
+            <el-input-number v-model="taskForm.duration_hours" :min="0" :max="24" :step="0.5" style="width:100%" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="10">
+        <el-col :span="12">
+          <el-form-item label="类型">
+            <el-input v-model="taskForm.task_type" placeholder="工作/学习/生活…" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="标签">
+            <el-input v-model="taskForm.tags" placeholder="逗号分隔" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-form-item label="备注">
+        <el-input v-model="taskForm.notes" type="textarea" :rows="2" placeholder="完善本次任务的备注说明" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button size="small" @click="taskFormVisible = false">取消</el-button>
+      <el-button size="small" type="primary" :loading="taskSaving" @click="saveTask">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, onMounted, reactive } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import * as temporalApi from '@/modules/temporal/api/temporalApi'
 
@@ -166,6 +242,67 @@ const currentYearQualifyRate = computed(() => {
 })
 
 onMounted(fetchData)
+
+// ─── 任务清单 CRUD ───
+const taskDialogVisible = ref(false)
+const taskFormVisible = ref(false)
+const tasks = ref<any[]>([])
+const tasksLoading = ref(false)
+const taskTotal = ref(0)
+const taskPage = ref(1)
+const taskSaving = ref(false)
+const taskEditingId = ref<number | null>(null)
+const taskForm = reactive({
+  task_name: '', task_description: '', start_time: '', duration_hours: 0,
+  task_type: '其他', tags: '', notes: '',
+})
+
+async function loadTasks() {
+  tasksLoading.value = true
+  try {
+    const res = await temporalApi.getTaskList({ page: taskPage.value, page_size: 20 })
+    const data = res.data
+    tasks.value = (data.results || data) as any[]
+    taskTotal.value = data.count ?? tasks.value.length
+  } catch { tasks.value = [] } finally { tasksLoading.value = false }
+}
+
+function openTaskForm(row?: any) {
+  taskEditingId.value = row?.id ?? null
+  taskForm.task_name = row?.task_name || ''
+  taskForm.task_description = row?.task_description || ''
+  taskForm.start_time = row?.start_time || ''
+  taskForm.duration_hours = row?.duration_hours ?? 0
+  taskForm.task_type = row?.task_type || '其他'
+  taskForm.tags = row?.tags || ''
+  taskForm.notes = row?.notes || ''
+  taskFormVisible.value = true
+}
+
+async function saveTask() {
+  if (!taskForm.task_name.trim()) { ElMessage.warning('请输入任务名称'); return }
+  taskSaving.value = true
+  try {
+    if (taskEditingId.value) {
+      await temporalApi.updateTask(taskEditingId.value, { ...taskForm })
+    } else {
+      await temporalApi.createTask({ ...taskForm })
+    }
+    ElMessage.success('保存成功')
+    taskFormVisible.value = false
+    loadTasks()
+  } catch { ElMessage.error('保存失败') } finally { taskSaving.value = false }
+}
+
+async function handleDeleteTask(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认删除任务「${row.task_name}」？`, '删除确认', { type: 'warning' })
+    await temporalApi.deleteTask(row.id)
+    ElMessage.success('已删除')
+    loadTasks()
+  } catch { /* 取消 */ }
+}
+
 </script>
 
 <style scoped lang="scss">

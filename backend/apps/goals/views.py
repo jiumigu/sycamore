@@ -569,6 +569,9 @@ class MilestoneViewSet(viewsets.ModelViewSet):
                     reason='milestone_uncheck',
                     description=f'取消完成里程碑「{old_instance.title}」（{old_instance.goal.title}），扣回{reward_amount}元',
                 )
+                Goal.objects.filter(id=instance.goal_id).update(
+                    total_reward_issued=F('total_reward_issued') - reward_amount,
+                )
                 instance.reward_synced = False
                 instance.reward_issued_at = None
                 instance.save(update_fields=['reward_synced', 'reward_issued_at'])
@@ -590,6 +593,9 @@ class MilestoneViewSet(viewsets.ModelViewSet):
                     amount=reward_amount,
                     transaction_type='milestone_complete',
                     description=f'完成里程碑「{instance.title}」（{instance.goal.title}），获得{reward_amount}元奖励',
+                )
+                Goal.objects.filter(id=instance.goal_id).update(
+                    total_reward_issued=F('total_reward_issued') + reward_amount,
                 )
                 instance.reward_synced = True
                 instance.reward_issued_at = timezone.now()

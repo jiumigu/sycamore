@@ -1,5 +1,7 @@
 <template>
   <div class="conflict-tracker">
+    <!-- 归档提示 -->
+    <el-alert title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
     <h2 class="page-title">🌱 成长记录</h2>
 
     <!-- 统计卡片 -->

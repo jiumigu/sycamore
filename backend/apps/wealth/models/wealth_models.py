@@ -104,8 +104,8 @@ class WealthBalanceList(models.Model):
     """月度收支复盘表 — 每月收支统计+存款汇总"""
 
     yearmon = models.CharField(primary_key=True, max_length=10, verbose_name='年月')
-    wageincome = models.FloatField(db_column='wageIncome', blank=True, null=True, verbose_name='工资收入')
-    otherincome = models.FloatField(db_column='otherIncome', blank=True, null=True, verbose_name='其他收入')
+    wageincome = models.FloatField(blank=True, null=True, verbose_name='工资收入')
+    otherincome = models.FloatField(blank=True, null=True, verbose_name='其他收入')
     outmoney = models.FloatField(blank=True, null=True, verbose_name='支出')
     mbalance = models.FloatField(blank=True, null=True, verbose_name='每月余额')
     btime = models.DateTimeField(blank=True, null=True, verbose_name='日期')
@@ -186,3 +186,37 @@ class WealthRegularList(models.Model):
             return 0.0
         days = self.term_days
         return round(self.value * (self.rate / 100) * (days / 365), 2)
+
+
+class WealthBillList(models.Model):
+    """账单明细（映射外部遗留表 wealth_bill_list，清单 CRUD 用）"""
+
+    id = models.AutoField(primary_key=True)
+    transaction_type = models.CharField(max_length=10, verbose_name='收支类型')
+    date = models.DateTimeField(verbose_name='日期')
+    category = models.CharField(max_length=50, blank=True, null=True, verbose_name='分类')
+    subcategory = models.CharField(max_length=50, blank=True, null=True, verbose_name='子分类')
+    project = models.CharField(max_length=100, blank=True, null=True, verbose_name='项目')
+    account = models.CharField(max_length=50, blank=True, null=True, verbose_name='账户')
+    account_currency = models.CharField(max_length=10, blank=True, null=True, verbose_name='币种')
+    amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name='金额')
+    member = models.CharField(max_length=50, blank=True, null=True, verbose_name='成员')
+    merchant = models.CharField(max_length=100, blank=True, null=True, verbose_name='商户')
+    notes = models.TextField(blank=True, null=True, verbose_name='备注')
+    related_id = models.CharField(max_length=100, blank=True, null=True, verbose_name='关联ID')
+    year = models.IntegerField(blank=True, null=True)
+    month = models.IntegerField(blank=True, null=True)
+    day = models.IntegerField(blank=True, null=True)
+    created_at = models.DateTimeField(blank=True, null=True, auto_now_add=False)
+    updated_at = models.DateTimeField(blank=True, null=True, auto_now_add=False)
+    user_id = models.IntegerField(default=1)
+
+    class Meta:
+        managed = False
+        db_table = 'wealth_bill_list'
+        ordering = ['-date']
+        verbose_name = '账单明细'
+        verbose_name_plural = '账单明细'
+
+    def __str__(self):
+        return f'{self.transaction_type} {self.amount} {self.notes or ""}'

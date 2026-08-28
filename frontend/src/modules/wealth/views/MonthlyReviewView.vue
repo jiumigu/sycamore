@@ -131,6 +131,8 @@ function handleEditBalanceInfo(row: MonthlyListItem) {
 function handleSaveBalanceInfo(data: BalanceInfoFormData) {
   const payload = {
     yearmon: data.yearmon,
+    income: data.income || 0,
+    expense: data.expense || 0,
     wageincome: data.income || 0,
     otherincome: 0,
     outmoney: data.expense || 0,

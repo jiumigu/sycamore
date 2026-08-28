@@ -4,14 +4,14 @@ import subprocess
 from datetime import date, datetime
 
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Max, Q
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Notification, SystemPreset, UserProfile
+from .models import MenuGroup, MenuPreference, Notification, SystemPreset, UserProfile
 
 
 logger = logging.getLogger(__name__)
@@ -180,6 +180,94 @@ class SystemPresetViewSet(viewsets.ReadOnlyModelViewSet):
             defaults={'values': values},
         )
         return Response(self.get_serializer(obj).data)
+
+
+# ========== 菜单管理（动态侧边栏） ==========
+
+DEFAULT_MENU_GROUPS = [
+    {'key': 'overview', 'name': '总览', 'sort': 1},
+    {'key': 'temporal', 'name': '时间感知', 'sort': 2},
+    {'key': 'goals', 'name': '目标与项目', 'sort': 3},
+    {'key': 'health', 'name': '身心健康', 'sort': 4},
+    {'key': 'nourishment', 'name': '精神滋养', 'sort': 5},
+    {'key': 'wealth', 'name': '财富管理', 'sort': 6},
+    {'key': 'connection', 'name': '连接与足迹', 'sort': 7},
+    {'key': 'tools', 'name': '工具箱', 'sort': 8},
+    {'key': 'system', 'name': '系统运维', 'sort': 9},
+]
+
+
+def ensure_default_menu_groups() -> None:
+    """首次使用惰性 seed 默认分组（表空时写入）"""
+    if MenuGroup.objects.exists():
+        return
+    MenuGroup.objects.bulk_create([
+        MenuGroup(group_key=g['key'], group_name=g['name'], sort_order=g['sort'])
+        for g in DEFAULT_MENU_GROUPS
+    ])
+
+
+class MenuPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MenuPreference
+        fields = ['id', 'menu_key', 'is_favorite', 'sort_order', 'updated_at']
+
+
+class MenuGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MenuGroup
+        fields = ['id', 'group_key', 'group_name', 'sort_order', 'is_visible', 'created_at', 'updated_at']
+
+
+class MenuPreferenceViewSet(viewsets.ReadOnlyModelViewSet):
+    """菜单偏好：常用/归档切换 + 批量更新"""
+
+    permission_classes = [AllowAny]
+    queryset = MenuPreference.objects.all()
+    serializer_class = MenuPreferenceSerializer
+
+    @action(detail=False, methods=['get'])
+    def user_prefs(self, request):
+        """获取当前用户菜单偏好"""
+        user_id = request.query_params.get('user_id', 1)
+        prefs = MenuPreference.objects.filter(user_id=user_id)
+        return Response(self.get_serializer(prefs, many=True).data)
+
+    @action(detail=False, methods=['post'])
+    def batch_update(self, request):
+        """批量更新菜单偏好，body: {updates: [{menu_key, is_favorite, sort_order}]}"""
+        updates = request.data.get('updates', [])
+        if not isinstance(updates, list):
+            return Response({'error': 'updates 必须是列表'}, status=400)
+        for u in updates:
+            menu_key = u.get('menu_key')
+            if not menu_key:
+                continue
+            MenuPreference.objects.update_or_create(
+                menu_key=menu_key,
+                defaults={
+                    'is_favorite': bool(u.get('is_favorite', True)),
+                    'sort_order': int(u.get('sort_order', 0)),
+                },
+            )
+        return Response({'success': True, 'updated': len(updates)})
+
+
+class MenuGroupViewSet(viewsets.ModelViewSet):
+    """菜单分组 CRUD（重命名/排序/新增/删除/显隐）"""
+
+    permission_classes = [AllowAny]
+    queryset = MenuGroup.objects.all()
+    serializer_class = MenuGroupSerializer
+
+    def list(self, request, *args, **kwargs):
+        ensure_default_menu_groups()
+        return super().list(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        # 新分组默认排在最后
+        max_sort = MenuGroup.objects.aggregate(Max('sort_order'))['sort_order__max'] or 0
+        serializer.save(sort_order=max_sort + 1)
 
 
 class GlobalSearchView(APIView):

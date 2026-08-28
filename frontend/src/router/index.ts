@@ -57,7 +57,6 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
-  { path: '/projects', name: 'projects', component: () => import('@/modules/projects/views/ProjectOverview.vue'), meta: { title: '项目管理' } },
 
   // 身心健康
   {
@@ -278,6 +277,12 @@ const routes: RouteRecordRaw[] = [
     name: 'AdminPresets',
     component: () => import('@/core/admin/views/PresetManager.vue'),
     meta: { title: '系统预设' },
+  },
+  {
+    path: '/admin/menus',
+    name: 'AdminMenus',
+    component: () => import('@/core/admin/views/MenuManager.vue'),
+    meta: { title: '菜单管理' },
   },
 
   // 连接与足迹

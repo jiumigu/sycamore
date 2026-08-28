@@ -102,7 +102,14 @@ class InboxViewSet(viewsets.ModelViewSet):
             'target_date': request.data.get('target_date'),
             'description': request.data.get('description', ''),
         }
-        item = ConverterService.process(item, action_type, **extra)
+        try:
+            item = ConverterService.process(item, action_type, **extra)
+        except ValueError as e:
+            # 如：转为里程碑未指定目标
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            # 如：目标已被删除/失效
+            return Response({'error': '转换失败，请检查所选目标是否仍有效'}, status=status.HTTP_400_BAD_REQUEST)
         serializer = self.get_serializer(item)
         return Response(serializer.data)
 
@@ -181,6 +188,44 @@ class InboxViewSet(viewsets.ModelViewSet):
             'converted_count': len(items),
         })
 
+    @action(detail=False, methods=['post'], url_path='convert-to-milestone')
+    def convert_to_milestone(self, request):
+        """将多条收集箱事项批量转为已有目标的里程碑（同目标）"""
+        item_ids = request.data.get('item_ids', [])
+        goal_id = request.data.get('goal_id')
+
+        if not item_ids or not goal_id:
+            return Response({'error': '请选择事项并指定目标'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from apps.goals.models import Goal
+        goal = Goal.objects.filter(id=goal_id).first()
+        if not goal:
+            return Response({'error': '目标不存在'}, status=status.HTTP_400_BAD_REQUEST)
+
+        items = list(InboxItem.objects.filter(id__in=item_ids, status='pending'))
+        if not items:
+            return Response({'error': '未找到有效事项'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from apps.inbox.services import ConverterService
+        converted = 0
+        for item in items:
+            try:
+                # 复用单条转换：标题=内容，截止日期/详细描述各自带过去
+                ConverterService.convert_to_milestone(item, goal_id=goal_id)
+                item.status = 'processed'
+                item.save(update_fields=['status'])
+                converted += 1
+            except Exception:
+                continue
+
+        return Response({
+            'goal_id': goal.id,
+            'goal_title': goal.title,
+            'milestone_count': converted,
+            'converted_count': converted,
+            'failed_count': len(items) - converted,
+        })
+
     @action(detail=False, methods=['post'], url_path='import')
     def import_items(self, request):
         """批量导入待办事项（CSV / Markdown / 纯文本）"""
@@ -199,6 +244,8 @@ class InboxViewSet(viewsets.ModelViewSet):
                     {'success': False, 'error': '文件编码不支持，请使用 UTF-8 或 GBK'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+        content = content.lstrip('﻿')  # 去除 Excel 导出常见的 UTF-8 BOM
 
         file_name = (file.name or '').lower()
         if file_name.endswith('.csv'):

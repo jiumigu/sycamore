@@ -10,6 +10,7 @@ class InboxItem(models.Model):
         ('pain', '痛点'),
         ('reminder', '提醒'),
         ('work', '工作'),
+        ('study', '学习'),
         ('other', '其他'),
     ]
 

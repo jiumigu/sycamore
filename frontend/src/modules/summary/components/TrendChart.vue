@@ -33,7 +33,7 @@ function render() {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      formatter: (params: { seriesName: string; value: number; color: string }[][]) => {
+      formatter: (params: { seriesName: string; value: number; color: string; axisValue?: string; marker?: string }[][]) => {
         if (!params?.[0]) return ''
         const p = params[0]
         let html = `<div style="font-weight:600;margin-bottom:4px">${p[0].axisValue}</div>`

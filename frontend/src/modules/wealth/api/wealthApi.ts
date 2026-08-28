@@ -209,3 +209,19 @@ export function importCSV(file: File) {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
+
+export function getBills(params?: Record<string, unknown>) {
+  return request({ url: '/wealth/bills/', method: 'get', params })
+}
+
+export function createBillRecord(data: Record<string, unknown>) {
+  return request({ url: '/wealth/bills/', method: 'post', data })
+}
+
+export function updateBill(id: number, data: Record<string, unknown>) {
+  return request({ url: `/wealth/bills/${id}/`, method: 'patch', data })
+}
+
+export function deleteBill(id: number) {
+  return request({ url: `/wealth/bills/${id}/`, method: 'delete' })
+}

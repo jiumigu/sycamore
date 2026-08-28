@@ -1,5 +1,7 @@
 <template>
   <div class="dams-dashboard">
+    <!-- 归档提示 -->
+    <el-alert title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
     <h1 class="page-title">数字资产管理</h1>
 
     <!-- 注意力分区总览 -->

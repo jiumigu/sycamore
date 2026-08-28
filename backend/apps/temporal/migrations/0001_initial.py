@@ -14,19 +14,33 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunSQL(
             sql="""
-                ALTER TABLE temporal_time_atracker_tasks_list
-                ADD COLUMN day int DEFAULT NULL COMMENT '日期' AFTER `mon`,
-                ADD COLUMN week int DEFAULT NULL COMMENT '周数' AFTER `day`,
-                ADD COLUMN quarter int DEFAULT NULL COMMENT '季度' AFTER `week`,
-                ADD COLUMN category_level1 varchar(50) DEFAULT NULL COMMENT '一级分类' AFTER `quarter`,
-                ADD COLUMN category_level2 varchar(50) DEFAULT NULL COMMENT '二级分类' AFTER `category_level1`,
-                ADD COLUMN category_color varchar(20) DEFAULT NULL COMMENT '分类颜色' AFTER `category_level2`,
-                ADD COLUMN import_batch varchar(50) DEFAULT NULL COMMENT '导入批次号' AFTER `category_color`,
-                ADD COLUMN updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间' AFTER `import_batch`,
-                ADD INDEX idx_start_time (`start_time`),
-                ADD INDEX idx_task_name (`task_name`),
-                ADD INDEX idx_category (`category_level1`, `category_level2`),
-                ADD INDEX idx_year_month (`year`, `mon`)
+                CREATE TABLE IF NOT EXISTS `temporal_time_atracker_tasks_list` (
+                  `id` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
+                  `task_name` varchar(255) NOT NULL COMMENT '任务名称',
+                  `task_description` text COMMENT '任务说明',
+                  `start_time` datetime DEFAULT NULL COMMENT '开始时间',
+                  `end_time` datetime DEFAULT NULL COMMENT '结束时间',
+                  `duration` time DEFAULT NULL COMMENT '持续时间',
+                  `duration_hours` float DEFAULT NULL COMMENT '持续小时数',
+                  `notes` text COMMENT '附注',
+                  `tags` text COMMENT '标签',
+                  `task_type` varchar(100) NOT NULL DEFAULT '其他' COMMENT '任务类型',
+                  `year` int DEFAULT NULL COMMENT '年份',
+                  `mon` varchar(10) DEFAULT NULL COMMENT '月份',
+                  `day` int DEFAULT NULL COMMENT '日期',
+                  `week` int DEFAULT NULL COMMENT '周数',
+                  `quarter` int DEFAULT NULL COMMENT '季度',
+                  `category_level1` varchar(50) DEFAULT NULL COMMENT '一级分类',
+                  `category_level2` varchar(50) DEFAULT NULL COMMENT '二级分类',
+                  `category_color` varchar(20) DEFAULT NULL COMMENT '分类颜色',
+                  `import_batch` varchar(50) DEFAULT NULL COMMENT '导入批次号',
+                  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  PRIMARY KEY (`id`),
+                  KEY `idx_start_time` (`start_time`),
+                  KEY `idx_task_name` (`task_name`),
+                  KEY `idx_category` (`category_level1`, `category_level2`),
+                  KEY `idx_year_month` (`year`, `mon`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             reverse_sql="""
                 ALTER TABLE temporal_time_atracker_tasks_list

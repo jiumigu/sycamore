@@ -17,6 +17,9 @@
       <div class="item-meta">
         <span v-if="item.description" class="item-desc">{{ item.description }}</span>
         <span class="item-category">{{ categoryLabel }}</span>
+        <span v-if="tagList.length" class="item-tags">
+          <el-tag v-for="t in tagList" :key="t" size="small" effect="plain">{{ t }}</el-tag>
+        </span>
         <span v-if="item.due_date" class="item-due" :class="dueDateUrgency">
           📅 {{ formatDueDate }}
         </span>
@@ -74,6 +77,10 @@ const categoryIcon = computed(() => {
 
 const categoryLabel = computed(() => {
   return props.item.category_display
+})
+
+const tagList = computed(() => {
+  return props.item.tags?.split(',').map(t => t.trim()).filter(Boolean) ?? []
 })
 
 const priorityColor = computed(() => {
@@ -183,6 +190,10 @@ function toggleSelect() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.item-tags {
+  display: inline-flex;
+  gap: 4px;
 }
 .item-due.overdue {
   color: #EF4444;

@@ -1,6 +1,8 @@
 from rest_framework import serializers
 
-from ..models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthCashFlow, WealthBalanceList, FundSchedule
+from ..models import (
+    WealthBillList, WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthCashFlow, WealthBalanceList, FundSchedule
+)
 
 
 class WeekCalendarSerializer(serializers.ModelSerializer):
@@ -134,6 +136,37 @@ class BillCreateSerializer(serializers.Serializer):
     merchant = serializers.CharField(max_length=100, allow_blank=True, required=False)
     notes = serializers.CharField(allow_blank=True, required=False)
     date = serializers.DateTimeField()
+
+class BillSerializer(serializers.ModelSerializer):
+    """账单明细（清单 CRUD：备注 notes / 商户 merchant 可编辑）"""
+
+    class Meta:
+        model = WealthBillList
+        fields = [
+            'id', 'transaction_type', 'date', 'category', 'subcategory',
+            'project', 'account', 'amount', 'merchant', 'notes', 'user_id',
+        ]
+        read_only_fields = ['id', 'user_id']
+
+    def _fill_derived(self, validated_data: dict) -> dict:
+        from django.utils import timezone
+        now = timezone.now()
+        validated_data.setdefault('created_at', now)
+        validated_data.setdefault('updated_at', now)
+        dt = validated_data.get('date')
+        if dt is not None:
+            validated_data.setdefault('year', dt.year)
+            validated_data.setdefault('month', dt.month)
+            validated_data.setdefault('day', dt.day)
+        return validated_data
+
+    def create(self, validated_data):
+        return super().create(self._fill_derived(validated_data))
+
+    def update(self, instance, validated_data):
+        from django.utils import timezone
+        validated_data['updated_at'] = timezone.now()
+        return super().update(instance, validated_data)
 
 
 # ─── 月度复盘序列化器 ───
@@ -408,7 +441,9 @@ class ExpiringItemSerializer(serializers.Serializer):
 
 
 class FundScheduleSerializer(serializers.ModelSerializer):
-    """资金排程快照（合计由服务端权威计算，只读）"""
+    """资金排程快照（合计由服务端权威计算；预留项：入参 JSON，读取从子表组装）"""
+
+    reserve_items = serializers.JSONField(write_only=True, required=False, default=list)
 
     class Meta:
         model = FundSchedule
@@ -417,6 +452,20 @@ class FundScheduleSerializer(serializers.ModelSerializer):
             'total_reserved', 'remaining', 'created_at',
         ]
         read_only_fields = ['id', 'total_reserved', 'remaining', 'created_at']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # 读取时从 wealth_fund_schedule_item 子表组装（保持响应结构不变，前端无感）
+        data['reserve_items'] = [
+            {
+                'name': item.name,
+                'amount': float(item.amount),
+                'type': item.item_type,
+                'linked_expense_id': item.linked_expense_id,
+            }
+            for item in instance.items.all()
+        ]
+        return data
 
     def create(self, validated_data):
         from django.core.exceptions import ValidationError as DjangoValidationError

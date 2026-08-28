@@ -16,10 +16,10 @@
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-body">
-            <div class="stat-icon" style="background:#FCE4EC;color:#E91E63">📊</div>
+            <div class="stat-icon" style="background:#FCE4EC;color:#E91E63">📅</div>
             <div>
-              <div class="stat-value">{{ stats?.total_records ?? '--' }}</div>
-              <div class="stat-label">总记录数</div>
+              <div class="stat-value">{{ stats?.avg_duration != null ? stats.avg_duration + '天' : '--' }}</div>
+              <div class="stat-label">持续时间</div>
             </div>
           </div>
         </el-card>
@@ -82,6 +82,12 @@
       </template>
       <el-table :data="store.records" v-loading="store.loading" stripe size="small" style="width:100%">
         <el-table-column label="开始日期" width="100" prop="start_date" />
+        <el-table-column label="结束日期" width="100" prop="end_date">
+          <template #default="{ row }">{{ row.end_date || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="持续" width="60" prop="duration_days">
+          <template #default="{ row }">{{ row.duration_days != null ? row.duration_days + '天' : '-' }}</template>
+        </el-table-column>
         <el-table-column label="月份" width="70" prop="month" />
         <el-table-column label="偏移" width="60" prop="offset" />
         <el-table-column label="周期" width="60" prop="cycle_days" />
@@ -113,6 +119,12 @@
       <el-form :model="form" label-width="80px" size="small">
         <el-form-item label="开始日期" required>
           <el-date-picker v-model="form.start_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="结束日期">
+          <el-date-picker v-model="form.end_date" type="date" value-format="YYYY-MM-DD" style="width:100%" placeholder="填写后自动算持续天数" />
+        </el-form-item>
+        <el-form-item label="持续天数">
+          <el-input-number v-model="form.duration_days" :min="0" :max="30" style="width:100%" placeholder="自动计算，可手动改" />
         </el-form-item>
         <el-form-item label="偏移量">
           <el-input-number v-model="form.offset" :min="-30" :max="60" style="width:100%" />
@@ -262,6 +274,8 @@ const saving = ref(false)
 
 const form = reactive({
   start_date: '',
+  end_date: '',
+  duration_days: null as number | null,
   offset: 0,
   cycle_days: 30,
   notes: '',
@@ -271,6 +285,8 @@ function openForm(row?: MenstrualRecord) {
   if (row) {
     editingId.value = row.id
     form.start_date = row.start_date
+    form.end_date = row.end_date || ''
+    form.duration_days = row.duration_days ?? null
     form.offset = row.offset
     form.cycle_days = row.cycle_days
     form.notes = row.notes

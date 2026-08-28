@@ -3,6 +3,8 @@
 from datetime import datetime
 
 from django.db import models, transaction as db_transaction
+from django.db.models import DateField
+from django.db.models.functions import Cast
 
 from apps.reward.services import RewardPoolService
 
@@ -121,17 +123,20 @@ class EnergyService:
         # 本周统计
         week_start = today.replace(day=today.day - today.weekday())
         week_stats = EnergyLog.objects.filter(
-            user_id=user_id, completed_at__date__gte=week_start,
+            user_id=user_id, completed_at__gte=datetime.combine(week_start, datetime.min.time()),
         ).aggregate(
             total_energy=Sum('energy_gained'),
             completed_count=Count('id'),
         )
 
         # 本月统计
+        month_start_dt = datetime(today.year, today.month, 1)
+        next_month = month_start_dt.month % 12 + 1
+        next_year = today.year + (1 if month_start_dt.month == 12 else 0)
         month_stats = EnergyLog.objects.filter(
             user_id=user_id,
-            completed_at__year=today.year,
-            completed_at__month=today.month,
+            completed_at__gte=month_start_dt,
+            completed_at__lt=datetime(next_year, next_month, 1),
         ).aggregate(
             total_energy=Sum('energy_gained'),
             completed_count=Count('id'),
@@ -173,8 +178,8 @@ class EnergyService:
 
         daily = (
             EnergyLog.objects
-            .filter(user_id=user_id, completed_at__date__gte=start_date)
-            .annotate(date=TruncDate('completed_at'))
+            .filter(user_id=user_id, completed_at__gte=datetime.combine(start_date, datetime.min.time()))
+            .annotate(date=Cast('completed_at', DateField()))
             .values('date')
             .annotate(total_energy=Sum('energy_gained'))
             .order_by('date')
@@ -202,7 +207,7 @@ class EnergyService:
         dates = set(
             EnergyLog.objects
             .filter(user_id=user_id)
-            .annotate(date=TruncDate('completed_at'))
+            .annotate(date=Cast('completed_at', DateField()))
             .values_list('date', flat=True)
             .distinct()
             .order_by('-date')

@@ -1,5 +1,7 @@
 <template>
   <div class="food-dashboard">
+    <!-- 归档提示 -->
+    <el-alert title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
     <!-- 页面头部 -->
     <div class="page-header">
       <div class="page-title">

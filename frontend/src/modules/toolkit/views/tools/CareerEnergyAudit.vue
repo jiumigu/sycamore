@@ -252,6 +252,7 @@ interface AuditRecord {
   decision: string
   notes: string
   body_signals: string
+  advice?: string
   work_score: number
   env_score: number
   growth_score: number
@@ -344,7 +345,7 @@ async function handleAudit() {
 
   saving.value = true
   try {
-    const data = { ...form, body_signals: bodySignals.value.join(',') }
+    const data: Record<string, unknown> & { body_signals: string; next_review_date?: string | null } = { ...form, body_signals: bodySignals.value.join(',') }
     // 将空字符串日期转为 null，避免 DRF 校验失败
     if (!data.next_review_date) data.next_review_date = null
     const resp = await toolkitApi.createCareerEnergyAudit(data as unknown as Record<string, unknown>)

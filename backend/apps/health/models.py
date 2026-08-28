@@ -212,6 +212,8 @@ class MenstrualRecord(models.Model):
     year = models.IntegerField(verbose_name='年份')
     month = models.CharField(max_length=10, verbose_name='月份')
     start_date = models.DateField(verbose_name='开始日期')
+    end_date = models.DateField(blank=True, null=True, verbose_name='本次结束日期')
+    duration_days = models.IntegerField(blank=True, null=True, verbose_name='持续天数（自动=结束-开始，可手动覆盖）')
     offset = models.IntegerField(default=0, verbose_name='偏移量(天)')
     cycle_days = models.IntegerField(default=30, verbose_name='周期跨度(天)')
     notes = models.TextField(blank=True, default='', verbose_name='备注')

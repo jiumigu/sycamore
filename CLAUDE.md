@@ -36,7 +36,6 @@ backend/
 │   ├── travel/       # 旅行记录
 │   ├── reward/       # 奖励池
 │   ├── goals/        # 目标管理
-│   ├── projects/     # 项目管理
 │   ├── dams/         # 数字资产
 │   ├── toolkit/      # 工具箱
 │   └── summary/      # 跨模块聚合
@@ -139,7 +138,7 @@ cd frontend && npm run preview      # 预览生产构建
 - **sugar→reward 同步**：sugar service 层直接调用 `RewardPoolService`，不经过 signal
 - **礼物自动检测**：`_check_gift_availability()` 在每次池变动后扫描 pending/waiting 状态切换
 - **dams 自动化**是后端子包 `apps/dams/automation/`，由 Celery 触发
-- **goals/projects** 是平级关系，进度始终计算得出(editable=False)
+- **goals** 进度始终计算得出(editable=False)
 - **Notification** 无 user 外键（单用户系统）
 
 ## Module Details

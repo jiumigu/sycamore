@@ -67,3 +67,42 @@ class Notification(models.Model):
 
     def __str__(self):
         return f'[{self.get_category_display()}] {self.title}'
+
+
+class MenuPreference(models.Model):
+    """菜单显示偏好（单用户系统，user_id=1）"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    menu_key = models.CharField(max_length=100, unique=True, verbose_name='菜单标识')
+    is_favorite = models.BooleanField(default=True, verbose_name='是否常用')
+    sort_order = models.IntegerField(default=0, verbose_name='排序')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'core_menu_preference'
+        ordering = ['sort_order', 'menu_key']
+        verbose_name = '菜单偏好'
+        verbose_name_plural = '菜单偏好'
+
+    def __str__(self):
+        return f'{self.menu_key}: {"常用" if self.is_favorite else "归档"}'
+
+
+class MenuGroup(models.Model):
+    """菜单分组配置"""
+
+    group_key = models.CharField(max_length=50, unique=True, verbose_name='分组标识')
+    group_name = models.CharField(max_length=50, verbose_name='分组名称')
+    sort_order = models.IntegerField(default=0, verbose_name='排序')
+    is_visible = models.BooleanField(default=True, verbose_name='是否显示')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'core_menu_group'
+        ordering = ['sort_order', 'group_key']
+        verbose_name = '菜单分组'
+        verbose_name_plural = '菜单分组'
+
+    def __str__(self):
+        return f'{self.group_name} ({self.group_key})'

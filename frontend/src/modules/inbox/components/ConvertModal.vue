@@ -39,6 +39,9 @@
         <el-form-item label="截止日期">
           <el-date-picker v-model="targetDate" type="date" placeholder="选填" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
+        <el-form-item label="详细描述">
+          <el-input v-model="milestoneDesc" :placeholder="item?.description || '（原待办无详细描述）'" :rows="3" type="textarea" />
+        </el-form-item>
       </template>
 
       <el-form-item label="备注">
@@ -85,6 +88,7 @@ const notes = ref('')
 const goalId = ref<number | null>(null)
 const milestoneName = ref('')
 const targetDate = ref('')
+const milestoneDesc = ref('')
 const goals = ref<GoalItem[]>([])
 const goalsLoading = ref(false)
 
@@ -101,7 +105,9 @@ watch(() => props.visible, (v) => {
     notes.value = ''
     goalId.value = null
     milestoneName.value = ''
-    targetDate.value = ''
+    // 默认预填待办自带的截止日期与详细描述（可手动覆盖）
+    targetDate.value = props.item?.due_date || ''
+    milestoneDesc.value = props.item?.description || ''
     fetchGoals()
   }
 })
@@ -133,7 +139,7 @@ async function handleConvert() {
     extra.goal_id = goalId.value
     extra.milestone_name = milestoneName.value || ''
     extra.target_date = targetDate.value || ''
-    extra.description = props.item.content
+    extra.description = milestoneDesc.value || props.item.description || ''
   }
 
   await store.convertItem(props.item.id, action.value, extra)
@@ -142,6 +148,7 @@ async function handleConvert() {
   goalId.value = null
   milestoneName.value = ''
   targetDate.value = ''
+  milestoneDesc.value = ''
 }
 </script>
 
