@@ -176,7 +176,18 @@
       </el-select>
       <el-date-picker v-model="billDateRange" size="small" type="daterange" value-format="YYYY-MM-DD"
         start-placeholder="开始" end-placeholder="结束" style="width:240px" @change="loadBills" />
-      <el-button size="small" @click="billTypeFilter=''; billDateRange=null; loadBills()">重置</el-button>
+      <el-input
+        v-model="billSearch"
+        placeholder="搜索备注 / 商户 / 分类"
+        clearable
+        size="small"
+        style="width:200px"
+        @keyup.enter="applyBillSearch"
+        @clear="applyBillSearch"
+      >
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
+      <el-button size="small" @click="billTypeFilter=''; billDateRange=null; billSearch=''; loadBills()">重置</el-button>
       <span class="hint" style="margin-left:auto">共 {{ billTotal }} 条 · 备注可编辑完善</span>
     </div>
     <el-table :data="bills" v-loading="billsLoading" stripe size="small" max-height="420">
@@ -260,7 +271,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Calendar, DataAnalysis, Grid } from '@element-plus/icons-vue'
+import { Plus, Refresh, Calendar, DataAnalysis, Grid, Search } from '@element-plus/icons-vue'
 import { useCashflowStore } from '../stores/cashflowStore'
 import * as wealthApi from '../api/wealthApi'
 import AssetOverview from '../components/cashflow/AssetOverview.vue'
@@ -433,6 +444,12 @@ const billPage = ref(1)
 const billSaving = ref(false)
 const billEditingId = ref<number | null>(null)
 const billTypeFilter = ref('')
+const billSearch = ref('')
+
+function applyBillSearch() {
+  billPage.value = 1
+  loadBills()
+}
 const billDateRange = ref<[string, string] | null>(null)
 const billForm = reactive({
   transaction_type: '支出', amount: 0, date: '', category: '', subcategory: '',
@@ -448,6 +465,7 @@ async function loadBills() {
       params.date_from = billDateRange.value[0]
       params.date_to = billDateRange.value[1]
     }
+    if (billSearch.value.trim()) params.search = billSearch.value.trim()
     const res = await wealthApi.getBills(params)
     const data = res.data
     bills.value = (data.results || data) as any[]

@@ -229,3 +229,7 @@ export function deleteBill(id: number) {
 export function getBillContrib() {
   return request({ url: '/wealth/bills/contrib/', method: 'get' })
 }
+
+export function getBillDailyDetail(params: { date: string }) {
+  return request<{ date: string; total?: number; items: any[] }>({ url: '/wealth/bills/daily_detail/', method: 'get', params })
+}

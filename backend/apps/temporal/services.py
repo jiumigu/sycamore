@@ -137,7 +137,7 @@ class CSVImportService:
         # ── 覆盖模式写入（用 year/mon/day 查找，避免 CONVERT_TZ 问题） ──
         stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
         for (name, d), g in merged.items():
-            category = TASK_CATEGORY_MAPPING.get(name, '维护与秩序')
+            category = TASK_CATEGORY_MAPPING.get(name, '生活')
             color = CATEGORY_COLORS.get(category, '#9CA3AF')
 
             task_defaults = {
@@ -223,8 +223,8 @@ class TemporalStatsService:
             h = float(c['hours'] or 0)
             cat_breakdown[cat_name] = h
 
-        if total_hours > 0 and '生产与创造' in cat_breakdown:
-            production_pct = round((cat_breakdown['生产与创造'] / total_hours) * 100, 1)
+        if total_hours > 0 and '学习' in cat_breakdown:
+            production_pct = round((cat_breakdown['学习'] / total_hours) * 100, 1)
 
         return {
             'total_hours': round(float(total_hours), 2),
@@ -258,7 +258,7 @@ class TemporalStatsService:
 
             period_data[key][cat] += hours
 
-        categories_order = ['生产与创造', '维护与秩序', '滋养与成长', '连接与记录']
+        categories_order = ['工作', '学习', '生活', '兴趣记录']
         result = []
         for period in sorted(period_data.keys()):
             item = {'period': period}
@@ -285,7 +285,7 @@ class TemporalStatsService:
         categories = []
         cat_map = {c['category_level1']: float(c['hours'] or 0) for c in cat_totals}
 
-        for cat_name in ['生产与创造', '维护与秩序', '滋养与成长', '连接与记录']:
+        for cat_name in ['工作', '学习', '生活', '兴趣记录']:
             hours = cat_map.get(cat_name, 0)
             pct = round((hours / total_hours) * 100, 1) if total_hours > 0 else 0
             categories.append({

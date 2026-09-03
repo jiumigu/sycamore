@@ -6,6 +6,10 @@
         <el-tag type="primary" class="module-tag">知识沉淀</el-tag>
       </div>
       <div class="header-actions">
+        <el-button @click="goCharts">
+          <el-icon><DataAnalysis /></el-icon>
+          图形分析
+        </el-button>
         <el-button type="primary" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
           新建书籍
@@ -73,22 +77,6 @@
         </el-col>
       </el-row>
     </div>
-
-    <el-row :gutter="20" class="chart-row">
-      <el-col :span="12">
-        <el-card class="chart-card">
-          <template #header><div class="card-header"><span>年度阅读统计</span></div></template>
-          <div ref="yearChartRef" class="chart-container" />
-        </el-card>
-      </el-col>
-      <el-col :span="12">
-        <el-card class="chart-card">
-          <template #header><div class="card-header"><span>书籍类型分布</span></div></template>
-          <div v-if="stats?.type_stats?.length" ref="typeChartRef" class="chart-container" />
-          <el-empty v-else description="暂无类型数据" :image-size="100" />
-        </el-card>
-      </el-col>
-    </el-row>
 
     <el-card class="filter-card">
       <div class="filter-header">
@@ -297,18 +285,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
-  Search, Refresh, Plus, Delete, Edit, Document, Check, Star, Calendar, RefreshRight,
+  Search, Refresh, Plus, Delete, Edit, Document, Check, Star, Calendar, RefreshRight, DataAnalysis,
 } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
 import { useBookStore } from '../stores/bookStore'
 import {
   BTYPE_OPTIONS, STATUS_OPTIONS, READING_DEPTH_OPTIONS, RECOMMEND_TEXTS,
 } from '../types/bookTypes'
 import type { Book } from '../types/bookTypes'
 
+const router = useRouter()
 const bookStore = useBookStore()
 
 const loading = computed(() => bookStore.loading)
@@ -323,11 +312,6 @@ const selectedIds = ref<number[]>([])
 const dialogVisible = ref(false)
 const dialogType = ref<'create' | 'edit'>('create')
 const formRef = ref<FormInstance>()
-
-const yearChartRef = ref<HTMLElement>()
-const typeChartRef = ref<HTMLElement>()
-let yearChart: echarts.ECharts | null = null
-let typeChart: echarts.ECharts | null = null
 
 const yearOptions = computed(() => {
   const years: number[] = []
@@ -405,7 +389,11 @@ async function fetchData() {
 }
 
 async function fetchStats() {
-  try { await bookStore.fetchStats(); await initCharts() } catch {}
+  try { await bookStore.fetchStats() } catch {}
+}
+
+function goCharts() {
+  router.push('/books/charts')
 }
 
 function resetForm() {
@@ -511,44 +499,7 @@ function handleSizeChange(val: number) { pageSize.value = val; currentPage.value
 function handleCurrentChange(page: number) { currentPage.value = page; fetchData() }
 function refreshData() { fetchData(); fetchStats(); ElMessage.success('数据已刷新') }
 
-function initCharts() {
-  nextTick(() => {
-    if (yearChartRef.value) {
-      if (!yearChart) yearChart = echarts.init(yearChartRef.value)
-      const yd = stats.value?.year_stats || []
-      yearChart.setOption({
-        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-        xAxis: { type: 'category', data: yd.map(i => i.years).reverse(), axisLabel: { rotate: 30 } },
-        yAxis: { type: 'value', name: '阅读数量' },
-        series: [{ type: 'bar', data: yd.map(i => i.count).reverse(), barWidth: '40%', itemStyle: { color: '#409EFF', borderRadius: [4, 4, 0, 0] } }],
-      })
-    }
-    if (typeChartRef.value) {
-      if (!typeChart) typeChart = echarts.init(typeChartRef.value)
-      const td = (stats.value?.type_stats || []).filter(i => i.count > 0)
-      if (td.length) {
-        typeChart.setOption({
-          tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} ({d}%)' },
-          legend: { orient: 'vertical', left: 'left', data: td.map(i => i.btype) },
-          series: [{
-            name: '书籍类型分布', type: 'pie', radius: ['50%', '70%'],
-            center: ['55%', '50%'], avoidLabelOverlap: false,
-            itemStyle: { borderRadius: 10, borderColor: '#fff', borderWidth: 2 },
-            label: { show: false },
-            emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
-            data: td.map(i => ({ name: i.btype, value: i.count })),
-          }],
-        })
-      }
-    }
-  })
-}
-
-function handleResize() { yearChart?.resize(); typeChart?.resize() }
-
-onMounted(() => { fetchData(); fetchStats(); window.addEventListener('resize', handleResize) })
-onUnmounted(() => { window.removeEventListener('resize', handleResize); yearChart?.dispose(); typeChart?.dispose() })
+onMounted(() => { fetchData(); fetchStats() })
 </script>
 
 <style scoped lang="scss">
@@ -580,13 +531,6 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize); yearChar
         .stat-label { font-size: 14px; color: var(--el-text-color-regular); }
       }
     }
-  }
-}
-
-.chart-row { margin-bottom: 20px;
-  .chart-card {
-    .card-header { display: flex; justify-content: space-between; align-items: center; padding: 0 10px; span { font-size: 16px; font-weight: 500; } }
-    .chart-container { height: 350px; width: 100%; padding: 10px; }
   }
 }
 

@@ -191,6 +191,9 @@ class ProgressAggregator:
 
         modules = [cls._module_entry(m, year) for m in MODULE_LIST]
         total = sum(m['points'] for m in modules)
+        # 注入 percent（该模块占总进度的百分比）
+        for m in modules:
+            m['percent'] = round(m['points'] / total * 100, 1) if total > 0 else 0
         monthly_target = round(YEARLY_TARGET * MONTHLY_TARGET_RATIO, 2)
 
         return {
@@ -251,6 +254,11 @@ class ProgressAggregator:
     # ── 公开: 雷达图 ───────────────────────────────────────
 
     @classmethod
+    def _get_radar_config(cls):
+        from apps.summary.models import SevenDimConfig
+        return SevenDimConfig.get_active()
+
+    @classmethod
     def get_radar(cls, year: int | None = None) -> dict:
         if year is None:
             year = datetime.now().year
@@ -258,11 +266,13 @@ class ProgressAggregator:
         indicators = []
         series_values = []
 
+        cfg = cls._get_radar_config()
         for mod in MODULE_LIST:
             raw = cls._get_raw_value(mod, year)
             value = round(cls._raw_to_points(mod, raw), 2)
             meta = MODULE_META[mod]
-            max_val = RADAR_MAX.get(mod, 100)
+            # 优先读自定义配置，未配置则回退 RADAR_MAX 默认值
+            max_val = getattr(cfg, f'{mod}_max', None) or RADAR_MAX.get(mod, 100)
             indicators.append({
                 'name': meta['label'],
                 'max': max_val,

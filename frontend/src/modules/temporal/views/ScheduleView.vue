@@ -6,48 +6,122 @@
         <el-tag size="small" type="info" effect="plain">收件箱 · 里程碑 日历总览</el-tag>
       </div>
       <div class="header-actions">
+        <el-button size="small" :type="viewMode === 'month' ? 'primary' : ''" @click="viewMode = 'month'">月</el-button>
+        <el-button size="small" :type="viewMode === 'list' ? 'primary' : ''" @click="viewMode = 'list'">列表</el-button>
         <el-button size="small" @click="fetchAll">刷新</el-button>
       </div>
     </div>
 
+    <!-- 月份导航（钉钉式：上/下月 + 今天 + 年月标题） -->
+    <div class="cal-toolbar">
+      <div class="toolbar-left">
+        <el-button-group>
+          <el-button size="small" @click="changeMonth(-1)">
+            <el-icon><ArrowLeft /></el-icon>
+          </el-button>
+          <el-button size="small" @click="changeMonth(1)">
+            <el-icon><ArrowRight /></el-icon>
+          </el-button>
+        </el-button-group>
+        <span class="toolbar-title">{{ calendarDate.getFullYear() }}年{{ calendarDate.getMonth() + 1 }}月</span>
+      </div>
+      <el-button size="small" @click="goToday">今天</el-button>
+    </div>
+
     <el-card shadow="never" class="calendar-card">
-      <el-calendar v-model="calendarDate" @current-date-change="handleMonthChange">
-        <template #date-cell="{ data }">
-          <div class="date-cell" :class="{ 'is-selected': selectedDate === data.day }" @click="selectDate(data.day)">
-            <div class="date-number">{{ data.day.split('-')[2] }}</div>
-            <div class="cell-items">
-              <div
-                v-for="e in displayEvents(data.day)"
-                :key="e.id"
-                class="cell-item"
-                :class="{ done: e.status === 'done' }"
-                :title="e.title"
+      <!-- 月视图：自建，每行独立高度 -->
+      <CalendarMonthView
+        v-if="viewMode === 'month'"
+        :events="allEvents"
+        :year="calendarDate.getFullYear()"
+        :month="calendarDate.getMonth() + 1"
+        :selected-date="selectedDate"
+        :expanded-days="expandedDays"
+        @select-date="selectDate"
+        @toggle-expand="toggleDay"
+        @click-event="handleEventClick"
+      />
+
+      <!-- 列表视图 -->
+      <CalendarListView
+        v-else
+        :events="allEvents"
+        :year="calendarDate.getFullYear()"
+        :month="calendarDate.getMonth() + 1"
+        @select-date="selectDate"
+        @click-event="handleEventClick"
+      />
+    </el-card>
+
+    <!-- 事项详情抽屉 -->
+    <el-drawer v-model="drawerVisible" :title="detailTitle" size="420px">
+      <div v-if="detailEvent" class="event-detail">
+        <div class="detail-meta">
+          <el-tag :type="detailEvent.source === 'inbox' ? 'warning' : 'primary'" size="small">
+            {{ detailEvent.source === 'inbox' ? '📥 收件箱待办' : '🎯 里程碑' }}
+          </el-tag>
+          <el-tag :type="detailEvent.status === 'done' ? 'success' : 'danger'" size="small" effect="plain">
+            {{ detailEvent.status === 'done' ? '已完成' : '待完成' }}
+          </el-tag>
+        </div>
+
+        <el-descriptions :column="1" border size="small" class="detail-desc">
+          <el-descriptions-item label="日期">{{ detailEvent.date }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailEvent.goalTitle" label="所属目标">{{ detailEvent.goalTitle }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailEvent.category" label="类别">{{ detailEvent.category }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailEvent.tags" label="标签">{{ detailEvent.tags }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailEvent.description" label="描述">
+            <div class="desc-text">{{ detailEvent.description }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detailEvent.completedNote" label="完成备注">
+            <div class="desc-text">{{ detailEvent.completedNote }}</div>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 详情模式：完成按钮 -->
+        <template v-if="detailEvent.status !== 'done' && !completing">
+          <el-button
+            type="success"
+            class="complete-btn"
+            @click="enterCompleteMode"
+          >
+            ✓ 完成{{ detailEvent.source === 'inbox' ? '待办' : '里程碑' }}
+          </el-button>
+        </template>
+
+        <!-- 录入模式：完成备注 + 确认 -->
+        <template v-else-if="detailEvent.status !== 'done' && completing">
+          <div class="completion-form">
+            <div class="completion-title">记录完成心得</div>
+            <el-input
+              v-model="completionNote"
+              type="textarea"
+              :rows="5"
+              :placeholder="detailEvent.source === 'inbox'
+                ? '做完有什么感想？耗时多久？留个记录日后可回顾'
+                : '学习内容、心得、答题情况… 写下来才算真正掌握'"
+              maxlength="500"
+              show-word-limit
+            />
+            <div class="completion-actions">
+              <el-button @click="cancelComplete">取消</el-button>
+              <el-button
+                type="success"
+                :loading="submitting"
+                @click="submitComplete"
               >
-                <span class="cell-dot" :class="e.status" />
-                <span class="cell-title">{{ smartTruncate(e.title, 10) }}</span>
-              </div>
-              <div
-                v-if="getEventsForDay(data.day).length > 3 && !expandedDays[data.day]"
-                class="cell-more"
-                @click.stop="toggleDay(data.day)"
-              >
-                +{{ getEventsForDay(data.day).length - 3 }} 项
-              </div>
-              <div
-                v-else-if="expandedDays[data.day]"
-                class="cell-more"
-                @click.stop="toggleDay(data.day)"
-              >
-                收起
-              </div>
+                ✓ 确认完成
+              </el-button>
             </div>
           </div>
         </template>
-      </el-calendar>
-    </el-card>
+
+        <el-alert v-else type="success" :closable="false" show-icon title="该事项已完成" />
+      </div>
+    </el-drawer>
 
     <!-- 选中日期的事件列表 -->
-    <el-card v-if="dayEvents.length" shadow="hover" class="event-detail-card">
+    <el-card v-if="selectedDate && dayEvents.length" shadow="hover" class="event-detail-card">
       <template #header>
         <div class="card-header">
           <span class="card-title">{{ selectedDateLabel }}</span>
@@ -57,7 +131,7 @@
       <div class="event-list">
         <template v-for="(e, idx) in displayList(selectedDate, dayEvents)" :key="e.id">
           <div class="event-item" :class="{ 'hidden-item': idx >= 3 && !expandedDays[selectedDate] }">
-            <span class="status-dot" :class="e.status" />
+            <span class="status-dot" :class="{ done: e.status === 'done' }" />
             <el-tag :type="e.source === 'inbox' ? 'warning' : 'primary'" size="small">
               {{ e.source === 'inbox' ? '📥' : '🎯' }}
             </el-tag>
@@ -83,23 +157,24 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import request from '@/shared/utils/request'
-import { smartTruncate } from '@/shared/utils/text'
-
-interface CalendarEvent {
-  id: string
-  title: string
-  date: string
-  status: 'todo' | 'done'
-  source: 'inbox' | 'milestone'
-  sourceLabel: string
-}
+import CalendarMonthView from './components/CalendarMonthView.vue'
+import CalendarListView from './components/CalendarListView.vue'
+import type { CalendarEvent } from '../types/calendar'
 
 const calendarDate = ref(new Date())
 const selectedDate = ref('')
 const inboxItems = ref<any[]>([])
 const milestones = ref<any[]>([])
 const expandedDays = ref<Record<string, boolean>>({})
+const viewMode = ref<'month' | 'list'>('month')
+const drawerVisible = ref(false)
+const detailEvent = ref<CalendarEvent | null>(null)
+const completing = ref(false)        // 是否在录入完成模式
+const submitting = ref(false)         // 提交中
+const completionNote = ref('')
 
 const allEvents = computed<CalendarEvent[]>(() => {
   const result: CalendarEvent[] = []
@@ -113,6 +188,11 @@ const allEvents = computed<CalendarEvent[]>(() => {
         status: i.status === 'done' ? 'done' : 'todo',
         source: 'inbox',
         sourceLabel: i.category_display || '收件箱',
+        description: i.description || '',
+        category: i.category_display || i.category || '',
+        tags: i.tags || '',
+        remindAt: i.remind_at || '',
+        rawId: i.id,
       })
     }
   }
@@ -127,6 +207,11 @@ const allEvents = computed<CalendarEvent[]>(() => {
         status: m.status === 'completed' ? 'done' : 'todo',
         source: 'milestone',
         sourceLabel: m.goal_title || '目标',
+        description: m.description || '',
+        completedNote: m.completed_note || '',
+        goalTitle: m.goal_title || '',
+        goalDeadline: m.goal_deadline || '',
+        rawId: m.id,
       })
     }
   }
@@ -145,22 +230,8 @@ const selectedDateLabel = computed(() => {
   return `${parseInt(d[1])}月${parseInt(d[2])}日`
 })
 
-function getEventsForDay(day: string) {
-  return allEvents.value.filter(e => e.date === day)
-}
-
-function displayEvents(day: string) {
-  const items = getEventsForDay(day)
-  if (items.length > 3 && !expandedDays.value[day]) {
-    return items.slice(0, 3)
-  }
-  return items
-}
-
 function displayList(day: string, items: CalendarEvent[]) {
-  if (items.length > 3 && !expandedDays.value[day]) {
-    return items.slice(0, 3)
-  }
+  if (items.length > 3 && !expandedDays.value[day]) return items.slice(0, 3)
   return items
 }
 
@@ -172,10 +243,65 @@ function selectDate(day: string) {
   selectedDate.value = day
 }
 
-function handleMonthChange(date: Date) {
-  calendarDate.value = date
+const detailTitle = computed(() => detailEvent.value?.title || '事项详情')
+
+function handleEventClick(ev: CalendarEvent) {
+  detailEvent.value = ev
+  drawerVisible.value = true
+}
+
+function enterCompleteMode() {
+  completionNote.value = detailEvent.value?.completedNote || ''
+  completing.value = true
+}
+
+function cancelComplete() {
+  completing.value = false
+  completionNote.value = ''
+}
+
+async function submitComplete() {
+  const ev = detailEvent.value
+  if (!ev || ev.status === 'done') return
+  submitting.value = true
+  try {
+    const note = completionNote.value.trim()
+    if (ev.source === 'milestone') {
+      await request({
+        url: `/goals/milestones/${ev.rawId}/`,
+        method: 'patch',
+        data: { status: 'completed', completed_note: note },
+      })
+    } else {
+      await request({
+        url: `/inbox/items/${ev.rawId}/`,
+        method: 'patch',
+        data: { status: 'done', completion_note: note },
+      })
+    }
+    ElMessage.success('已完成 ✓')
+    ev.status = 'done'
+    if (note) ev.completedNote = note
+    completing.value = false
+    completionNote.value = ''
+    fetchEvents(calendarDate.value)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function changeMonth(delta: number) {
+  calendarDate.value = new Date(calendarDate.value.getFullYear(), calendarDate.value.getMonth() + delta, 1)
   selectedDate.value = ''
-  fetchEvents(date)
+  fetchEvents(calendarDate.value)
+}
+
+function goToday() {
+  calendarDate.value = new Date()
+  selectedDate.value = ''
+  fetchEvents(calendarDate.value)
 }
 
 async function fetchEvents(date: Date) {
@@ -216,7 +342,6 @@ onMounted(() => {
   justify-content: space-between;
   margin-bottom: 8px;
 }
-
 .header-left {
   display: flex;
   align-items: center;
@@ -228,11 +353,27 @@ onMounted(() => {
   font-weight: 600;
   color: #1F2937;
 }
-
 .header-actions {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.cal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toolbar-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1F2937;
 }
 
 .calendar-card {
@@ -240,131 +381,7 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 .calendar-card :deep(.el-card__body) {
-  padding: 8px !important;
-}
-.calendar-card :deep(.el-calendar) {
-  --el-calendar-border: #E5E7EB;
-  --el-calendar-header-height: 32px;
-  --el-calendar-cell-width: auto;
-}
-.calendar-card :deep(.el-calendar__header) {
-  padding: 4px 0;
-}
-.calendar-card :deep(.el-calendar__header .el-calendar__title) {
-  font-size: 14px;
-}
-.calendar-card :deep(.el-calendar__header .el-button-group .el-button) {
-  padding: 4px 8px;
-  font-size: 12px;
-}
-.calendar-card :deep(.el-calendar__body) {
-  padding: 0;
-}
-.calendar-card :deep(.el-calendar-table) {
-  width: 100%;
-  table-layout: fixed;
-}
-.calendar-card :deep(.el-calendar-table thead th) {
-  padding: 4px 0;
-  font-size: 12px;
-}
-.calendar-card :deep(.el-calendar-table td) {
-  padding: 2px;
-  vertical-align: top;
-  border: 1px solid #eee;
-}
-.calendar-card :deep(.el-calendar-table td.is-selected) {
-  background: #EFF6FF;
-}
-.calendar-card :deep(.el-calendar-table td.is-today) {
-  background: #FEFCE8;
-}
-.calendar-card :deep(.el-calendar-table .el-calendar-day) {
-  min-height: 80px;
-  padding: 4px;
-  box-sizing: border-box;
-}
-
-.date-cell {
-  cursor: pointer;
-  min-height: 60px;
-  padding: 2px;
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-.date-cell:hover {
-  background: #F3F4F6;
-}
-.date-cell.is-selected {
-  background: #DBEAFE;
-}
-
-.date-number {
-  font-size: 13px;
-  font-weight: 500;
-  color: #374151;
-  width: 28px;
-  height: 28px;
-  line-height: 28px;
-  text-align: center;
-  margin: 2px;
-}
-
-.cell-items {
-  margin-top: 2px;
-  gap: 2px;
-}
-
-.cell-item {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 0;
-  font-size: 11px;
-  line-height: 1.2;
-  border-radius: 3px;
-  overflow: hidden;
-}
-.cell-item.done .cell-title {
-  text-decoration: line-through;
-  color: #9CA3AF;
-}
-
-.cell-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.cell-dot.todo {
-  background: #f56c6c;
-}
-.cell-dot.done {
-  background: #67c23a;
-}
-.cell-dot.milestone {
-  background: #e6a23c;
-}
-
-.cell-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #374151;
-}
-
-.cell-more {
-  font-size: 10px;
-  color: #909399;
-  cursor: pointer;
-  padding: 1px 4px;
-  border-radius: 3px;
-  text-align: center;
-  margin-top: 1px;
-}
-.cell-more:hover {
-  background: #F3F4F6;
-  color: #409EFF;
+  padding: 10px !important;
 }
 
 .event-detail-card {
@@ -372,24 +389,20 @@ onMounted(() => {
   margin-top: 8px;
   margin-bottom: 8px;
 }
-
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-
 .card-title {
   font-size: 14px;
   font-weight: 600;
   color: #1F2937;
 }
-
 .event-list {
   display: flex;
   flex-direction: column;
 }
-
 .event-item {
   display: flex;
   align-items: center;
@@ -397,26 +410,15 @@ onMounted(() => {
   padding: 4px 0;
   border-bottom: 1px solid #f5f5f5;
 }
-.event-item:last-child {
-  border-bottom: none;
-}
-
+.event-item:last-child { border-bottom: none; }
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-}
-.status-dot.todo {
   background: #f56c6c;
 }
-.status-dot.done {
-  background: #67c23a;
-}
-.status-dot.milestone {
-  background: #e6a23c;
-}
-
+.status-dot.done { background: #67c23a; }
 .event-title {
   flex: 1;
   font-size: 14px;
@@ -429,27 +431,64 @@ onMounted(() => {
   color: #999;
   text-decoration: line-through;
 }
-
 .event-date {
   margin-left: auto;
   font-size: 12px;
   color: #999;
 }
-
 .collapse-toggle {
   text-align: center;
   padding: 8px 0 4px;
   border-top: 1px solid #f0f0f0;
   margin-top: 4px;
 }
-.collapse-toggle .el-link {
-  font-size: 12px;
-}
-
+.collapse-toggle .el-link { font-size: 12px; }
 .empty-state {
   text-align: center;
   padding: 24px;
   color: #9CA3AF;
   font-size: 13px;
+}
+.event-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.detail-meta {
+  display: flex;
+  gap: 8px;
+}
+.detail-desc :deep(.el-descriptions__label) {
+  width: 90px;
+  color: #909399;
+}
+.desc-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #374151;
+  line-height: 1.6;
+}
+.complete-btn {
+  width: 100%;
+  margin-top: 6px;
+}
+.completion-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+.completion-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1F2937;
+}
+.completion-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

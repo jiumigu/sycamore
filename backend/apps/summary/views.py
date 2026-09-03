@@ -11,6 +11,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .constants import MODULE_LIST
+from .models import SevenDimConfig
+from .serializers import SevenDimConfigSerializer
 from .services import BodyMindCorrelationService, ProgressAggregator, QuarterlyWorkbenchService
 
 
@@ -57,6 +59,66 @@ class SummaryViewSet(viewsets.ViewSet):
             year = int(year)
         data = ProgressAggregator.get_radar(year)
         return Response(data)
+
+    CONFIG_MAX_FIELDS = [
+        'wealth_max', 'health_max', 'times_max',
+        'words_max', 'sugar_max', 'travel_max', 'book_max',
+    ]
+
+    @action(detail=False, methods=['get'])
+    def yearly_detail(self, request):
+        """年度明细：每年一行（总进度/目标/7 模块/达成率）"""
+        years = ProgressAggregator.get_available_years()
+        rows = []
+        for y in years:
+            data = ProgressAggregator.get_yearly_overview(y)
+            mod_map = {m['module']: m['points'] for m in data['modules']}
+            rows.append({
+                'year': data['year'],
+                'total_points': data['total_points'],
+                'yearly_target': data['yearly_target'],
+                'progress_percent': data['progress_percent'],
+                'wealth': mod_map.get('wealth', 0),
+                'health': mod_map.get('health', 0),
+                'times': mod_map.get('times', 0),
+                'book': mod_map.get('book', 0),
+                'sugar': mod_map.get('sugar', 0),
+                'travel': mod_map.get('travel', 0),
+                'words': mod_map.get('words', 0),
+            })
+        return Response({'years': rows})
+
+    @action(detail=False, methods=['get'])
+    def radar_config(self, request):
+        """七维平衡封顶配置：当前生效的一条"""
+        cfg = SevenDimConfig.get_active()
+        return Response(SevenDimConfigSerializer(cfg).data)
+
+    @action(detail=False, methods=['get'])
+    def radar_config_history(self, request):
+        """七维平衡封顶配置：历史版本列表（倒序）"""
+        qs = SevenDimConfig.objects.all()[:30]
+        return Response(SevenDimConfigSerializer(qs, many=True).data)
+
+    @radar_config.mapping.post
+    @radar_config.mapping.put
+    @radar_config.mapping.patch
+    def update_radar_config(self, request):
+        """七维平衡封顶配置：新增一个版本并生效（未传字段沿用当前值，旧版本自动失效）"""
+        current = SevenDimConfig.get_active()
+        data = {
+            f: request.data.get(f, getattr(current, f))
+            for f in self.CONFIG_MAX_FIELDS
+        }
+        ser = SevenDimConfigSerializer(data=data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        note = request.data.get('note', '')
+        new = SevenDimConfig.apply_config(
+            {f: ser.validated_data[f] for f in self.CONFIG_MAX_FIELDS},
+            note,
+        )
+        return Response(SevenDimConfigSerializer(new).data)
 
     @action(detail=False, methods=['get'])
     def years(self, request):

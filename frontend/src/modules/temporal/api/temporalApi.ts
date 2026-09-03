@@ -30,6 +30,13 @@ export function getWeekCount() {
   return request<{ count: number }>({ url: '/temporal/oneday/week_count/', method: 'get' })
 }
 
+export function getWeekStats() {
+  return request<{ count: number; step_count: number; weekly_expense: number }>({
+    url: '/temporal/oneday/week_stats/',
+    method: 'get',
+  })
+}
+
 export function bulkDeleteOneDay(ids: number[]) {
   return request({ url: '/temporal/oneday/bulk_delete/', method: 'delete', data: { oids: ids } })
 }
@@ -112,4 +119,12 @@ export function getTaskContrib() {
 
 export function getOnedayContrib() {
   return request({ url: '/temporal/oneday/contrib/', method: 'get' })
+}
+
+export function getTaskDailyDetail(params: { date: string }) {
+  return request<{ date: string; total?: number; items: any[] }>({ url: '/temporal/tasks/daily_detail/', method: 'get', params })
+}
+
+export function getOnedayDailyDetail(params: { date: string }) {
+  return request<{ date: string; total?: number; items: any[] }>({ url: '/temporal/oneday/daily_detail/', method: 'get', params })
 }

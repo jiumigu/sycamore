@@ -25,7 +25,9 @@
             <div class="cells-grid">
               <div v-for="d in yearDays(year)" :key="d.date"
                    class="day-cell"
-                   :style="{ left: d.col * (CELL + GAP) + 'px', top: d.row * (CELL + GAP) + 'px', backgroundColor: dayColor(d.v) }">
+                   :class="{ clickable: d.v !== 0 }"
+                   :style="{ left: d.col * (CELL + GAP) + 'px', top: d.row * (CELL + GAP) + 'px', backgroundColor: dayColor(d.v) }"
+                   @click="d.v !== 0 && emit('cell-click', d.date)">
                 <el-tooltip v-if="d.v !== 0" :content="d.tip" placement="top" :show-after="150">
                   <div class="cell-inner"></div>
                 </el-tooltip>
@@ -53,6 +55,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+
+const emit = defineEmits<{ 'cell-click': [date: string] }>()
 
 const props = defineProps<{
   data: Array<{ date: string; value: number }>
@@ -219,6 +223,14 @@ function dayColor(v: number): string {
   width: 13px; height: 13px;
   border-radius: 2px;
   background-color: #ebedf0;
+}
+.day-cell.clickable {
+  cursor: pointer;
+}
+.day-cell.clickable:hover {
+  outline: 2px solid #2563EB;
+  outline-offset: -1px;
+  z-index: 2;
 }
 .cell-inner { width: 100%; height: 100%; }
 

@@ -8,9 +8,15 @@ class BookService:
     """书籍业务逻辑"""
 
     @staticmethod
-    def get_stats():
-        """获取综合统计数据"""
-        queryset = Book.objects.all()
+    def get_stats(year=None):
+        """获取综合统计数据
+
+        year 非空时按记录年份(years)限定统计范围（卡片计数、类型/状态等分布均基于该年）；
+        年度趋势 year_stats 恒用全量，保证跨年柱状图不失真；
+        month_count/year_count 恒为「当前自然月/年」真实口径，不随 year 变化。
+        """
+        base_qs = Book.objects.all()
+        queryset = base_qs.filter(years=year) if year else base_qs
 
         total_count = queryset.count()
         completed_count = queryset.filter(status='已完成').count()
@@ -19,8 +25,8 @@ class BookService:
         planned_count = queryset.filter(status='计划阅读').count()
 
         now = timezone.now()
-        month_count = queryset.filter(readDate__year=now.year, readDate__month=now.month).count()
-        year_count = queryset.filter(readDate__year=now.year).count()
+        month_count = base_qs.filter(readDate__year=now.year, readDate__month=now.month).count()
+        year_count = base_qs.filter(readDate__year=now.year).count()
 
         avg_recommend = queryset.aggregate(avg=Avg('recommend'))['avg'] or 0
 
@@ -37,7 +43,7 @@ class BookService:
         )
 
         year_stats = list(
-            queryset.values('years')
+            base_qs.values('years')
             .annotate(count=Count('bid'))
             .order_by('-years')
         )

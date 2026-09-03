@@ -22,9 +22,19 @@
         :title="title"
         :unit-label="unitLabel"
         :positive-negative="posNeg"
+        @cell-click="onCellClick"
       />
       <el-empty v-else-if="!loading" description="暂无数据" />
     </el-card>
+
+    <DailyDetailDialog
+      v-model:visible="detailVisible"
+      :title="`${detailDate} 步数`"
+      :data="detailItems"
+      :columns="detailColumns"
+      :loading="detailLoading"
+      :summary="detailSummary"
+    />
   </div>
 </template>
 
@@ -33,6 +43,8 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Refresh } from '@element-plus/icons-vue'
 import ContributionGraph from '@/shared/components/ContributionGraph.vue'
+import DailyDetailDialog from '@/shared/components/DailyDetailDialog.vue'
+import { getStepDailyDetail } from '@/modules/health/api/healthApi'
 import * as healthApi from '@/modules/health/api/healthApi'
 
 const title = '健康贡献图'
@@ -42,6 +54,38 @@ const graphData = ref<Array<{ date: string; value: number }>>([])
 const minYear = ref(2020)
 const maxYear = ref(new Date().getFullYear())
 const loading = ref(false)
+
+// ─── 每日明细弹窗 ───
+const detailVisible = ref(false)
+const detailDate = ref('')
+const detailItems = ref<any[]>([])
+const detailLoading = ref(false)
+const detailSummary = ref('')
+const detailColumns = [
+  { prop: 'time', label: '时间', width: 130, formatter: (v: string) => v ? v.slice(0, 16) : '' },
+  { prop: 'htype', label: '类型', width: 100 },
+  { prop: 'steps', label: '步数', width: 100, align: 'right' as const },
+  { prop: 'total', label: '折算', width: 100, align: 'right' as const },
+  { prop: 'remark', label: '备注', minWidth: 180 },
+]
+
+async function onCellClick(date: string) {
+  detailDate.value = date
+  detailVisible.value = true
+  detailItems.value = []
+  detailSummary.value = ''
+  detailLoading.value = true
+  try {
+    const res = await getStepDailyDetail({ date })
+    const data: any = res.data
+    detailItems.value = data.items || []
+    detailSummary.value = data.items?.length ? `共 ${data.items.length} 条，折算 ${data.total} 步` : ''
+  } catch {
+    ElMessage.error('获取明细失败')
+  } finally {
+    detailLoading.value = false
+  }
+}
 
 const CACHE_KEY = 'contrib_cache_HealthContribView'
 

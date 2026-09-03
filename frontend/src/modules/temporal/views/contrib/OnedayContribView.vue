@@ -22,9 +22,18 @@
         :title="title"
         :unit-label="unitLabel"
         :positive-negative="posNeg"
+        @cell-click="onCellClick"
       />
       <el-empty v-else-if="!loading" description="暂无数据" />
     </el-card>
+
+    <DailyDetailDialog
+      v-model:visible="detailVisible"
+      :title="`${detailDate} 日记`"
+      :data="detailItems"
+      :columns="detailColumns"
+      :loading="detailLoading"
+    />
   </div>
 </template>
 
@@ -33,6 +42,8 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Refresh } from '@element-plus/icons-vue'
 import ContributionGraph from '@/shared/components/ContributionGraph.vue'
+import DailyDetailDialog from '@/shared/components/DailyDetailDialog.vue'
+import { getOnedayDailyDetail } from '@/modules/temporal/api/temporalApi'
 import * as temporalApi from '@/modules/temporal/api/temporalApi'
 
 const title = '日记流贡献图'
@@ -42,6 +53,35 @@ const graphData = ref<Array<{ date: string; value: number }>>([])
 const minYear = ref(2020)
 const maxYear = ref(new Date().getFullYear())
 const loading = ref(false)
+
+// ─── 每日明细弹窗 ───
+const detailVisible = ref(false)
+const detailDate = ref('')
+const detailItems = ref<any[]>([])
+const detailLoading = ref(false)
+const detailColumns = [
+  { prop: 'title', label: '主题', minWidth: 200 },
+  { prop: 'otype', label: '类型', width: 100 },
+  { prop: 'total', label: '总字数', width: 100, align: 'right' as const },
+  { prop: 'flag', label: '标签', minWidth: 100 },
+  { prop: 'remark', label: '备注', minWidth: 180 },
+]
+
+async function onCellClick(date: string) {
+  detailDate.value = date
+  detailVisible.value = true
+  detailItems.value = []
+  detailLoading.value = true
+  try {
+    const res = await getOnedayDailyDetail({ date })
+    const data: any = res.data
+    detailItems.value = data.items || []
+  } catch {
+    ElMessage.error('获取明细失败')
+  } finally {
+    detailLoading.value = false
+  }
+}
 
 const CACHE_KEY = 'contrib_cache_OnedayContribView'
 

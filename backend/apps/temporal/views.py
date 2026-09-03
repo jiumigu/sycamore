@@ -69,15 +69,50 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         date_from = params.get('date_from')
         if date_from:
             # datetime 区间直接比较（规避 __date 触发 CONVERT_TZ 时区转换返回 NULL）
-            qs = qs.filter(start_time__gte=datetime.combine(datetime.strptime(date_from, '%Y-%m-%d').date(), datetime.min.time()))
+            # make_aware：历史数据为本地时间，避免 naive datetime 警告
+            qs = qs.filter(start_time__gte=timezone.make_aware(
+                datetime.combine(datetime.strptime(date_from, '%Y-%m-%d').date(), datetime.min.time())))
 
         date_to = params.get('date_to')
         if date_to:
-            qs = qs.filter(start_time__lte=datetime.combine(datetime.strptime(date_to, '%Y-%m-%d').date(), datetime.max.time()))
+            qs = qs.filter(start_time__lte=timezone.make_aware(
+                datetime.combine(datetime.strptime(date_to, '%Y-%m-%d').date(), datetime.max.time())))
 
         return qs
 
     @action(detail=False, methods=['get'])
+    @action(detail=False, methods=["get"])
+    def daily_detail(self, request):
+        # 每日明细：按日期查当日所有时间任务
+        from datetime import datetime
+        from django.utils import timezone
+
+        date_str = request.query_params.get('date')
+        if not date_str:
+            return Response({'error': 'date 参数必填'}, status=400)
+        try:
+            d = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'error': 'date 格式 YYYY-MM-DD'}, status=400)
+        ws = timezone.make_aware(datetime.combine(d, datetime.min.time()))
+        we = timezone.make_aware(datetime.combine(d, datetime.max.time()))
+        qs = TemporalTask.objects.filter(start_time__gte=ws, start_time__lte=we).order_by('start_time')
+        items = [{
+            'id': t.id,
+            'start_time': t.start_time.isoformat() if t.start_time else None,
+            'task_name': t.task_name,
+            'category_level1': t.category_level1,
+            'category_level2': t.category_level2 or '',
+            'duration_hours': round(t.duration_hours or 0, 2),
+            'notes': t.notes or '',
+        } for t in qs]
+        return Response({
+            'date': date_str,
+            'total': round(sum(x['duration_hours'] for x in items), 2),
+            'items': items,
+        })
+
+    @action(detail=False, methods=["get"])
     def contrib(self, request):
         """贡献图：单日持续小时数聚合"""
         rows = list(
@@ -290,6 +325,28 @@ class OneDayPageViewSet(viewsets.ModelViewSet):
         return qs
 
     @action(detail=False, methods=['get'])
+    def daily_detail(self, request):
+        # 每日明细：按日期查当日日记
+        date_str = request.query_params.get('date')
+        if not date_str:
+            return Response({'error': 'date 参数必填'}, status=400)
+        try:
+            from datetime import datetime
+            d = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'error': 'date 格式 YYYY-MM-DD'}, status=400)
+        qs = OneDayPage.objects.filter(begin_date=d).order_by('begin_date')
+        items = [{
+            'oid': p.oid,
+            'title': p.title or '',
+            'otype': p.otype,
+            'total': p.total or 0,
+            'flag': p.flag or '',
+            'remark': p.remark or '',
+        } for p in qs]
+        return Response({'date': date_str, 'items': items})
+
+    @action(detail=False, methods=["get"])
     def contrib(self, request):
         """贡献图：当日总字数聚合"""
         rows = list(
@@ -355,6 +412,47 @@ class OneDayPageViewSet(viewsets.ModelViewSet):
         ).count()
 
         return Response({'count': count})
+
+    @action(detail=False, methods=['get'])
+    def week_stats(self, request):
+        """仪表盘周统计：本周日记数 / 步数 / 支出"""
+        from datetime import timedelta
+
+        from django.db.models import Sum
+
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        # 时间字段为本地 naive 存储（Asia/Shanghai），用 aware 边界过滤
+        ws = timezone.make_aware(datetime.combine(week_start, datetime.min.time()))
+        we = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+
+        diary = OneDayPage.objects.filter(
+            begin_date__gte=week_start, begin_date__lte=today
+        ).count()
+
+        steps = 0
+        expense = 0.0
+        try:
+            from apps.health.models import HealthRecord
+            steps = HealthRecord.objects.filter(
+                time__gte=ws, time__lte=we
+            ).aggregate(s=Sum('total'))['s'] or 0
+        except Exception:
+            pass
+        try:
+            from apps.wealth.models import WealthBillList
+            exp = WealthBillList.objects.filter(
+                transaction_type='支出', date__gte=ws, date__lte=we
+            ).aggregate(s=Sum('amount'))['s']
+            expense = round(float(exp or 0), 2)
+        except Exception:
+            pass
+
+        return Response({
+            'count': diary,
+            'step_count': round(steps),
+            'weekly_expense': expense,
+        })
 
 
 class OpenLogseqView(APIView):

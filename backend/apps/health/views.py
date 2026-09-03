@@ -51,6 +51,36 @@ class HealthRecordViewSet(viewsets.ModelViewSet):
     # ─── 统计接口 ───
 
     @action(detail=False, methods=['get'])
+    def daily_detail(self, request):
+        # 每日明细：按日期查当日步数记录
+        from datetime import datetime
+        from django.utils import timezone
+
+        date_str = request.query_params.get('date')
+        if not date_str:
+            return Response({'error': 'date 参数必填'}, status=400)
+        try:
+            d = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'error': 'date 格式 YYYY-MM-DD'}, status=400)
+        ws = timezone.make_aware(datetime.combine(d, datetime.min.time()))
+        we = timezone.make_aware(datetime.combine(d, datetime.max.time()))
+        qs = HealthRecord.objects.filter(time__gte=ws, time__lte=we).order_by('time')
+        items = [{
+            'id': r.hid,
+            'time': r.time.isoformat() if r.time else None,
+            'htype': r.htype,
+            'steps': r.steps or 0,
+            'total': r.total or 0,
+            'remark': r.remark or '',
+        } for r in qs]
+        return Response({
+            'date': date_str,
+            'total': round(sum(x['total'] for x in items), 2),
+            'items': items,
+        })
+
+    @action(detail=False, methods=["get"])
     def contrib(self, request):
         """贡献图：单日步数（折算后 total）聚合"""
         rows = list(

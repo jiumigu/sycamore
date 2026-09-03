@@ -192,14 +192,6 @@ export function deleteElectricityRecord(id: number) {
 
 // ────────── 标签管理器 ──────────
 
-export function getTags() {
-  return request({ url: '/toolkit/tags/', method: 'get' })
-}
-
-export function mergeTag(data: { action: string; old_tag: string; new_tag: string }) {
-  return request({ url: '/toolkit/tags/', method: 'post', data })
-}
-
 // ────────── 语言训练 ──────────
 
 export function getLanguageTrainingList(params?: Record<string, unknown>) {

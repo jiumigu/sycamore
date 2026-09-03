@@ -1,92 +1,181 @@
+## [2026-09-03] v3.47.0 — 阅读图形分析独立页
+
+### ✨ 新增
+
+- **阅读图形分析独立页（两图迁出主页面）**：阅读管理的「年度阅读统计」「书籍类型分布」从主页面迁至独立分析页（`/books/charts`，懒加载路由、不进侧边栏菜单）——主页面右上角新增「图形分析」按钮跳转，新页 header 提供「返回阅读管理」回跳；新页面增强：顶部 4 张统计卡片（书籍总数/已完成/平均推荐/阅读中）+ 年份选择器联动 + 点击柱状图柱子联动筛选该年类型分布（选中柱橙色高亮）；后端 `stats` action 支持 `?year=`（按记录年份限定卡片计数与类型分布口径，`year_stats` 年度趋势保持全量、`month_count/year_count` 恒为当前自然月/年，默认不传完全向后兼容）；主页面移除图表区（顶部仅保留统计卡片），echarts 引入/图表渲染/resize 监听等脚本与样式一并清理
+
+## [2026-08-31] v3.46.0 — 全系统时区修正 · 任务清单增强 · 日程完成心得
+
+### ✨ 新增
+
+- **全系统时区体系修复（读取路径 → 时间统计历史数据 → 全库）**：时间追踪贡献图（3-19 显示 20.6h）与任务清单（10.5h）数据对不上，根因历史 `start_time` 为 naive 本地时间（CSV 导入）被 Django 误按 UTC 解释——① 修复读取路径：`DATABASES.TIME_ZONE='Asia/Shanghai'` + MySQL 会话 `time_zone='+08:00'`，清单筛 3-19 与贡献图对齐（`get_queryset` 日期区间改 `timezone.make_aware` 消除警告）；② 修复已存数据：旧导入实际存 UTC naive（-8h），全表 2471 条 `start_time/end_time` +8h 恢复本地时间并重算 `year/mon/day/week/quarter`（跨天任务正确归日），3-19 语言学习 22:50:27 与 CSV 完全一致；③ 修复全局副作用：时区切换使所有「切换前 ORM 写入」的 datetime 显示 -8h——17 个 app 历史 `created_at/updated_at` 及系统生成字段（里程碑奖励发放/收件箱处理/财富快照等）共 86 个 表.列 **3261 行 +8h**（WHERE 值 < 2026-08-31 11:08 切换时刻，避开已正确的新数据）；用户手动/导入字段（账单日期 18-19 点记账高峰、交互时间、步数时间）经小时分布实证为本地存储不受影响；修正前备份 `temporal_tasks_backup_20260831` + 各表 `*_backup_tz_20260831`；验证修正后时间全部合理（里程碑 01:46→09:46、奖励发放 01:38→09:38、语录 02:31→10:31），pytest 97 passed
+- **任务清单增强（筛选栏 + 结束时间列）**：清单弹窗新增筛选栏（日期范围 daterange / 分类下拉 4 项 / 关键词搜索任务名·备注 / 查询 / 重置，复用后端 `date_from/date_to/category/search` 参数，分页自动重置）；表格在开始时间后新增「结束时间」列（`end_time` 截取到分钟，为空显示 `-`，serializer 本就返回该字段）
+- **时间追踪分类直白化（工作/学习/生活/兴趣记录）**：原四分类（生产与创造/维护与秩序/滋养与成长/连接与记录）语义抽象、边界模糊（运动归「秩序」、写作归「滋养」、牛马工作与家务混在「秩序」）——按实际内容重排为 4 个直白分类并同步 2478 条历史数据（牛马工作→工作；语言/代码/资质/阅读→学习；家务/备餐/运动/健康/生活杂事→生活；兴趣/写作/旅游/冥想/ONEDAY/社交→兴趣记录）；后端 `constants.py` 映射表/颜色/图标 + `services.py`（周报「生产占比」→「学习占比」、分类排序）同步；前端筛选下拉/趋势图/分类色标同步；备份 `temporal_tasks_backup_cat_20260831`；验证 stats/balance/trend 全返回新分类、学习占比 10.1%，pytest 97 passed
+- **七维平衡雷达图优化（封顶 + tooltip 单点）**：① 封顶调整：原 `RADAR_MAX` 财富 100、阅读 60 不合理——财富增长有现实天花板、阅读 60 本/年不现实（好书要细嚼慢咽）；改为财富 **10 万元**封顶、阅读 **20 本**封顶，其他 5 维（健康 80/时间 80/小确幸 50/旅行 20/文字 20）保持。② tooltip 修 bug：原 formatter 在 radar item trigger 下 `params.value` 是整个数组被默认 toString 显示成 `33.44,18.34,.../100 点`，且 `params.name` 匹配不上 indicator 用默认 max；`trigger: 'axis'` 方案在 radar 上会崩（ECharts 访问 `params[0].axisValue` 报 TypeError）——最终方案：**关闭 ECharts 自带 tooltip，自定义几何提示**（`RadarChart` 监听 mousemove，按鼠标角度映射最近顶点 index，逆时针取反对齐 ECharts 顶点排列，环形带 0.55~1.15r 判定），hover 任一顶点只显示该维度的「name / 实际值 / max 点」。③ 修 TypeError（`parent.insertBefore` null）：根因父组件 `<RadarChart v-if>` 在 radarData 置 null 时卸载组件，watch+nextTick 的 render 在 DOM 已移除后操作空容器——父组件改 `v-show`（组件常驻）；RadarChart 加固：tip 移出 ECharts 容器、`isConnected` 检查、`getInstanceByDom` 失联自动重建、render/dispose 全 try-catch、resize 防抖 150ms。验证：type-check 0、build ✓
+- **七维平衡封顶可配置（版本化历史）**：封顶值从硬编码 `RADAR_MAX` 改为可持久化配置——`SevenDimConfig` 模型升级为**版本化历史表**（每次保存新增一行，`is_active` 唯一生效、旧版本自动失效并保留，新增 `note` 备注 + `created_at` 配置时间）；`GET/PATCH /api/summary/radar_config/` + `GET /api/summary/radar_config_history/`（历史倒序）；PATCH 未传字段沿用当前值（局部修改友好），min_value≥1 校验；`get_radar` 读生效配置、未配置回退默认；前端「📡 七维平衡」卡片标题右侧「⚙️ 配置」按钮弹窗：7 维度封顶（el-input-number + 单位提示 万元/万步/小时÷30/万字/级/次/本）+ 备注输入 + **历史配置折叠列表**（时间/生效标记/备注/各维度值），保存后即时刷新雷达图
+- **4 个贡献图支持点击查看当日明细**：贡献图方格点击弹出当日明细弹窗——① 后端新增 4 个 `daily_detail` action（temporal tasks 当日任务、temporal oneday 当日日记、health 当日步数、wealth 当日账单），按 `?date=YYYY-MM-DD` 查当天记录并返回汇总字段；② 前端 `ContributionGraph.vue` 给有数据方格加 `@click` + emit `cell-click` + 有值方格加 hover outline 提示；③ 新增共享 `DailyDetailDialog.vue`（el-dialog + el-table，columns 由各视图配置）；④ 4 个 contrib 视图接线（监听 cell-click → 调对应 daily_detail → 弹窗，列分别为：时间/任务/分类/时长/备注、主题/类型/字数/标签、时间/类型/步数、时间/类型/分类/商户/金额/备注，账单加收入/支出汇总）
+- **仪表盘「本周步数/支出」接入真实数据**：诊断发现两卡从上线起就是死卡片（`stepCount`/`weeklyExpense` 只有声明从未赋值，永远显示 `-`）——新增后端 `GET /api/temporal/oneday/week_stats/`（本周日记数/步数/支出一次返回：日记 OneDayPage 计数、步数 HealthRecord.total 求和、支出 WealthBillList 支出金额求和，均按周一起点 aware 边界过滤）；前端 `fetchDiaryCount` 升级为 `fetchWeekStats` 一次拉三值赋值（weeklyExpense 类型 string→number 修正）
+- **汇总总览统计卡片全部移除**：顶部概览 4 卡（🎯 年度总进度 / 📈 目标完成率 / ⏳ 剩余目标 / 📅 月度目标）与「📊 各模块贡献」header 进度徽章及月度明细重复——整体移除统计卡片区（含 stats-row/stat-card/stat-body 等样式）；年度进度信息集中于「各模块贡献」徽章，月度目标在月度明细表可见
+- **移除「标签管理器」模块**：系统预设功能已覆盖其作用，整体下线——前端删 `TagManager.vue`、`/admin/tag-manager` 路由、`menuConfig` 菜单条目（admin_tags）、`toolkitApi` 的 `getTags/mergeTag`；后端删 `TagManagerView`（动态聚合摘录/小确幸/好东西/日记流标签）+ `urls` tags 路由 + 清理仅此处使用的 `SugarRecord/GoodThing/OneDayPage` import（Quote 保留，摘录馆仍用）；无独立数据表，各模块 tags 字段不受影响
+- **日记流支持按日期查询 + 修复标题搜索**：TemporalView 筛选栏新增日期范围选择器（daterange → `date_from/date_to`，后端 `begin_date` 范围过滤早已支持，仅前端接线）；顺带修复标题搜索 bug——原传 `params.title` 后端未处理（SearchFilter 用的是 `?search=`），标题搜索一直无效，改为 `params.search`（搜 title+remark 模糊匹配）；重置按钮一并清日期范围
+- **账单清单备注模糊搜索**：CashFlowView 账单清单筛选栏新增搜索框（备注/商户/分类模糊匹配，回车或清空触发，分页自动重置）——复用后端已有 `SearchFilter` + `search_fields = ['notes','merchant','category']`（`?search=` icontains），前端仅接线 `params.search` + Search 图标；重置按钮一并清空搜索词
+- **各模块贡献百分比数值补全**：各模块贡献条原显示 `42.14 点 (%)` 百分号无数值——后端 `_module_entry` 之前未返回 `percent` 字段，前端 `{{ item.percent }}` 渲染为空。`get_yearly_overview` 注入 percent（该模块占总进度的百分比，如健康 32.7% / 时间投入 26.0% / ... 合计 ≈100%）
+- **仪表盘去重（年度进度 → 各模块贡献聚合）**：仪表盘「📈 年度进度」卡片（进度条 + 各模块条）与汇总总览「📊 各模块贡献」重复——移除 Dashboard.vue 卡片及 `ProgressData`/`progress`/`loadingProgress`/`progressColors`/`fetchProgress` 全套；汇总总览「📊 各模块贡献」卡片 header 右侧新增进度标识徽章（`总进度 / 目标 分 (达成率%)`，灰色圆角底），信息不丢失且位置聚合
+- **时间统计去重 + 汇总新增年度明细**：① TimeStatsView 移除「📅 月度统计」与「📋 年度统计」两个冗余表格（字数统计，信息已由汇总总览月度/年度明细覆盖）——删表格区块 + `monthlyStats`/`yearStats` computed + `month_stats`/`year_stats` 类型定义，后端 stats 接口字段保留（兼容，测试仍引用）；② 汇总总览「📅 月度明细」卡片 header 新增「📆 年度明细」按钮，点击弹窗展示年度表（年份/总进度/目标/财富/健康/时间投入/阅读/小确幸/旅行/文字/达成率，达成率三色标记）——后端新增 `GET /api/summary/yearly_detail/`（遍历可用年份，每行 = get_yearly_overview 的 7 模块 points + 总进度 + 达成率）
+- **日程视图完成时录入心得**：抽屉点「✓ 完成」不再直接提交，而是切换为「录入心得」面板（textarea，500 字上限 + 字数统计，按事项类型给不同 placeholder）→ 填好后「确认完成」才 PATCH（收件箱传 `completion_note`、里程碑传 `completed_note`）；后端放开 `InboxItemSerializer.completion_note` 的 read_only 限制（原本误标导致 PATCH 被拒），端到端验证 PATCH 200 + 字段入库
+
 ## [2026-08-30] v3.45.0 — 贡献图 · 标签检索 · 计算器聚合 · 高频直达
 
 ### ✨ 新增
 
+- **日程视图重构（弃用 el-calendar，自建钉钉式月视图）**：原 `ScheduleView` 用 el-calendar 黑盒组件导致每格等高、无跨天、无农历、无视图切换——重写为自建 `CalendarMonthView`（CSS Grid 7 列 + `grid-auto-rows: minmax(96px, auto)` 每行独立高度、今天蓝圈高亮、农历/节气/节日显示、收件箱橙/里程碑蓝/完成置灰标记、+N 项溢出展开、非当月淡显）+ `CalendarListView`（按月分组列表，钉钉"列表"视图）+ 月份导航（上/下月、今天按钮）；集成 `lunar-typescript` 农历库（验证 8-31「十九」、8-7「立秋」与钉钉截图一致）；数据层保留（收件箱 due_date + 里程碑 target_date），事件模型预留跨天 `endDate` 字段
+
+- **日程视图事项详情 + 一键完成**：点击月视图/列表视图中的任意日程条目弹出详情抽屉——收件箱待办显示描述/类别/标签/提醒时间，里程碑显示描述/所属目标/完成备注；未完成事项可直接点「✓ 完成待办/里程碑」（PATCH `/goals/milestones/<id>/` 或 `/inbox/items/<id>/`），完成后实时置灰 + 刷新当月数据；`CalendarEvent` 类型扩展携带详情字段（description/category/tags/goalTitle/rawId）
+
 - **高频工具直达菜单**：用电记录、摘录管理 加入左侧菜单栏（工具箱分组，`menuConfig.ts` 新增 `toolkit_electricity`/`toolkit_quotes`，path 分别直达 `/toolkit/electricity-record` 与 `/toolkit/quotes`），自动纳入菜单管理（可排序/归档/分组）
+
 - **财务计算器三合一**：固定开销 / 自由支配额度 / 时薪 三个计算器合并为一个「💰 财务计算器」入口（工具箱列表折叠显示，`ToolDetail` 渲染聚合页 `FinanceCalculators.vue` 用 tab 切换）；聚合页默认定位固定开销，子组件去掉各自「返回工具集」按钮（对齐 FixedExpense 规范）；顺带接上此前未被引用的 HourlyWage 组件（原走空表单）
+
 - **移除「图片转GIF」功能**：多轮调试后使用效果不佳（macOS 预览兼容性反复出问题），决定整体下线——删除 img2gif 后端工具、`POST /api/toolkit/execute_files/` 多文件上传执行端点、前端图片上传/参数表单/FormData 执行链路（api.executeToolFiles / store.runToolFormData / ToolDetail 图片分支）、相关测试与 22 条执行记录；`GIF 下载端点 FileDownloadView`（通用）保留；工具箱「GIF 压缩」等其他工具不受影响
+
 - **四大模块贡献图（Roam 风格年度热力图）**：时间/日记流/财富/健康各新增贡献图页面（`/temporal/contrib`、`/temporal/oneday/contrib`、财富 tab「贡献图」、`/health/contrib`），多年 × 12 月网格、色阶深浅=当日活跃度（时间=持续小时数 / 日记流=总字数 / 财富=收支净值红收绿支 / 健康=折算步数），初始年份取各模块最早数据年（时间 2024 / 日记流 2021 / 财富 2014 / 健康 2021）；通用组件 `shared/components/ContributionGraph.vue` + 4 个后端 contrib 聚合端点（单表 GROUP BY + Cast 规避 CONVERT_TZ）；前端 localStorage 按模块+年缓存 30 分钟 + 手动刷新；性能实测 4 查询合计 34ms 不固化（未来 >500 万条再物化）；新增 4 条 contrib pytest（96 passed）
+
 - **日记流标签列 + 标签检索**：列表新增「标签」列（flag 逗号分隔拆分为多个 el-tag 展示）；筛选栏新增标签输入框（如"待回顾"），后端 `flag__icontains` 子串检索支持多标签命中；重置会清空标签筛选；新增 pytest 检索用例（89 passed）
+
 - **里程碑列表智能排序**：未完成（pending/in-progress）排前 → 有截止日期（target_date）排前 → 截止日期最近排最前 → 手排/ID 兜底；`MilestoneViewSet.get_queryset` 用 Case/When 生成排序键；新增 pytest 排序用例（86 passed）
+
 - **待跟进提醒排除同事**：`get_due_reminders` 排除 `identity_then='同事'` 的关系（32 条同事不再提醒）；新增 pytest 用例（97 passed）
 
 ### ✅ 测试
 
 - **测试用例扩充 46 → 85（新增 39 条）**：覆盖资金排程子表、账单清单 CRUD/时间筛选、好朋友跟踪（结束日期/持续天数/12 个月口径）、健康统计 ORM 化、时间追踪任务 CRUD、oneday stats 列名回归、关系统计 ORM 化、summary/goals services 跨类引用回归；conftest 补 7 张外部表镜像（task/oneday/step/relationship/interaction/balance/travel），测试库结构变更需 DROP test_sycamore 重建
+
 - **测试暴露并修复产品 bug**：relation 能量趋势/互动频率按月分组的 `ExtractYear/Month` 受 CONVERT_TZ 影响 period 全为 `0000-00`，改 `TruncMonth(Cast(...))` 修复
 
 ### 🐛 修复
 
 - **里程碑截止日期被编辑清空修复**：`GoalHub.saveMilestoneDate` 中 `editingMilestoneDate.value || null` 在输入为空时把 target_date 置 null——改为未改动不提交（新旧值相同直接关闭），仅显式清空才传 null；新增 3 条「编辑不丢失未改动字段」pytest 回归用例（92 passed）
+
 ## [2026-08-27] v3.44.0 — 菜单管理系统 · 补测试 · 数据库清理
 
 ### ✨ 新增
 
 - **时间追踪任务 + 账单清单 CRUD**：
-  - `temporal_time_atracker_tasks_list`（时间追踪任务）：`TemporalTaskViewSet` 由只读改为完整 ModelViewSet（列表/新增/编辑/删除）；前端「年度周度时间追踪」页新增「📋 任务清单」入口——清单弹窗（任务/开始时间/时长/分类/备注列 + 分页）+ 新增/编辑弹窗（含备注 notes 填写完善）+ 删除确认
-  - `wealth_bill_list`（账单）：新增 `WealthBillList` ORM 模型（managed=False 映射外部遗留表）+ `BillViewSet`（`/api/wealth/bills/` CRUD，按类型/日期范围筛选）+ `BillSerializer`（自动补 created_at/updated_at/year/month/day，备注 notes 可编辑）；前端「现金实时盘点」页新增「📋 账单清单」入口——清单弹窗（日期/类型/金额/分类/商户/备注列 + 类型/日期筛选 + 分页）+ 新增/编辑弹窗（含备注 notes 填写完善）+ 删除确认
-  - ⚠️ 前端 `createBill` 与原有快速记账同名冲突，新增的改名 `createBillRecord`
-  - ⚠️ **拆分遗留跨类引用修复**：services 拆包时漏 import 兄弟类（quarterly_workbench 引用 ProgressAggregator、goal_clone/quick_goal 引用 GoalProgressService）导致季度报告/目标克隆运行时 NameError，已补 import（pytest 未覆盖该类路径，教训：拆包后需显式排查跨类引用）
-- **收件箱批量「转为里程碑」**：整理模式勾选多条待办后新增「🏁 转为里程碑」操作——弹窗选择已有目标，全部条目转入同一目标成为里程碑（标题=各条内容，截止日期/详细描述随各条待办自动带过去，复用转换兜底链）；后端新增 `POST /api/inbox/items/convert-to-milestone/`（body `{item_ids, goal_id}`，返回转换/失败计数），转换后待办标记为已处理
-- **菜单管理系统（可管理动态侧边栏）**：
-  - 后端：`MenuPreference`（`core_menu_preference`：菜单常用/归档 + 排序）+ `MenuGroup`（`core_menu_group`：分组名称/排序/显隐）模型（迁移 0005）；API `GET /api/core/menus/user_prefs/`、`POST /api/core/menus/batch_update/`、`/api/core/menu-groups/` 分组 CRUD（list 惰性 seed 9 个默认分组，新增分组自动排最后）
-  - 前端：`shared/config/menuConfig.ts` 全量 32 个菜单项（key/path/label/icon/group/defaultArchived）；`LayoutSidebar.vue` 重写为菜单配置驱动——常用菜单留在原分组、归档菜单统一收进「归档菜单 (N)」折叠区（系统运维下方，可展开）；`core/admin/views/MenuManager.vue` 菜单管理页（分组重命名/排序/显隐/增删 + 菜单常用/归档开关 + 保存全部，取消归档自动回到原分组，删除分组时组内菜单自动转归档）；路由 `/admin/menus` + 侧边栏「菜单管理」入口
-  - 偏好持久化到数据库，刷新保持；无偏好记录时按 `defaultArchived` 兜底（第一轮归档的 5 模块 + 舞蹈记录默认归档）
-- **补充测试（pytest + pytest-django）**：新增 6 个测试文件 46 个用例，覆盖财富周聚合/现金流推演（日利息复利）/固定开销/CSV 导入去重、里程碑奖励发放与防重复/取消与删除扣回/目标完成奖励金（顺序无关/幂等）、小确幸奖励金额=快乐程度；配套 `pytest.ini`（--no-migrations + 测试库外部表 conftest 建表）
-- **系统体检报告**：`docs/Sycamore-系统体检报告-2026-08-27.docx`（三位一体审计 + 数据取证）
 
+  - `temporal_time_atracker_tasks_list`（时间追踪任务）：`TemporalTaskViewSet` 由只读改为完整 ModelViewSet（列表/新增/编辑/删除）；前端「年度周度时间追踪」页新增「📋 任务清单」入口——清单弹窗（任务/开始时间/时长/分类/备注列 + 分页）+ 新增/编辑弹窗（含备注 notes 填写完善）+ 删除确认
+
+  - `wealth_bill_list`（账单）：新增 `WealthBillList` ORM 模型（managed=False 映射外部遗留表）+ `BillViewSet`（`/api/wealth/bills/` CRUD，按类型/日期范围筛选）+ `BillSerializer`（自动补 created_at/updated_at/year/month/day，备注 notes 可编辑）；前端「现金实时盘点」页新增「📋 账单清单」入口——清单弹窗（日期/类型/金额/分类/商户/备注列 + 类型/日期筛选 + 分页）+ 新增/编辑弹窗（含备注 notes 填写完善）+ 删除确认
+
+  - ⚠️ 前端 `createBill` 与原有快速记账同名冲突，新增的改名 `createBillRecord`
+
+  - ⚠️ **拆分遗留跨类引用修复**：services 拆包时漏 import 兄弟类（quarterly_workbench 引用 ProgressAggregator、goal_clone/quick_goal 引用 GoalProgressService）导致季度报告/目标克隆运行时 NameError，已补 import（pytest 未覆盖该类路径，教训：拆包后需显式排查跨类引用）
+
+- **收件箱批量「转为里程碑」**：整理模式勾选多条待办后新增「🏁 转为里程碑」操作——弹窗选择已有目标，全部条目转入同一目标成为里程碑（标题=各条内容，截止日期/详细描述随各条待办自动带过去，复用转换兜底链）；后端新增 `POST /api/inbox/items/convert-to-milestone/`（body `{item_ids, goal_id}`，返回转换/失败计数），转换后待办标记为已处理
+
+- **菜单管理系统（可管理动态侧边栏）**：
+
+  - 后端：`MenuPreference`（`core_menu_preference`：菜单常用/归档 + 排序）+ `MenuGroup`（`core_menu_group`：分组名称/排序/显隐）模型（迁移 0005）；API `GET /api/core/menus/user_prefs/`、`POST /api/core/menus/batch_update/`、`/api/core/menu-groups/` 分组 CRUD（list 惰性 seed 9 个默认分组，新增分组自动排最后）
+
+  - 前端：`shared/config/menuConfig.ts` 全量 32 个菜单项（key/path/label/icon/group/defaultArchived）；`LayoutSidebar.vue` 重写为菜单配置驱动——常用菜单留在原分组、归档菜单统一收进「归档菜单 (N)」折叠区（系统运维下方，可展开）；`core/admin/views/MenuManager.vue` 菜单管理页（分组重命名/排序/显隐/增删 + 菜单常用/归档开关 + 保存全部，取消归档自动回到原分组，删除分组时组内菜单自动转归档）；路由 `/admin/menus` + 侧边栏「菜单管理」入口
+
+  - 偏好持久化到数据库，刷新保持；无偏好记录时按 `defaultArchived` 兜底（第一轮归档的 5 模块 + 舞蹈记录默认归档）
+
+- **补充测试（pytest + pytest-django）**：新增 6 个测试文件 46 个用例，覆盖财富周聚合/现金流推演（日利息复利）/固定开销/CSV 导入去重、里程碑奖励发放与防重复/取消与删除扣回/目标完成奖励金（顺序无关/幂等）、小确幸奖励金额=快乐程度；配套 `pytest.ini`（--no-migrations + 测试库外部表 conftest 建表）
+
+- **系统体检报告**：`docs/Sycamore-系统体检报告-2026-08-27.docx`（三位一体审计 + 数据取证）
 
 ### 🐛 修复
 
 - **好朋友跟踪：平均周期按最近 12 个月 + 新增本次结束日期**：
+
   - `stats` 接口统一 12 个月口径（按自然月精确回推 `start_date >= since`）：avg_cycle / avg_offset / min_cycle / max_cycle / predicted_next 全部基于最近 12 个月记录
+
   - `MenstrualRecord` 新增 `end_date`（本次结束日期）+ `duration_days`（持续天数，可编辑）字段（迁移 0006）；serializer 自动计算：未显式传 `duration_days` 时由 `end_date - start_date` 得出，用户可手动覆盖
+
   - 前端记录列表新增「结束日期」「持续」两列；表单新增「结束日期」（填后自动算）+「持续天数」（自动计算可手动改）；统计卡「总记录数」改为「持续时间」（`avg_duration` 12 个月口径平均持续天数，恒 12 条无信息量的记录数卡片下线）
+
   - 验证：自动算 5 天 ✓、手动覆盖 2 ✓、12 个月口径 stats ✓、pytest 46 passed、type-check 0 错误
+
 - **侧边栏图标组件未注册**：`LayoutSidebar` 重写后模板直接使用的 `Expand/Fold/Box/ArrowUp/ArrowDown` 未在 script setup 显式导入，导致「归档菜单」折叠箭头与折叠按钮不渲染（Vue warn: Failed to resolve component）
+
 - **收件箱转换异常防护**：单条「转为里程碑」未选目标/目标已失效时原抛 500，现返回友好 400（`转为里程碑需要指定目标ID` / `转换失败，请检查所选目标是否仍有效`）
+
 - **收件箱「转为里程碑」丢失截止日期与详细描述**：转换逻辑改为兜底链——`target_date` 前端显式传的 > 待办 `due_date`；`description` 前端显式传的 > 待办 `description` > 待办 `content`。前端转换弹窗「截止日期」默认预填待办 `due_date`、「详细描述」默认预填待办 `description`（均可手动覆盖）
+
 - **取消完成里程碑未扣减目标累计发奖**：`goals/views.py` 取消完成（completed→pending）分支补 `total_reward_issued - reward_amount`（与 `sync_on_delete` 行为对齐）
+
 - **views「首次完成」路径未增加累计发奖**：与 service 路径行为不一致，补 `total_reward_issued + reward_amount`
+
 - **前端 43 个既有类型错误全部修复**（11 个文件）：BehaviorTrackCard 联合类型判别收窄、SnapshotHistory formatMoney 参数允许 null、CareerEnergyAudit/ModulePoint/TrendChart/InboxStats/MonthlySummaryTab/RelationView/MonthlyReviewView/FoodForm 类型补齐与安全转换
+
 - **temporal/travel 迁移缺陷**：`RunSQL ALTER TABLE`（假设生产外部表已存在）改为 `CREATE TABLE IF NOT EXISTS`（完整结构），全新空库可完整 migrate（73 张表），生产库无副作用
+
 - 清除 BehaviorTrackCard 的 7 条【折叠调试】console.log 残留
 
 ### 🗑️ 数据清理与重构
 
 - **旧库 sycamore_db 彻底移除**：50 张表逐表核实（25 张精确 0 行 + 3 张旧系统表 + 6 张已迁移业务表直接删除；含疑似未迁移数据的表经用户确认后删除），最终 `DROP DATABASE sycamore_db`；数据库仅剩 `sycamore`（唯一业务库）+ `test_sycamore`；备份留存 `db_backups/`（旧库全量 + 备份表 + 迁移前生产库）
+
 - **备份表清理**：删除 `wealth_cash_flow_backup_20260710`（主表已覆盖）；`temporal_..._backup_20260604`（698 条独立历史数据）经用户确认后一并删除
+
 - **迁移文件 squash：86 → 45**：core 4→1、wealth 9→1、goals 15→1、toolkit 18→2（净效果迁移 + replaces，toolkit 0016 RunPython 回填独立保留）；生产库 migrate no-op、全新库可一键部署
+
 - **projects 空壳模块彻底删除**：后端 `apps/projects/`、前端 `modules/projects/`、路由、侧边栏颜色映射、README/CLAUDE.md 文档全清（数据库本无表）
+
 - **侧边栏瘦身（第一轮）**：个人良品率/数字资产/美食地图/旅行计划/成长记录归档弱化，决策日志/自由支配额度/复盘工具箱/语言训练器移出独立入口
 
 ### 🎨 优化
 
 - **拆分大 services.py（summary/health/goals）**：
+
   - `summary/services.py`（814 行）→ `summary/services/` 包 3 文件：progress_aggregator（358）/ quarterly_workbench（369）/ body_mind_correlation（84）
+
   - `health/services.py`（639 行）→ `health/services/` 包 2 文件：health_stats（372）/ weight_service（281）
+
   - `goals/services.py`（476 行）→ `goals/services/` 包 5 文件：goal_progress（88）/ milestone_reward（166）/ quick_goal（138）/ goal_clone（52）/ streak（52）
+
   - 对外接口不变：`__init__.py` 重新导出，views 的 `from .services import X` **零改动**；踩坑：① 拆包后 `from .models` 相对导入层级变深需改 `..models`；② GoalProgressService 交叉引用 MilestoneRewardService 需显式 import；③ 切分时曾误 git checkout 覆盖第二轮 health ORM 化改动，已按 memory 重做并验证（active_days 371/2026-08 7065.0）
+
   - 验证：pytest 46 passed、manage.py check 0、核心 API 冒烟 200（summary/goals/health records/weight）
+
   - ⏳ 其他超 300 行 services 待拆：temporal 457 / travel 384 / toolkit 380 / inbox 330（下轮）
+
 - **技术债清理：原生 SQL + 驼峰字段（第二轮）**：
+
   - **原生 SQL 64 → 33 处**：relation services（stats_service 14 + quality_service 5）与 health services（12）共 31 处全部 ORM 化——统计聚合改 aggregate/annotate、按月分组改 ExtractYear/Month、按日分组改 `Cast('time', DateField())`（规避 USE_TZ 下 `__date` 生成 CONVERT_TZ 而 MySQL 无时区表返回 NULL 的问题）；剩余 27 处为 `wealth_bill_list` 外部遗留表（无 ORM 模型，原生 SQL 是唯一访问方式，已加注释）+ 6 处测试辅助
+
   - **驼峰 db_column 6 处清理**：temporal `beginDate→begin_date`/`updateDate→update_date`（外部表 RunSQL 迁移 0004，索引自动跟随）、wealth `wageIncome→wageincome`/`otherIncome→otherincome`（RunSQL 迁移 0012）、book `createDate→created_at`/`updateDate→updated_at`（迁移 0003）；前端 API 字段均无感（序列化输出字段名不变）；另 4 处 FK 显式 snake_case 声明（file_id/template_id 等）本就合规无需改
+
   - **时间筛选/统计 CONVERT_TZ 全家桶修复**：USE_TZ + MySQL 无时区表导致 DateTimeField 的 `__date`/`__year`/`__month`/`TruncDate` 查询返回 NULL（筛选全空、统计为 0）——账单清单时间筛选、时间追踪任务筛选、小确幸能量统计（周/月/连续打卡）、关系本月互动数 4 处全部改 datetime 区间或 `Cast`；DateField 的 `__year` 无时区正常未动；账单 8 月筛出 25 条、任务 8 月 22 条验证通过
+
   - **驼峰重命名后遗症修复**：`temporal/services.py` 的 `get_stats` 原生 SQL（`DATE_FORMAT(beginDate,...)`）漏改旧列名导致 `/api/temporal/oneday/stats/` 500（Unknown column 'beginDate'），已改 `begin_date`；一次性历史迁移命令（migrate_oneday/migrate_books）保留旧列名（源数据在旧表，不可改）
+
   - 验证：manage.py check 0、pytest 46 passed、前端 type-check 0 错误；备份 `db_backups/backup_before_round2_20260827.sql`
+
   - ⚠️ book `readDate` 为字段名驼峰（非 db_column，API 契约被前端 6 处引用），建议保留或下轮独立评估
+
 - **资金排程 reserve_items JSON 字段拆分（完成两轮）**：
+
   - 第一轮：新增子表 `wealth_fund_schedule_item`（FundScheduleItem，迁移 0010），数据迁移命令 `migrate_json_to_tables`（1 条排程 20 项已迁，幂等），保存写子表 + 读取从子表组装（JSON 保留 deprecated）
+
   - 第二轮：**删除 `FundSchedule.reserve_items` JSON 字段**（迁移 0011，子表为唯一存储）；serializer 的 reserve_items 改为 write_only 入参、读取经 to_representation 从子表组装；service 不再写 JSON
+
   - 验证：创建写子表（201/合计正确）、旧记录子表读 20 项、响应结构不变前端无感；pytest 46 passed、type-check 0 错误
+
   - ⚠️ 任务描述中的 `FundPool.linked_categories` 不适用：FundPool 模型与表已于 0007 迁移删除
+
 - **四张核心表补充业务索引（10 个）**：
+
   - `life_sample.obsidian_path` 唯一索引 `uq_ls_obsidian_path` + 普通索引 `idx_ls_obsidian_path`（Obsidian 同步精确匹配从全表扫描 → const 查找，O(1)）
+
   - `reward_transaction` 4 索引：`idx_reward_type`（按交易类型筛选）、`idx_reward_source`（source_type+source_id 查重）、`idx_reward_created`（时间倒序）、`idx_reward_type_created`（类型+时间复合，最高频）
+
   - `temporal_oneday_page_list` 3 索引（外部表，RunSQL 迁移 0003）：`idx_oneday_date`（beginDate 按日查重）、`idx_oneday_type_date`（otype+日期）、`idx_oneday_year_date`（years+日期）
+
   - `health_step_info` 1 索引（外部表，RunSQL 迁移 0005）：`idx_health_time`（时间序列范围查询）
+
   - EXPLAIN 验证：全部从全表扫描（ALL）变为 Index lookup / Covering index / Index range scan
+
 - **归档体验**：归档页面保留「此模块已归档，随时可重新启用」提示条；侧边栏归档入口统一折叠（菜单系统落地后）
 
 ### 📝 文档
@@ -98,12 +187,15 @@
 ### ✨ 新增
 
 - **目标类型新增「项目目标」**：`Goal.category` 增加 `project`（迁移 0015），目标类型下拉框新增「📋 项目目标」选项
+
 - **收件箱批量导入**：`POST /api/inbox/items/import/`（multipart 文件上传），支持 CSV / Markdown 任务列表 / 纯文本三种格式自动识别；中文列名与中文标签（待办/已完成等）自动归一化为合法 code；导入项自动标记 `source='import'`；前端导入弹窗含格式说明、拖拽上传、预览、CSV 模板下载
+
 - **目标卡片截止倒计时**：`Goal` 列表/详情序列化新增计算字段 `days_remaining`（无截止日期为 null、已过期为 0）；卡片上按剩余天数分级着色（🔥≤3天 / ⚠️≤7天 / 📅N天 / ⏰已过期）
 
 ### 📝 文档
 
 - 更新 `inbox/README.md`（后端 + 前端）：Services 增 `InboxImportService`、API 增 `/items/import/`、Components 增 `ImportDialog.vue`
+
 - 更新 `goals/README.md`（后端 + 前端）：Goal 模型增项目目标、API 增 `days_remaining` 说明、Components 增 `CountdownBadge.vue`；goals 前端 README 全面整理（移除已删除文件 GoalForm/MilestoneForm/ActionList/CloneDialog/output* 的过时条目、修正重复的 Views 节、补全现有文件）
 
 ## [2026-08-23] v3.42.0 — 人生样本 · 同步防重复 + Obsidian 打开修复
@@ -111,7 +203,9 @@
 ### 🐛 修复
 
 - **Obsidian 打开失败（相对路径无法解析）**：`get_obsidian_uri` 原产出 `obsidian://open?path=<相对路径>`，Obsidian 无法解析。现改为拼上仓库绝对路径 → `obsidian://open?path=<绝对路径>`；前端打开时 URI 为空（集成未配置）则友好提示
+
 - **Obsidian 同步重复创建（文件重命名后）**：旧同步仅按 `obsidian_path` 精确匹配，文件重命名后路径已变 → 找不到原索引 → 重复创建。现改为四级匹配：① 路径精确匹配 → 字段变更则更新；② 文件名（不含扩展名）在已关联记录路径里包含匹配（重命名时 frontmatter name 也可能变）→ 迁移路径 + 更新内容；③ 按姓名匹配（文件已重命名或手动索引未关联）→ 迁移/补齐路径 + 更新内容，**保留 status/relevance**；④ 都找不到 → 新建。同步结果新增 `migrated` 列表（name/old_path/new_path），前端同步结果弹窗展示「🔁 迁移 X 个（路径变更）」
+
 - **卡片 Obsidian 路径显示过长**：仅显示文件名（`诗人_李白.md`），不再展示恒定无区分度的 `05_人生样本(LifeSamples)/` 前缀
 
 ### 🗑️ 数据清理
@@ -121,6 +215,7 @@
 ### 📝 文档
 
 - 更新 `lifesample/README.md`（后端）：Services 增 `sync_samples` 四级匹配 + `get_obsidian_uri` 绝对路径说明、API 同步/打开端点更新
+
 - 更新 `lifesample/README.md`（前端）：Types 增 `SyncMigration`、SampleCard 路径显示与打开流程、API 同步/打开说明
 
 ## [2026-08-21] v3.41.0 — 人生样本 · P0 状态与评级
@@ -128,19 +223,25 @@
 ### ✨ 新增
 
 - **状态管理**：`LifeSample.status` ∈ 已收集/已核实/已审阅；`verified_at`/`reviewed_at` 由模型 `save()` 在状态推进时自动补齐（只读，防手填）；同步新建样本默认「已收集」
+
 - **借鉴意义评级**：`LifeSample.relevance` ∈ 高度借鉴/参考/了解 + `relevance_reason` 评级理由（卡片上以 💡 展示）
+
 - **状态/评级徽章组件**：`StatusBadge.vue` / `RelevanceBadge.vue`，样本卡片顶部展示；表单弹窗新增状态/评级 radio 组 + 评级理由输入
+
 - **统计展示**：`/samples/stats/` 返回 `status`/`relevance` 分布 dict；主页新增状态/评级统计卡，**点击即筛选**（再次点击取消，卡片高亮 is-active）
+
 - **列表筛选**：`GET /samples/?status=&relevance=` 支持按状态/评级过滤，前端筛选栏新增「全部状态」「全部评级」下拉
 
 ### 🎨 优化
 
 - **统计区紧凑化**：13 个独立数字精简为一行 5 张核心统计卡（总样本/已收集/已核实/已审阅/已关联）+ 一行评级摘要（🔥高度借鉴/📖参考/👀了解）；点击卡片筛选、再点取消、点「总样本」清除全部筛选；筛选器紧凑化（small + 占位符）
+
 - **移除死代码**：`useSampleStore` 删除不再使用的 `statusCounts`/`relevanceCounts` getter
 
 ### 📝 文档
 
 - 更新 `lifesample/README.md`（后端 + 前端）：Models 增状态/评级字段、API 增筛选与分布统计、Components 增徽章组件、Store 增 statusCounts/relevanceCounts、Types 增 StatusConfig/RelevanceConfig
+
 - 更新 `lifesample/README.md`（前端）：Views 表改为紧凑统计布局描述、Store 移除 statusCounts/relevanceCounts
 
 ## [2026-08-20] v3.40.0 — 人生样本 · Obsidian 双向同步
@@ -148,20 +249,27 @@
 ### ✨ 新增
 
 - **Obsidian 双向同步端点**：`POST /api/lifesample/samples/sync-from-obsidian/` —— 扫描样本文件夹，按 `obsidian_path` 匹配：无记录则创建、字段（name/alias/tags/summary）有变化则更新、未变化则跳过；`transaction.atomic` 包裹，返回 `{success, message, created, updated, skipped, total}`（无文件时 404 + 提示）
+
 - **frontmatter 解析扩展**：`ObsidianService.parse_frontmatter` 现解析 name/alias/era/region/birth_year/death_year/type/tags/summary；扫描结果含 `modified_at`/`exists`；frontmatter `type` 支持中文标签（如「历史人物」→ historical），非法值自动回退
+
 - **前端「同步Obsidian」**：替代原「扫描Obsidian」逐条新建逻辑，改为调用后端同步端点，同步结果弹窗展示 新增/更新/跳过 明细；无变更时仅 toast 提示
+
 - **系统设置 Obsidian 卡增强**：新增「测试连接」（成功 / 空文件夹 / 失败三种状态提示）、当前配置预览（完整路径 code 展示）、快速操作（📂 打开 Obsidian 仓库 / 📁 打开样本文件夹）
+
 - **样本文件夹默认值**：`ObsidianConfig.samples_folder` 默认改为 `05_人生样本(LifeSamples)`（与用户实际仓库一致），迁移 `lifesample.0002`
 
 ### 🐛 修复
 
 - **扫描不到文件（路径重复拼接）**：仓库路径误填为含样本文件夹的完整路径时，`get_samples_folder_path` 会把 `samples_folder` 再拼一次导致路径不存在 → 扫到 0 个。现加防御：`vault` 尾部与 `samples_folder` 同名时直接返回 vault，不再重复拼接（两种配置方式均扫描正常）
+
 - **「测试连接」用旧配置**：扫描读数据库配置，表单里改了但没点「保存配置」时会按旧配置扫描。现「测试连接」先持久化表单当前值再扫描
+
 - **同步跳过「待采集名单」**：`待采集名单.md` 是待采集名单而非样本本体，`sync_samples` 现跳过该文件（`SYNC_SKIP_FILENAMES`），不再被索引为样本
 
 ### 📝 文档
 
 - 更新 `lifesample/README.md`（后端）：Services 增 `parse_frontmatter`/`sync_samples`/`_normalize_type`，API 增同步端点
+
 - 更新 `lifesample/README.md`（前端）：Store 增 `syncing`/`syncFromObsidian`，API 增同步方法，设置卡功能说明
 
 ---
@@ -171,14 +279,19 @@
 ### ✨ 新增
 
 - **人生样本模块**：轻量索引人生参照样本（姓名/别名/类型/标签/一句话简介/Obsidian 路径/我的笔记），深度内容存 Obsidian，Sycamore 只做索引
+
 - **LifeSample + ObsidianConfig 模型 + API**：`life_sample` / `obsidian_config`（单例 id=1）两表；`/api/lifesample/samples/` 提供 CRUD（不分页，?search=&type=&tag= 筛选）+ `tags` + `stats` 端点；`/api/lifesample/obsidian/config/` 配置读写、`/scan/` 扫描样本文件夹（解析 frontmatter name/summary，按 mtime 倒序）、`/open/<path>/` 生成 `obsidian://open` URI
+
 - **Obsidian 扫描自动关联**：`ObsidianService.scan_samples` 扫描仓库样本文件夹，前端「扫描Obsidian」按钮对未关联文件自动创建样本（默认类型「历史人物」）
+
 - **前端页面**：`/lifesample` —— 4 统计卡（总样本/已关联/文件数/待关联）+ 搜索姓名 + 类型/标签筛选 + 卡片墙（卡片可打开编辑弹窗）+ 扫描导入；新建/编辑共用 `SampleForm.vue` 弹窗（标签多选可回车创建）
+
 - **系统设置新增 Obsidian 集成配置卡**：`AdminSettings.vue` 内嵌启用开关 + 仓库路径 + 样本文件夹 + 测试扫描（实时显示扫描文件数）
 
 ### 📝 文档
 
 - 新增 `lifesample/README.md`（后端）：Models / Services / API Endpoints（含不分页与 `open/<path>` 路由说明）
+
 - 新增 `lifesample/README.md`（前端）：Views / Components / Store / API / Types，及系统设置卡片接入方式
 
 ---
@@ -188,13 +301,17 @@
 ### ✨ 新增
 
 - **TravelPlan + TravelPlanItem 模型 + API**：`travel_plan` / `travel_plan_item` 两表，`/api/travel/plans/` 提供完整 CRUD + `items`（子项列表）+ `stats`（计划统计）+ `toggle-item`（勾选/取消完成，自动记录完成时间）。创建时 POST 带 `items` 明细，服务端 `TravelPlanService.recalculate_total` 自动汇总预估总费用
+
 - **明细四类**：美食 / 景点 / 交通 / 住宿，每项含预估费用、完成状态、备注、排序
+
 - **前端页面**：`TravelPlanView.vue`（路由 `/travel/plans`）——4 统计卡（计划总数 / 总预估费用 / 已完成 / 计划中）+ 新建计划弹窗（四类明细编辑器）+ 可展开计划列表（逐项勾选完成划线）
+
 - **侧边栏**：「连接与足迹」分组下新增「旅行计划」入口，旅行记录高亮互斥
 
 ### 📝 文档
 
 - 更新 `travel/README.md`（后端）：Models / Services / API Endpoints 新增旅行计划，前端章节补 `/travel/plans`
+
 - 新增 `travel/README.md`（前端）：补齐旅行模块缺失的前端文档（Views / Components / Store / API / Types & Constants，含旅行计划页与明细四类）
 
 ---
@@ -204,18 +321,23 @@
 ### ✨ 新增
 
 - **用电记录工具**：工具箱新增「⚡ 用电记录」(`electricity-record`)，记录电表读数，服务端自动计算**间隔用电量 / 间隔天数 / 日均用电量 / 本月累计用电量**
+
 - **ElectricityRecord 模型 + API**：`toolkit_electricity_record` 表，`/api/toolkit/electricity-records/` 提供 CRUD——新增后自动算本记录，删除后 `recalculate_all` 自动重算后续记录，历史完整保留
+
 - **计算口径**：间隔用电 = 本次读数 − 上次读数（首条为空）；日均 = 间隔用电 ÷ 间隔天数（`Decimal` 四舍五入，与前端 `Math.round` 一致）；本月累计 = 本次读数 − 月初基准（优先取上月最后一条，无则取本月首条，本月首条为 0）
+
 - **前端页面**：`ElectricityRecord.vue`——4 统计卡（最新读数/本月累计/日均用电/记录次数）+ 新增表单（日期/读数/备注）+ ECharts 趋势图（读数折线 + 间隔用电柱状）+ 历史表格（全字段 + 删除）
 
 ### 🐛 修复
 
 - **工具页面重复「返回工具集」按钮**：`FixedExpense.vue` / `ElectricityRecord.vue` 经兜底路由 `/toolkit/:toolKey` 渲染在 `ToolDetail.vue` 内部（外层已有返回按钮），组件自身又各写一个导致双按钮。删除两个组件内的冗余 back-bar（模板块 + `ArrowLeft` 导入 + `.back-bar` 样式），统一由 `ToolDetail.vue` 提供单个返回按钮，并加注释防回归。独立路由的工具页（时薪/决策/健康自查等）各自保留唯一按钮
+
 - **工具页顶部描述卡片与误导性「历史记录」按钮**：`ToolDetail.vue` 曾为所有工具渲染共享描述卡片（图标/名称/描述 + 「历史记录」按钮跳执行历史页），但数据型工具（固定开销/用电/环境校准/旅行路线等）历史存在各自数据表、不在执行历史页展示，按钮误导。删除该描述卡片（规则：数据型 = 返回 + 内容 + 自己历史列表；执行型 = 返回 + 内容 + 执行历史入口；不允许独立描述卡片），执行型工具（gif-compressor/trad2simp）的「执行历史」入口移至返回栏右侧。为依赖卡片提供标题的 `EnvironmentAudit.vue` / `TravelRoute.vue` / `GifCompressor.vue` 及通用执行表单补自身 `page-title`
 
 ### 📝 文档
 
 - 更新 `toolkit/README.md`（后端）：Models / API Endpoints / 内置工具 三表新增用电记录
+
 - 更新 `toolkit/README.md`（前端）：补齐独立工具组件清单（数据型/执行型分类）+ 工具页面结构约定（数据型返回+内容+自己历史；执行型返回+内容+执行历史入口；不允许独立描述卡片）
 
 ---
@@ -225,13 +347,17 @@
 ### ✨ 新增
 
 - **FundSchedule 模型 + API**：`wealth_fund_schedule` 表（JSON `reserve_items` 预留项 + 服务端 Decimal 权威计算预留合计/剩余），`/api/wealth/fund-schedule/` 提供 list / create / detail / delete（无 update，快照不可变）
+
 - **资金排程看板重构**：`FundScheduleBoard.vue`（替换 AllocationBoard）——手里现金 + 计划名称、硬性承诺/弹性预留可增删、汇总卡（负数红色警示 + 恒等式 `现金 = 预留 + 剩余` 兜底 alert）、历史快照列表（查看/删除）
+
 - **固定开销联动**：「导入固定开销」弹出固定开销历史记录选择弹窗（名称/月开销/日开销/项目数/创建日期 + 选中预览部分项目），可按需选择任意一条导入，按 365 天口径（年周期 ÷12.17）折算月金额导入为硬性承诺，带 `linked_expense_id`
 
 ### 🐛 修复
 
 - **剩余可分配金额不相等 bug**：旧代码 `remainingToAllocate = free_cash - totalAllocated` 对预留合计二次扣减（少算一份）。重构后改为单一派生链 `现金 → 预留合计 → 剩余`，结构性消除该类错误
+
 - **负金额返回 500**：服务层 `ValidationError` 在 `serializer.create()` 内抛出未被 DRF 捕获，改为转 `serializers.ValidationError` 返回 400
+
 - **迁移删除组合唯一索引失败**：MySQL 删除参与唯一索引的列时用剩余列重建索引撞键（Duplicate entry），迁移先 `AlterUniqueTogether` 删索引再删列
 
 ### 🗑️ 删除
@@ -241,6 +367,7 @@
 ### 📝 文档
 
 - 更新 `wealth/README.md`（后端）：FundSchedule 模型/服务/API、快照语义、固定开销 365 天换算
+
 - 更新 `wealth/README.md`（前端）：`FundScheduleBoard.vue` + 资金排程章节
 
 ---
@@ -252,16 +379,23 @@
 ### ✨ 新增
 
 - **资金排程 + 分配计划看板**：新增 `/wealth/fund` 资金排程页面（`AllocationBoard.vue`，替换原 CashFlowBoard）——四张核心卡（手头现金可编辑 / 硬性承诺 / 预留分配 / 自由支配）+ 预留分配计划 + 硬性承诺 + 自由决策记录。核心语义：**分配是计划（预留），不是记录（花费）**，流程 手头现金 → 硬性承诺 → 预留分配 → 自由支配
+
 - **分配模型**：新增 `AllocationCategory` / `AllocationPlan` / `AllocationItem` / `Commitment` / `DecisionLog` 五表。月度计划按 `year_month` 唯一；分配项按 `(plan, category)` 唯一且 `remaining = planned - spent` 自动计算；承诺三态（待付/紧急/已付）+ 来源（账单/收件箱/手动）；决策记录自由支配的打算怎么花
+
 - **分配服务**：`AllocationService`——幂等 `create_plan`（事务内 upsert 分配项保留已花费、重建承诺、剔除未包含项）、`get_plan_detail` 返回全部启用类别作虚拟项（未保存即可编辑）、`calculate_commitments` 经 `wealth_bill_list` 原生 SQL 按 60 天窗口聚合支出账单
+
 - **分配 API**：`AllocationViewSet` 提供 `detail` / `create` / `update-allocations` / `record-spending` / `save-decision` / `categories` 六端点（前缀 `/api/wealth/allocation/`）
+
 - **类别初始化命令**：`manage.py init_allocation_categories` 幂等创建 5 个默认类别（投资 / 日常生活 / 精神愉悦-旅游美食 / 家居装修 / 风险预估-留底钱）
 
 ### 🐛 修复
 
 - **分配计划幂等化**：`create_plan` 由「重复保存产生重复记录」改为 `update_or_create` 分配项（保留已花费）+ 删除重建承诺 + 剔除未包含项，可反复保存
+
 - **detail 端点冲突**：`@action` 方法命名 `detail` 与 DRF 的 `self.detail` 布尔实例属性冲突，抛 `TypeError: 'bool' object is not callable`；方法更名 `get_detail`（`url_path` 不变）
+
 - **formatAmount 导入路径**：前端由 `@/shared/utils/privacy` 改为 `@/shared/utils/format`（实际导出位置）
+
 - **账单表原生查询**：规范中的 `WealthBill` ORM 模型不存在，硬性承诺聚合改用 `wealth_bill_list` 原生 SQL
 
 ### 🗑️ 删除
@@ -271,6 +405,7 @@
 ### 📝 文档
 
 - 更新 `wealth/README.md`（后端）：分配五模型、`allocation_service.py`、分配 API 端点、分配是计划不是记录语义；移除资金池文档
+
 - 更新 `wealth/README.md`（前端）：`AllocationBoard.vue` + 资金排程章节；`CashFlowBoard.vue` 移除
 
 ---
@@ -282,15 +417,21 @@
 ### ✨ 新增
 
 - **持续资金池**：废弃月度预算快照模式，改为持续累积的资金池 + 流水账。池子余额 = 全部 `FundTransaction` 流水金额聚合（`Sum(amount)`），永不重置，一条流水记录对应一次 注入/分配/消费扣减/手动调整/退款
+
 - **资金流水模型**：新增 `FundTransaction`（池子外键 + 类型 + 金额 ± + 操作后余额 + 备注 + 关联账单 ID + 时间），替换原 `MonthlyBudget`/`PoolAllocation` 两表
+
 - **关联分类自动扣减**：`FundPool` 新增 `linked_categories` JSON 字段；快速记账（`BillCreateView`）写入支出账单后，`FundService.auto_deduct_from_bill()` 按分类匹配优先级最高的池子，自动写入 `spend` 流水扣减余额
+
 - **资金操作 API**：`fund-transactions/inject`（注入）、`allocate`（分配多池）、`adjust`（手动调整余额）、`pool/<id>`（流水列表）；`fund-overview/summary`（总资产/健康度/各池目标进度）、`balances`（余额明细）
+
 - **新资金分配看板**：`FundDashboard.vue` 重写为持续资金池单页——总览卡片（总资产/健康度/池子数量）+ 池子卡片网格（余额/蓄水池目标进度/关联分类标签/人生意图）+ 分配/注入/新建编辑/删除/流水详情弹窗，池子 CRUD 并入看板，删除冗余 `FundPoolManager.vue`
+
 - **健康度算法重做**：蓄水池达标 40 分 + 无负余额 30 分 + 池子多样性 30 分，满 100 分
 
 ### 📝 文档
 
 - 更新 `wealth/README.md`（后端）：FundPool/FundTransaction 模型、`fund_service.py`、资金分配 API 端点、持续资金池与账单自动扣减语义
+
 - 更新 `wealth/README.md`（前端）：`FundView.vue`、`FundDashboard.vue`、fund store/api/types
 
 ---
@@ -300,10 +441,15 @@
 ### ✨ 新增
 
 - **资金池配置**：财富模块新增「资金分配」页面（`/wealth/fund`），支持自定义资金池管理——三种分配类型（`fixed` 固定金额 / `ratio` 收入比例 / `reservoir` 蓄水池目标），含图标、颜色、优先级、启用开关、人生意图描述。列表卡片网格 + 新增/编辑/删除弹窗。后端 `FundPool` 模型 + `FundPoolViewSet` CRUD
+
 - **月度资金概览**：按年月维度展示资金健康度评分（0-100）、当月总收入、已分配金额、初始注入资金，各池子进度条（已分配/已花/剩余），蓄水池达标展示「已达标/蓄水中」状态
+
 - **资金分配**：月度分配弹窗选择各池子分配金额，后端 `allocate_funds` 事务内写入 `PoolAllocation`，覆盖式更新，预算状态置为 `active`
+
 - **初始注入资金**：设置月度一次性注入的总池资金
+
 - **资金健康度算法**：分配执行率 25 分 + 风险缓冲达标率 30 分 + 支出偏差率 25 分 + 池子多样性 20 分，满 100 分
+
 - **删除保护**：资金池已有分配记录时禁止删除（`ProtectedError` → 400），提示可先停用该池子
 
 ### 🐛 修复
@@ -313,6 +459,7 @@
 ### 📝 文档
 
 - 更新 `wealth/README.md`（后端）：资金池三模型、`fund_service.py`、资金分配 API 端点、健康度算法与分配/删除保护语义
+
 - 更新 `wealth/README.md`（前端）：`FundView.vue`、`FundPoolManager.vue`、`FundDashboard.vue`、fund store/api/types
 
 ---
@@ -322,6 +469,7 @@
 ### 🔧 优化
 
 - **固定开销详情弹窗排版优化**：弹窗加宽至 650px，开销项目改为 3 列对齐表格（项目名弹性占满、原始金额 150px 右对齐、折合月均 120px 右对齐加粗），月固定开销/日固定开销汇总改为纵向堆叠的 18px 加粗蓝色大数字，备注移至底部灰底区域；底部操作新增「复制并编辑」按钮复用表单填充逻辑。同时修复 `append-to-body` 挂载导致详情弹窗样式失效的遗留问题
+
 - **底部状态栏周数显示**：LayoutFooter 日期时间左侧新增「第N周」徽标，按 ISO 周算法随秒级时钟刷新，12px 灰底圆角样式
 
 ---
@@ -331,27 +479,41 @@
 ### ✨ 新增
 
 - **打卡自动推进里程碑**：目标打卡（今日已打卡）时，优先完成打卡日期对应的里程碑；倒计时等无日期里程碑则推进下一个未完成里程碑，自动发放奖励并同步进度。补打卡（指定日期）同样触发，重复打卡不重复推进
+
 - **收件箱「已废弃」状态**：新增 `abandoned` 状态 + `abandon_reason` 废弃原因字段，记录头脑一热制定、因不合理或时过境迁不再需要处理的事项。统计卡片扩展为 6 张（新增 🗑️ 已废弃，可点击筛选），列表灰色删除线样式，日历视图不再展示已废弃事项
+
 - **固定开销计算器**：工具箱全栈工具，自定义开销项目（图标/名称/金额），每条项目支持按日/月/年周期记录，后端统一换算为每天/每月/每年三档总额（日 ×30 = 月、日 ×365 = 年，旧数据默认按每月口径兼容回填）。结果区三列大数字 + 各项目「原始 → 每日 → 每月 → 每年」换算明细与占比条 + 智能提示；历史记录支持编辑/复制/查看/删除
+
 - **时薪计算器附加收入**：支持配置额外收入来源（名称/金额/日·月·年周期），时薪改为「月总收入（工资+附加收入）÷ 总投入小时」计算；新增收入构成展示（各来源折算月额）与固定开销联动（日收入/日支出/日结余 + 开销占比健康度提示）；历史记录支持编辑/复制/查看
+
 - **目标人生维度分布**：新增 `/goals/dimension-chart` 页面，ECharts 雷达图展示 9 大人生维度目标数与平均进度，含各维度目标明细
+
 - **里程碑反思字段**：Milestone 新增 `difficulty_met`（遇到的困难）、`next_action`（下一步行动）；完成里程碑弹窗强制填写「此刻感悟」（含快捷短语），可补充困难与下一步行动
+
 - **目标完成奖励金**：Goal 新增 `goal_completion_bonus` 目标完成奖励金，`default_reward_amount` 语义明确为「每项里程碑奖励」，前端表单奖励拆分为里程碑奖励/完成奖励金两项
+
 - **管理命令 sync_field_comments**：core 新增管理命令，遍历各模型将 `verbose_name` 同步为 MySQL 字段注释（仅改 COMMENT，保留列定义/Null/默认值）
 
 ### 🐛 修复
 
 - **工具集未显示固定开销计算器**：`ToolRegistry.auto_discover()` 仅在启动时扫描 `tools/*.py`，运行中新增的工具不会进入内存注册表。触发服务重载后工具正常出现，并归入「💰 财务」分类
+
 - **奖励来源统计 missing goal_complete/inbox_complete**：`RewardSourceStatsSerializer` 补齐缺失的 `goal_complete`/`inbox_complete` 字段声明，来源统计前端不再始终显示 ¥0
+
 - **目标进度 100% 未自动完成**：`recalculate()` 新增 `_auto_transition_status()`，进度达 100% 自动切换目标为已完成
+
 - **编辑目标覆盖已完成里程碑状态**：`GoalCreateUpdateSerializer.update()` 保护已完成里程碑，编辑时不再重置为 `pending`
 
 ### 📝 文档
 
 - 更新 `toolkit/README.md`：FixedExpense 周期换算、HourlyWageRecord 附加收入字段、内置工具表
+
 - 更新 `inbox/README.md`：已废弃状态与统计
+
 - 更新 `goals/README.md`：人生维度/完成奖励金/里程碑反思字段/维度统计端点
+
 - 更新 `reward/README.md`：`goal_complete` 交易类型
+
 - 更新 `core/README.md`：`sync_field_comments` 管理命令
 
 ---
@@ -361,6 +523,7 @@
 ### ✨ 新增
 
 - **GIF 压缩工具**：工具箱新增 🎞️ GIF 压缩工具，支持四种压缩手段 — 抽帧（每隔 N 帧保留 1 帧）、缩放比例/指定宽高（0 表示不限制）、颜色数（256/128/64/32 自适应调色板）、压缩质量（10-100）。前端独立组件 `GifCompressor.vue`：拖拽上传 GIF → 配置参数 → 压缩 → 实时预览压缩结果（原始/压缩后大小、压缩率、帧数对比）+ 一键下载。后端 `GifCompressorTool`（`apps/toolkit/tools/gif_compressor.py`），输出文件经 `MEDIA_URL` 可访问
+
 - **文件上传接口泛化**：`FileToolUploadView`（`/toolkit/convert_file/`）从仅支持 `.txt` 扩展为按 `tool_key` 白名单校验扩展名（trad2simp→.txt，gif-compressor→.gif），并自动将 multipart 表单字段透传为工具参数（数值字符串自动转 int/float），`toolkitStore.runFileTool` 同步支持任意参数对象
 
 ### 📝 文档
@@ -374,16 +537,23 @@
 ### 🐛 修复
 
 - **奖励来源统计 missing goal_complete/inbox_complete**：`RewardSourceStatsSerializer` 声明了 4 个字段但缺少 `goal_complete` 和 `inbox_complete`，导致序列化时静默丢弃，前端始终显示 ¥0。修复：补齐两个字段声明
+
 - **目标编辑里程碑状态被覆盖**：`GoalCreateUpdateSerializer.update()` 在更新里程碑时未保护已完成的 `status`，编辑目标时误将已完成里程碑重置为 `pending`。修复：`pop('status', None)` 跳过已完成条目的状态更新
+
 - **目标进度未在里程碑变更后重新计算**：`GoalCreateUpdateSerializer.update()` 更新里程碑后未调用 `GoalProgressService.recalculate()`，导致 19/19 里程碑进度仍显示 84%。修复：在里程碑变更后强制重新计算进度
+
 - **目标进度 100% 未自动跳转完成状态**：`recalculate()` 仅更新 `progress_percentage` 字段，`status` 保持 `in-progress`。修复：新增 `_auto_transition_status()` 在进度达 100% 时自动切换为 `completed`
+
 - **目标完成奖励未触发**：`_check_goal_completion_bonus()` 仅在 `complete_milestone()` 路径检查，通过 serializer 还原里程碑进度达到 100% 时不触发。修复：在 `recalculate()` 中增加奖励检查
 
 ### ✨ 新增
 
 - **里程碑编辑详情弹窗**：目标编辑弹窗里程碑列表改为紧凑 2 行布局（textarea + 操作按钮），点击 ✏️ 弹出详情弹窗，支持编辑里程碑描述（description）和奖励金额（reward_amount）
+
 - **人生维度必填**：`life_dimension` 模型字段取消 `blank=True`，前端表单 added 必填校验 + 红色星标，迁移 0014
+
 - **奖励池来源筛选新增目标完成**：流水筛选 radio-group 新增 `goal_complete` 选项
+
 - **奖励来源分布展示目标完成和收件箱完成**：`RewardTimeline` 来源比例行新增 `goal_complete` 和 `inbox_complete` 两项统计及百分比
 
 ### 🔧 优化
@@ -397,19 +567,25 @@
 ### ✨ 新增
 
 - **侧边栏导航交互升级**：去除所有分类标题，使用半透明底色按模块分组（总览蓝/时间感知紫/目标琥珀/健康绿/滋养红/财富黄/连接橙/工具箱灰），菜单高度压缩（padding 8px 12px、图标 16px、间距 2px），折叠态宽度缩至 60px，侧栏独立滚动
+
 - **职业能量审计实时分数预览**：顶部卡片实时展示当前能量指数（-100~130）及进度条，滑块根据数值动态变色（< -2 红 / < 0 橙 / ≤ 2 蓝 / > 2 绿），提交按钮改为全宽"📊 生成职业能量报告"
+
 - **仪表盘段落金句完整展示**：段落类型金句改用 `-webkit-line-clamp: 4` 限制行数而非截断标题，超 200 字显示"点击展开全文"提示，弹窗加宽至 600px
 
 ### 🔧 优化
 
 - **周度追踪合并到时间统计页面**：删除独立页面/路由/侧边栏入口，52 周追踪表作为时间统计底部区域，保留年份选择、基准线设置、缓存刷新、统计卡片所有功能
+
 - **季度决策卡片迁移到汇总总览**：创建紧凑型 3 卡片组件（未达标/环比下降/最需关注），嵌入 SummaryDashboard 顶部，删除独立工作台页面/路由/侧边栏入口
+
 - **ToolDetail 信息卡片条件隐藏**：职业能量审计页面不再显示共享工具信息卡片（该页面已有独立标题）
 
 ### 📝 文档
 
 - 更新 `reward/README.md`：补全 `TRANSACTION_TYPES` 表格（含 inbox_complete 等 9 种类型）
+
 - 更新 `inbox/README.md`：补全端点副作用说明（小确幸创建、奖励池同步）
+
 - 更新 `sugar/README.md`：补全 `reward_amount` 字段说明及前端传入优先逻辑
 
 ---
@@ -419,7 +595,9 @@
 ### 🐛 修复
 
 - **收件箱标记完成小确幸 400 错误**：`createSugar` 缺少后端必填的 `title`/`time` 字段，`level_of_happiness` 使用前端 1-5 分制（后端要求 5-20 分制）导致请求被拒。修复：补全字段、分制映射（×4），后端 `SugarRecordSerializer.time` 增加 `input_formats` 兼容日期和时间两种格式
+
 - **收件箱完成奖励金额不一致**：小确幸 `reward_amount` 被后端 `perform_create` 覆盖为 `level_of_happiness`（20），忽略前端传入值（12）。修复：`perform_create` 优先使用前端传入的 `reward_amount`，`sugar/serializers.py` 将该字段移出 `read_only_fields`
+
 - **收件箱完成奖励流水类型**：`transaction_type` 从无意义的 `manual_add` 改为 `inbox_complete`，流水列表新增 `📥 收件箱完成` 绿色标签显示，`sourceEmoji` 同步支持。模型 `TRANSACTION_TYPES` 新增选项，历史 1 条数据已迁移
 
 ### ✨ 新增
@@ -441,6 +619,7 @@
 ### 🔧 优化
 
 - **覆盖进度基线修复**：进度条从"当前已度过周数"开始计算而非 0%，三段式显示"已度过 X 周 (Y%) + 可支撑 Z 周 = 覆盖至 N%"。永不耗尽时进度条 100%
+
 - **日利息显示条件**：利息行不再依赖 `support_weeks !== Infinity` 判断，有日利息率即显示
 
 ### 🐛 修复
@@ -450,6 +629,7 @@
 ### 📝 文档
 
 - 更新 `temporal/README.md`：新增 `logseq_file` 字段说明、`OpenLogseqView` 端点
+
 - 更新 `core/README.md`：`UserProfile` 新增 `logseq_path` 字段说明
 
 ---
@@ -463,12 +643,15 @@
 ### 🐛 修复
 
 - **默认日记重复生成**：`DailyLogAutoService.generate_default_log()` 改用 `begin_date__year/month/day` 日期级检查（原逻辑只检查 `otype='ONEDAY'`），避免在有 MIGU 等类型日记的日期再生成 ONEDAY。清理 6 月至今 8 条冗余默认日记
+
 - **热力图默认日记不可见**：热力图 `getDayColor` 区分"无记录"（灰色 `colorScale[0]`）与"有日记但当日 0 字"（浅绿 `colorScale[1]`），使默认日记也能在热力图上显现
+
 - **类型标签 type prop 警告**：`getTypeTagType` 将 SUMMARY/ONEDAY 映射为 `'info'`，兜底返回 `'info'` 而非空字符串，消除 el-tag type prop 校验警告
 
 ### 📝 文档
 
 - 更新 `relation/README.md`：新增 `quick_record`/`recent` 端点说明
+
 - 更新 `temporal/README.md`：新增 `DailyLogAutoService` 说明
 
 ---
@@ -478,6 +661,7 @@
 ### ✨ 新增
 
 - **现金流推演日利息复利**：推演算法 `calculate_coverage` 新增 `daily_interest_rate` 参数（日利息率，小数），每日扣除预算后计息再复利，支持余额宝等货基场景。`WealthCurrentScenario`/`WealthScenarioHistory` 模型新增 `daily_interest_rate` 字段，前端 `ControlPanel` 推演面板新增"日利息率"输入（万分之单位），覆盖进度条改为"已度过 + 可支撑 = 覆盖至"三段式显示
+
 - **环境变量模板**：`.env.example` 环境变量模板，含 `SECRET_KEY`/`DB_PASSWORD` 等必要变量
 
 ### 📝 文档
@@ -517,18 +701,27 @@
 ### 🔧 优化
 
 - **小确幸编辑事务保护**：`perform_update` 将 `serializer.save()` 移入 `transaction.atomic()` 块，确保奖励池与记录数据一致
+
 - **小确幸编辑 `years/month` 自动同步**：`time` 字段变更时自动更新 `years`/`month`，避免日期与年份月份脱节
+
 - **里程碑取消完成扣回奖励**：`MilestoneViewSet.perform_update` 在里程碑从已完成变为其他状态时调用 `deduct_reward` 扣回奖励并重置 `reward_synced`
+
 - **标签合并去重保护**：合并操作替换标签后增加顺序保持去重，防止新标签已在记录中时产生重复
+
 - **全局搜索异常隔离**：5 个模块各自独立 `try/except`，单模块异常不级联崩溃
 
 ### 🐛 修复
 
 - **父子目标循环引用**：Serializer 新增 `validate_parent_goal` 向上遍历检测循环引用；`GoalViewSet.perform_update` 拒绝将已是子目标的目标设为父目标。API 层双重防护
+
 - **小确幸编辑 `serializer.save()` 在原子块外**：`serializer.save()` 在 `transaction.atomic()` 外执行，若奖励池更新失败则数据不一致。修复：移入原子块内
+
 - **小确幸编辑不更新年份月份**：编辑 `time` 后 `years` 和 `month` 保持旧值。修复：`perform_update` 末尾自动同步
+
 - **取消里程碑完成不扣回奖励**：completed→pending 时已发放奖励未扣回。修复：调用 `deduct_reward` + 重置状态
+
 - **标签合并产生重复**：新标签已在记录中时替换后变成"标签A,标签A"。修复：替换后去重
+
 - **全局搜索单模块异常导致整体 500**：任一模块查询失败（如表结构变更）导致全接口崩溃。修复：各模块独立 try/except
 
 ---
@@ -538,20 +731,27 @@
 ### ✨ 新增
 
 - **小确幸快乐类型五类重构**：后端 `SugarRecord.joy_type` 选项从七类（创造/社交/独处/户外/美食/学习/其他）改为五类（感官型/秩序型/联结型/意外型/独处型），前端 `JOY_TYPE_OPTIONS`/`JOY_TYPE_COLORS` 同步更新，新增迁移 `0006`。旧数据保留不变，编辑时显示原值
+
 - **小确幸编辑弹窗发生日期**：弹窗新增日期选择器，编辑时自动回填原日期，支持修改
+
 - **全局搜索增强**：跨模块搜索（Quote/OneDayPage/SugarRecord/GoodThing/ReviewRecord），前端 SearchBar 组件+全局搜索框
+
 - **标签管理器**：独立运维页面 `/admin/tag-manager`，聚合 Quote/Sugar/GoodThing 三模块标签，支持重命名/合并
 
 ### 🔧 优化
 
 - **目标编辑里程碑保存**：后端 `GoalCreateUpdateSerializer.update()` 新增里程碑增量同步（匹配 ID 更新、新增、删除），前端回填带上 `id: m.id`，不再删除重建
+
 - **小确幸奖励金额**：`perform_create` 改用 `serializer.save(reward_amount=level)`，奖励金额直接等于快乐程度值，不再经过阈值映射
+
 - **侧边栏**：新增"系统运维"分组，标签管理器移至 `/admin/tag-manager`
 
 ### 🐛 修复
 
 - **目标编辑新增里程碑未保存**：后端 `GoalCreateUpdateSerializer.update()` 原 `validated_data.pop('milestones', None)` 丢弃里程碑数据，重写为完整的增量同步逻辑
+
 - **小确幸编辑日期变为修改日期**：`handleSubmit` 始终用 `new Date()` 覆盖 `time`，改为 `form.event_date` 优先
+
 - **小确幸新增奖励金额不一致**：按钮显示 12 元，保存后变 5 元。`perform_create` 绕过 `serializer.save()` 走 `_calculate_reward_amount` 阈值映射，改为直接 save 并同步奖励池
 
 ---
@@ -561,18 +761,23 @@
 ### ✨ 新增
 
 - **目标看板统计卡片重构**：后端新增 `status_stats` 端点返回各状态目标数量，前端以动态卡片组替代 radio-button 筛选 Tab，仅显示有数据的状态卡片，点击卡片蓝底白字高亮筛选，默认选中"进行中"，再次点击可取消
+
 - **仪表盘每日金句**：将汇总总览的金句卡片同步至 Dashboard 首页，含金句展示/换一句/全文弹窗，与汇总总览各自独立
+
 - **行为追踪里程碑点击完成**：`BehaviorTrackCard` 里程碑状态图标（○/✅）增加点击事件，弹出确认框后调用 `toggle_milestone` API 切换完成/重置，含奖励发放
 
 ### 🔧 优化
 
 - **良品率产出记录列表**：页面宽度从 1100px 调整为 1200px 对齐仪表盘，日期列 `white-space: nowrap` 防止换行
+
 - **良品率操作列**：多轮迭代最终确定为文字按钮 + `fixed="right"` + `overflow: visible` 确保完整显示
+
 - **目标看板筛选栏**：移除"类型"筛选下拉，保留搜索 + 优先级 + 新增行为 + 重置
 
 ### 🐛 修复
 
 - **产出记录表格重复标签**：HTML 未闭合错误导致两套 `el-table` 嵌套渲染，删除旧表残留标签
+
 - **产出记录删除按钮被裁切**：`el-table__fixed-right` 默认 `overflow: hidden` 截断固定列，强制 `overflow: visible` 修复
 
 ---
@@ -582,6 +787,7 @@
 ### ✨ 新增
 
 - **Docker 容器化部署**：`docker-compose.yml` 编排 mysql:8.0 + backend + frontend 三服务，`backend/Dockerfile` 两阶段构建（python:3.14-slim），`frontend/Dockerfile` 两阶段构建（node:22-alpine 编译 → nginx:alpine 静态托管），`nginx.conf` SPA fallback + `/api/`/`/media/`/`/static/` 反向代理
+
 - **开源配套文件**：`.env.example` 环境变量模板、`.dockerignore` 排除非必要文件、`LICENSE` MIT 协议、`README.md` 完整使用说明
 
 ### 🔧 优化
@@ -595,10 +801,15 @@
 ### 🐛 修复
 
 - **月度复盘结余负数截断**：后端 `get_monthly_list` 和 `_parse_balance_list` 的 `balance` 从依赖 `bi.mbalance` 改为 `income - expense` 实时计算，确保与 `savings_rate` 数据源一致，不再出现 balance=¥0 但 rate=-110.8% 的矛盾
+
 - **月度复盘列表结余符号丢失**：前端 `formatAmount` 内部使用 `Math.abs` 导致负数符号丢失，改为模板层条件渲染 `￥` / `-￥`，负数显示红色
+
 - **月度复盘结余率负数颜色**：`ReviewHeader` 结余率 `valueClass` 从写死 `text-info` 改为动态判断，负值时显示红色
+
 - **月度复盘手动录入 400 错误**：前端 `handleSaveBalanceInfo` 未将弹窗字段映射为模型字段（`income→wageincome` 等），后端创建新记录时未传 `age` 等必填字段。修复：前端添加字段映射、后端统一使用 `partial=True`、序列化器增加 `extra_kwargs` 默认值
+
 - **`wealth_balance_list` 表 `age` 字段 NOT NULL 约束冲突**：手动录入新记录时未传 `age` 导致数据库报错。删除 `age` 列（ALTER TABLE DROP COLUMN），同步清理模型、序列化器和服务的引用
+
 - **盘点历史排序错误**：`cashflow_service.py` 排序字段从 `-yearmon` 改为 `-btime`，按复盘时间倒序而非年月，确保同月多次盘点的顺序正确
 
 ### 🔧 优化
@@ -612,16 +823,19 @@
 ### ✨ 新增
 
 - **打卡日历补签**：日历格子可点击过去未打卡日期，弹出确认弹窗后补打卡。后端 `checkin` 端点新增 `date` 参数支持指定日期，`calculate_streak` 自动重新计算连续天数
+
 - **旅行路线推演重构**：左侧仅保留已保存路线列表（25%），输入区移至弹窗，地图扩大至 75%。新建/编辑通过统一弹窗完成，支持拖拽排序目的地，选中态高亮
 
 ### 🔧 优化
 
 - **好恶物详情弹窗**：加宽至 700px，`white-space: pre-wrap` 保留换行，`close-on-click-modal=false` 防止误关，`el-descriptions` 表格替换为分区卡片布局
+
 - **日记流按钮位置调整**：新增日记按钮从右上角移到筛选栏重置按钮左侧，筛选栏样式改为 `space-between` 两端对齐
 
 ### 🐛 修复
 
 - **未来日期打卡拒绝**：后端校验 `checkin_date > date.today()` 时返回 400 错误
+
 - **已打卡日期重复触发**：日历格子已打卡状态点击提示"该日期已打卡"而非再次弹出确认
 
 ---
@@ -631,12 +845,15 @@
 ### ✨ 新增
 
 - **好恶物详情弹窗**：点击卡片弹出详情对话框，700px 宽，内容区分好物/歹物独立展示，保留用户输入换行（`white-space: pre-wrap`），含元信息栏（类型/类别/评分）和底部状态栏
+
 - **好恶物卡片点击跳转**：TreasureCard 新增 `click-card` 事件，整张卡片可点击打开详情
 
 ### 🔧 优化
 
 - **好恶物卡片等高**：卡片使用 `display: flex; flex-direction: column; height: 100%` 确保网格内全部等高
+
 - **好恶物卡片 3 行截断**：`why_good` 描述使用 `-webkit-line-clamp: 3` 限制最多 3 行，超出省略
+
 - **好恶物卡片操作按钮不触发跳转**：`card-actions` 区域使用 `@click.stop` 阻止冒泡，编辑/删除按钮点击时不触发详情弹窗
 
 ### 🐛 修复
@@ -650,12 +867,15 @@
 ### ✨ 新增
 
 - **时薪计算器自由职业模式**：支持正式职业/自由职业双模式切换。自由职业含固定时长（月工作天数+日均时长）和弹性工时（周各天时长配置+月周数）两种子模式，后端 `_calc_freelance` 独立计算逻辑，历史列表新增"模式"标签列
+
 - **时薪计算器脱敏支持**：历史列表月薪列接入 `maskAmount`，隐私模式开启时显示 `¥*,***.**`，关闭时恢复正常格式化
+
 - **工具栏统一"返回工具集"按钮**：TravelRoute/EnvironmentAudit/CareerEnergyAudit 嵌入 ToolDetail 组件不再自带返回按钮（由 ToolDetail 统一提供），其余工具页各保留一个
 
 ### 🔧 优化
 
 - **工具栏页面宽度统一**：全部 9 个工具页 `padding: 20px`，移除 FreeSpending 的 `max-width: 720px` 限制，以 DecisionLog 为基准对齐
+
 - **返回按钮 CSS 加固**：`.back-bar` 统一使用 `display: flex; flex-wrap: nowrap` 防止图标与文字在窄容器中换行分离
 
 ### 📝 文档
@@ -669,18 +889,23 @@
 ### ✨ 新增
 
 - **体重目标调整记录**：`WeightGoalAdjustment` 模型追踪每次目标变更（调整前/后值、变更量、原因），API 端返回活跃目标的所有调整流水，前端 目标调整记录 时间线卡片展示（before→after + 变更标签 + 原因）
+
 - **体重月度进度自动推进**：`check_weight_goal_status` 在里程碑达成后自动递增 `goal.current_month` 并更新 `current_month_start_weight`/`current_month_target`，兼容旧数据修复（自动扫描已达成未推进的月份）
+
 - **体重趋势图 markLine 目标线**：目标体重以虚线 markLine 标注在图表中（"目标 105斤"标签），替代独立的 ECharts 目标线 series，legend 更简洁
 
 ### 🔧 优化
 
 - **体重趋势图 Y 轴动态适应**：从固定 `min: 90` 改为基于目标体重和历史数据自动计算下限（`Math.floor(target - 5)`），消除下方大段留白，体重波动更明显
+
 - **月度进度阶段列表去重**：修复展开全部时的渲染重复问题——`visibleMilestones` 始终只返回当前月份，其他阶段由 `el-collapse-transition` 独占渲染，消除 8 条重复
 
 ### 🐛 修复
 
 - **月度进度卡片高度撑开异常**：移除 `.progress-section` 的 `height: 100%`，添加 `overflow: visible` 防止卡片被 BMI 列拉伸
+
 - **进度卡片与趋势图间距缺失**：`.section-row` 从仅 `margin-top` 改为上下各 16px，添加 `overflow: visible` 防止裁剪
+
 - **el-collapse-transition 动画裁剪内容**：添加 `:deep(.el-collapse-transition) { overflow: visible }` 确保展开动画不遮挡后续元素
 
 ### 📝 文档
@@ -694,18 +919,23 @@
 ### ✨ 新增
 
 - **目标行为追踪模式**：当目标仅绑定 1 个行为时，展开区自动切换为打卡追踪视图（连续天数/进度条/打卡按钮/日历热力图），下方展示完整里程碑列表（✅/○ 状态图标 + 奖励金额 + 状态标签），每条右侧保留 ✏️ 编辑入口（详情描述/完成备注/自我批阅），样式与原有里程碑列表一致
+
 - **小确幸标签区优化**：弹窗和列表中标签在同一行内换行显示，不单独分两行，视觉更紧凑
 
 ### 🔧 优化
 
 - **小确幸快乐程度**：后端 validator 范围从 1-10 扩展为 5-20，奖励直接跟随快乐值（取消阈值映射），编辑弹窗同步显示原始快乐值
+
 - **小确幸编辑奖励同步**：编辑快乐程度时自动按新旧差额调整奖励池余额并生成奖励流水
 
 ### 🐛 修复
 
 - **小确幸保存失败**：后端 validator 仍限制 1-10，与前端 5-20 滑块不匹配，导致评分 10-20 提交后校验拒绝
+
 - **小确幸编辑保存 400**：前端 `joy_type: form.joy_type || null` 传 `null`，模型字段无 `null=True`，DRF ChoiceField 拒绝。改为 `joy_type: form.joy_type || ''`
+
 - **小确幸编辑奖励值显示错误**：`_calculate_reward_amount` 仍使用旧阈值映射（如 17→¥10），改为直接使用 `reward_amount=level` 显示原始值
+
 - **小确幸编辑奖励池未同步**：`perform_update` 仅存记录未调整池余额，新增 delta 差额调整 + RewardTransaction 记录
 
 ---
@@ -715,11 +945,13 @@
 ### ✨ 新增
 
 - **复盘工具箱**：工具箱全栈工具，5种复盘模板 — 每日复盘（约哈里窗四象限+情绪清单）、周复盘（完成/计划/反思）、月复盘（GRAI+ORID深度复盘）、季度复盘（滋养/消耗/害怕/烦恼/80岁遗憾/5年路径）、人生编舟（生命线/目标/四象限/深度复盘），历史记录可回溯编辑
+
 - **摘录馆标签展示**：列表卡片新增标签渲染，每条摘录显示语言标签和所有分类标签
 
 ### 🔧 优化
 
 - **日程视图日历紧凑化**：外层 padding 缩减至 8px，日历卡片 shadow 去掉，`el-card__body` 压缩至 8px，日期格高度提升至 80px，表头/按钮/单元格全面紧凑，最大化日历显示区域
+
 - **摘录馆统计与分页**：统计数字改为后端 `/toolkit/quotes/stats/` 接口返回真实数据库总数，列表新增分页控件（每页20条），筛选切换重置到第1页，筛选条件（language/is_paragraph）在后端正确生效
 
 ### 🐛 修复
@@ -733,6 +965,7 @@
 ### ✨ 新增
 
 - **自由支配额度计算器**：工具箱全栈工具，基于流动资产+年收入+债务+工作年限计算每次消费无需纠结的额度，自动保存计算历史，支持回溯删除
+
 - **收件箱快速输入支持自定义类别**：快捷输入组件同步开放 `allow-create`，无需打开完整弹窗即可输入新类别
 
 ### 🔧 优化
@@ -742,6 +975,7 @@
 ### 🐛 修复
 
 - **收件箱自定义类别保存失败**：模型层 `category` 字段 `choices=CATEGORY_CHOICES` 限制可选值，DRF CharField 序列化校验通过后 Django ORM 模型校验仍拒绝。删除模型 `choices` 约束，自定义类别正常持久化
+
 - **好朋友跟踪分页 Vue 警告**：`fetchRecords` 定义在 `reactive` 对象内，模板 `@current-change` 无法访问。提取为顶层 `loadRecords()` 函数，消除控制台警告
 
 ---
@@ -751,26 +985,39 @@
 ### ✨ 新增
 
 - **例假跟踪**：全栈新模块，MenstrualRecord 模型 + CRUD API + 统计接口（平均周期/偏移/下次预测）+ 周期趋势折线图（ECharts）+ 56 条历史数据（2021~2026）
+
 - **决策日志工具**：工具箱全栈工具，7大偏误分析统计 + 决策记录（含选项列表/恐惧指数/结果判定） + 回顾复盘弹窗
+
 - **个人画像仪表盘**：`/summary/profile` 7维度聚合（健康/精力/情绪/关系/良品率/收件箱/决策），颜色编码评分卡片
+
 - **小确幸快乐类型**：`joy_type` 字段 + 快乐偏好图谱 `/sugar/joy-types`
+
 - **收件箱"犹豫中"状态**：hesitating 状态 + hesitate_reason 字段 + 恢复"开始行动"入口
+
 - **收件箱自定义类别**：类别下拉支持 `allow-create` 自由输入新类型，筛选区自动包含自定义类型
+
 - **身体-状态关联图**：汇总看板 BodyMindChart，ECharts 柱线混合图展示健康自查与精力/情绪关联
+
 - **仪表盘随机回顾新增摘录馆**：random_retro 接口新增 Quote 来源，四种内容等概率随机
 
 ### 🔧 优化
 
 - **定期存款倒计时列**：新增"倒计时"列，>30天绿/7~30天蓝/<=7天橙/过期红/已取出灰
+
 - **小确幸编辑弹窗**：快乐程度 5-20 分制，奖励自动跟随快乐值，标签区预设+自定义双模式
+
 - **职业能量审计**：表单宽度 100%，结果中嵌入环境校准提示（环境分值连续 3 个月为负时高亮提醒）
+
 - **身体健康自查**：表格宽度 100%，日期列不换行，新增详情弹窗（2 列网格展示全部字段）
+
 - **金句管理→摘录馆**：模型 docstring/verbose_name、前端页面/路由/侧边栏全面更名
+
 - **仪表盘随机回顾**：后端过滤默认日记标题"幸福未被发现，就叫做普通的一天"（Quote/OneDayPage 两处）
 
 ### 🐛 修复
 
 - **收件箱编辑保存 400**：双因修复 — `updateInboxItem` 改用 PATCH（resume 操作只发 2 个字段不再缺字段）+ `hesitate_reason` 前端传 `null` 改为 `''`（模型无 `null=True`）
+
 - **仪表盘随机回顾仍显示默认标题**：summary random_retro 接口 OneDayPage 增加 `exclude(title__icontains='幸福未被发现')`
 
 ---
@@ -784,6 +1031,7 @@
 ### 🔧 优化
 
 - **新增里程碑不重置已完成记录**：`GoalCreateUpdateSerializer` 不再 `all().delete()` 所有里程碑再重建，只管理 `pending`/`in-progress` 状态，已完成的里程碑（含完成备注、奖励记录）完全保留
+
 - **收件箱转里程碑自动同步内容**：`ConverterService` 创建里程碑时将 `inbox_item.content` 自动填入 `description` 字段
 
 ### 🐛 修复
@@ -797,14 +1045,19 @@
 ### ✨ 新增
 
 - **收件箱与日历联动**：后端 `inbox/items/calendar/` 端点按年月筛选有截止日期的待办事项，里程碑支持 `target_date_year/month` 查询参数
+
 - **日程视图**：`/temporal/schedule` 全功能日历页，el-calendar 聚合收件箱事项和里程碑，点击日期查看详情列表
+
 - **事项截止日期视觉增强**：收件箱列表逾期标红、2天内标橙、"今天/明天/昨天截止"相对日期提示
 
 ### 🔧 优化
 
 - **日历圆点状态区分**：待办红色 `#f56c6c` / 已完成绿色 `#67c23a`，8px 更醒目
+
 - **事项列表UI重构**：来源图标标签（📥/🎯）+ 状态圆点 + 标题 + 日期，已完成标题加删除线
+
 - **已完成事项保留在日历**：后端排除 `processed`（已转目标）而非仅 `pending`，done 状态正常显示绿色圆点
+
 - **已转目标不重复**：收件箱 `processed` 状态不返回日历，里程碑端已显示
 
 ### 🐛 修复
@@ -818,13 +1071,17 @@
 ### ✨ 新增
 
 - **季度决策工作台**：`/summary/quarterly` 全栈功能，自动生成7模块季度对比报告（环比/同比），智能追问引擎（检测暴跌/飙升/低分/年度落后等模式），追问回答持久化，ECharts 季度对比柱状图
+
 - **收件箱统计卡片可点击筛选**：4张统计卡片（待处理/已完成/已处理/总条数）替换旧组件，点击卡片按状态筛选，再次点击取消
+
 - **月度明细达成率列**：汇总总览月度表格新增百分比列，≥80%绿/50-80%橙/<50%红
 
 ### 🔧 优化
 
 - **旅行省份解析**：`get_province()` 新增缩写→全称映射（"浙江"→"浙江省"）和城市名→省份反向查找，25条记录全部正确解析
+
 - **旅行统计卡片**：从4张扩展至6张，新增"旅行记录"条数和"累计天数"，卡片布局调整为6列
+
 - **收件箱筛选整合**：删除独立筛选按钮行，统计卡片承担筛选功能（可点选/取消），视觉更简洁
 
 ### 🐛 修复
@@ -836,32 +1093,51 @@
 ### ✨ 新增
 
 - **年度周度时间追踪**：52周×N年矩阵表，按百分比染色，支持年份选择，统计卡片（年度总时长/周均/达标周数/达标率）
+
 - **周度时间固化缓存**：`WeeklyTimeCache` 模型，管理命令 `refresh_weekly_cache` 聚合 TemporalTask，避免实时 CONVERT_TZ 性能问题
+
 - **里程碑详情弹窗**：目标卡片点击标题弹出弹窗，支持查看/添加/勾选里程碑，显示进度汇总（百分比/完成数/总数/状态）
+
 - **里程碑截止日期编辑**：已有里程碑旁显示✏️按钮修改截止日期，未设置时显示"+ 设置截止日期"入口
+
 - **缓存刷新机制**：周度追踪页手动刷新按钮 + CSV 导入成功后自动刷新缓存
+
 - **行为记录发生日期**：编辑弹窗新增 `action_date` 日期选择器，默认当天，支持补录历史行为；列表中显示实际发生日期
+
 - **好东西档案馆**：全栈新模块，记录亲自验证过的好东西（吃/穿/用/店/地方/方法），卡片式布局 + 类别筛选 + 评分系统
+
 - **好恶物双面档案**：在好东西基础上扩展，支持记录"歹物"（踩坑记录），TAB 切换查看，歹物卡片红色警告样式，含踩坑原因/实际后果字段
 
 ### 🔧 优化
 
 - CSV 导入：支持中文日期格式（"2026年6月3日 23:29:36"）解析
+
 - CSV 导入：编码自动回退（utf-8-sig → utf-8 → gbk → gb2312 → latin-1）
+
 - CSV 导入：去重覆盖模式，同一任务同一天时长相同跳过、不同则更新（不删数据）
+
 - CSV 导入：绕过 DRF parser 限制，通过 `request._request.FILES` 读取文件
+
 - 良品率：收件箱创建时自动设置 `occurred_at` 为当天，确保出现在月度统计中
 
 ### 🐛 修复
 
 - **CSV 导入 415 Unsupported Media Type**：DRF DEFAULT_PARSER_CLASSES 仅配了 JSONParser，`@parser_classes` 对 ViewSet action 不生效。改用 `request._request.FILES` 绕过
+
 - **CSV 导入 Content-Type boundary 缺失**：axios 实例默认 `Content-Type: application/json` + 手动设置 multipart 不传 boundary。修复：设 `Content-Type: undefined` 让 axios 自动生成
+
 - **周度追踪数据为空**：MySQL CONVERT_TZ 函数不可用（时区表未加载），`start_time__week` 返回 NULL。修复：使用模型预计算 `week` 字段
+
 - **周度日期查找同样因 CONVERT_TZ 失效**：`start_time__date` 也依赖时区转换。修复：使用 `year` + `mon` + `day` 字段查询
+
 - **行为记录列表仅显示 10 条**：`StandardPagination` 默认 page_size=10，`ActionViewSet` 未覆盖。修复：设置 `pagination_class = None`
+
 - **行为记录排序不生效**：`OrderingFilter` 的默认排序覆盖 `get_queryset` 的 `order_by`。修复：移除 `OrderingFilter` 和 `ordering` 属性
+
 - **行为记录排序混乱**：`action_date` 为 NULL 的记录干扰排序。修复：`Coalesce(action_date, CAST(created_at AS DATE))` 确保排序一致
+
 - **批量创建行为 action_date 为空**：batch 端点使用 `bulk_create` 不触发 `save()`。修复：显式传入 `action_date`
+
 - **后端 ImportError**：`Func` 不存在于 `django.db.models.functions`，改用 `Cast`
 
 ### 📝 文档
@@ -875,25 +1151,37 @@
 ### ✨ 新增
 
 - **职业能量审计工具**：工具箱全栈工具，26项细化指标分4大维度（工作内容7项/环境与人8项/成长未来5项/身体情绪6项），-5~+5分量表，自动判定（继续/待观察/准备离开/该走了），支持折叠面板分组录入、身体信号多选、历史趋势追踪
+
 - **环境校准工具**：工具箱全栈工具，6维度评分（允许说不知道/系统能力被当资产/噪音小于信号/身体报警能被听见/高手愿意分享/输出有回路），1-5分量表，自动判定（增值/可维持/消耗/立即离开），支持历史记录
+
 - **收件箱分页**：后端 PageNumberPagination + 前端 el-pagination，每页10条
+
 - **收件箱"已处理"筛选**：状态筛选新增"已处理"选项（status=processed），三状态切换
+
 - **盘点录入改为弹窗**：新增盘点从内联表单改为 el-dialog 弹窗（600px），编辑/新增共用
+
 - **盘点历史列表完整字段**：从4列扩展至15列（支付宝/微信/现金/建行/工行/中国银行/农信社/公积金/借出/负债/总现金流/总额/复盘时间/备注/操作）
 
 ### 🔧 优化
 
 - 盘点历史：表格支持横向滚动（overflow-x:auto + min-width:1440px）
+
 - 盘点历史：操作按钮 flex 容器防换行
+
 - 盘点金额：受全局隐私脱敏开关控制（privacyMode 开启时显示 \*,***）
+
 - 环境校准：表单标签宽度适配 160px，历史列表铺满页面并新增备注列
 
 ### 📝 文档
 
 - 更新 `toolkit/README.md`：补全 EnvironmentAudit 模型、工具注册表
+
 - 更新 `wealth/README.md`（后端）：补全现金盘点 API 端点
+
 - 更新 `wealth/README.md`（前端）：补全现金盘点组件清单
+
 - 更新 `inbox/README.md`：补充分页参数、processed 状态
+
 - 更新 `CHANGELOG.md`：本次变更记录
 
 ### 🐛 修复
@@ -907,34 +1195,55 @@
 ### ✨ 新增
 
 - **冲突事件追踪**：关系管理子模块，记录人际冲突（含情绪等级/解决状态/关联人搜索），支持统计总览
+
 - **个人良品率管理**：目标管理子模块，记录事项的质量判定（良品/不良品/废品）、难度评级、失败原因分析，含月度趋势和分类统计
+
 - **收件箱转里程碑**：单条收件箱事项可直接转为指定目标的里程碑，自动排序
+
 - **月末读者盘点**：读者群体月末汇总（总关注数/新增/取关/最佳文章），取关人数自动计算（上月总关注 + 本月新增 − 本月总关注）
+
 - **收件箱完成联动**：标记完成时可同时新增小确幸记录和快乐银行奖励
+
 - **收件箱工作分类**：类别新增"工作"选项
+
 - **快速创建目标弹窗**：目标名称与里程碑名称前缀分离，里程碑不再携带目标全名
 
 ### 🔧 优化
 
 - 收件箱：完成时支持输入完成情况备注，已完成事项显示绿色备注
+
 - 收件箱：编辑保存后显示"保存成功"提示并自动刷新列表
+
 - 冲突追踪：关联人支持可搜索下拉选择器
+
 - 冲突追踪：脱敏开关开启时关联人姓名自动脱敏
+
 - 月末盘点：编辑/删除按钮同行显示；编辑保存后自动刷新列表；新增时默认选中"公众号读者"群体
+
 - 良品率表单：类别/质量判定/难度各占一行，对话框 600px 宽
 
 ### 📝 文档
+
 - 更新 `relation/README.md`（后端+前端）：冲突事件追踪、读者月末盘点
+
 - 更新 `goals/README.md`（后端+前端）：个人良品率管理
+
 - 更新 `inbox/README.md`（后端+前端）：工作分类、转里程碑、完成备注、小确幸/奖励联动
+
 - 更新 `CHANGELOG.md`：本次变更记录
 
 ### 🐛 修复
+
 - 收件箱转里程碑：修复 milestones 拼接时缺少 `from django.db import models` 导致 NameError
+
 - 收件箱转里程碑：修复视图层未传递 goal_id/milestone_name/target_date 等参数
+
 - 快速创建目标：修复里程碑名称拼接错误（目标名称被误用为里程碑前缀）
+
 - 冲突追踪：修复前端 `contact_id` → 后端 `contact` 字段名不匹配导致的 400 错误
+
 - 月末盘点：修复子组件中 readerStore 导入路径错误
+
 - 目标管理：修复 models.py 中 OutputRecord 后残留的重复 Goal/Milestone/Action/GoalReview 定义
 
 ---
@@ -942,41 +1251,69 @@
 ## [2026-05-24] v3.3.0 - 全局隐私脱敏体系
 
 ### ✨ 新增
+
 - **隐私脱敏体系**：后端 `UserProfile` 模型 + `ProfileView` API（GET/PATCH）
+
 - **隐私脱敏体系**：前端 `privacyStore` Pinia 状态管理，LayoutHeader 开关 + AppLayout 横幅提示
+
 - **隐私脱敏体系**：`shared/utils/privacy.ts` 纯函数工具集（`maskName`/`maskAmount`/`maskAmountByType`/`maskLocation`/`maskText`/`maskTags`）
+
 - **隐私脱敏体系**：仅收入金额脱敏、支出不脱敏策略（`maskAmountByType`）
+
 - CSV 导入支持重复校验
 
 ### 🔧 优化
+
 - 关系管理：分类改为 drain(疏远型)/toxic(有毒型)
+
 - 关系管理：新增 met_place 筛选器
+
 - 目标管理：里程碑完成后自动补全体重目标
+
 - 目标管理：详情弹窗高度翻倍，提升长内容浏览体验
+
 - 关系管理：SQL 批量合并重复联系人
+
 - 代码规范化：10 个财富组件统一使用 `formatAmount` 替代内联 `fmt()`
 
 ### 🔒 隐私脱敏覆盖模块
+
 | 模块 | 脱敏内容 |
+
 |------|----------|
+
 | 关系列表 | 姓名 → 首字+\*，标签 → \*\*\* |
+
 | 关系详情 | 姓名/别名/地点/场景/身份/付出/备注 |
+
 | 旅行记录 | 目的地/上级地点/花费 |
+
 | 目标里程碑 | 目标值/实际值/奖励金额 |
+
 | 定期存款 | 银行名/金额/利率/利息/备注 |
+
 | 定期统计卡片 | 总额/未到期/已到期/利息 |
+
 | 月度日历 | 格子收支汇总文字(收入脱敏) |
+
 | 日明细弹窗 | 收入列表脱敏，支出列表不脱敏 |
+
 | 周明细弹窗 | 周汇总收入脱敏，支出不脱敏 |
 
 ### 📝 文档
+
 - 更新 `core/README.md`：增补 UserProfile、ProfileView、隐私脱敏体系文档（后端模型/前端组件/脱敏规则/覆盖模块）
+
 - 更新 `CHANGELOG.md`：本次变更记录
 
 ### 🐛 修复
+
 - 关系管理：分页与筛选参数联动丢失（切换页码重置筛选条件）
+
 - 关系管理：分页总数显示与实际条数不一致
+
 - 关系管理：SQL 批量合并重复联系人（met_place 华夏→福鼎，海量→杭州）
+
 - 目标管理：列表总数显示 18 条但仅渲染 10 张卡片（分页截断问题）
 
 ---
@@ -984,35 +1321,57 @@
 ## [2026-05-23] v3.2.1 - 旅行路线推演 + 热力图修复
 
 ### ✨ 新增
+
 - 旅行路线推演：路线预设 CRUD 管理（创建/编辑/删除，含目的地拖拽排序）
+
 - 旅行路线推演：全国 718+ 城市坐标数据库，按省份/地级市/区县三级联动
+
 - 工具箱：`CityCoordinate` 模型 + 5 个级联查询 API 端点（省份→地级市→区县）
+
 - 工具箱：`TravelRoutePreset` 模型 + 路线预设 REST API
+
 - 工具箱：旅行路线推演工具（ECharts 地图，动画路线，预设加载）
+
 - 旅行记录表单：区县（district）字段 + 省市县三级级联选择器
 
 ### 🔧 优化
+
 - 旅行路线推演：地图站点圆圈缩小，标签移至标记下方避免文字重叠
+
 - 旅行路线推演：目的地选择由 el-select 改为 el-autocomplete，解决城市名截断
+
 - 旅行路线推演：移除参数设置模块，精简界面
+
 - 旅行记录表单：省份/地级市/区县三个字段各占一行，更清晰
+
 - 旅行记录表单：自动地理编码（城市名→经纬度）
 
 ### 📝 文档
+
 - 创建 `travel/README.md`：旅行模块完整文档（模型/服务/API/前端）
+
 - 更新 `toolkit/README.md`：补全 CityCoordinate、TravelRoutePreset、内置工具表
 
 ### 🐛 修复
+
 - **现金流热力图周明细弹窗净结余为0**：三处修复
+
   - `BillsByWeekView` SQL 列名 `note` → `notes`（列名不匹配导致 MySQL 报错 → 前端 catch 显示空列表）
+
   - `BillsByWeekView` 日期上限 `week_end_date` → `week_end_date + timedelta(days=1)`（独占上限排除当天所有账单）
+
   - `update_lived_status()` 改用 `week_start_date__lte=today`，标记已开始的周为"已度过"，使聚合包含当前周
+
 - **现金流热力图周格子颜色空白**：`WeekCalendarView` + `WeeklySummaryView` 自动调用 `update_lived_status()`，无需手动初始化
+
 - **目标管理编辑行为报错**：前端 `updateAction` 改用 PATCH（PUT 需全字段提交导致校验失败）
+
 - **旅行路线预设保存后列表不显示**：前端处理 DRF 分页响应格式（`res.data?.results || res.data`）
+
 - **WeeklySummary 接口 404**：URL 参数名 `week_index` → `global_week_index`，与 `lookup_field` 匹配
 
 ### 🗂️ 数据
+
 - 批量导入福建/浙江/江苏三省区县级坐标数据
 
 ---
@@ -1020,27 +1379,43 @@
 ## [2026-05-16] v3.2.0 - 仪表盘重构 + 通知体系
 
 ### ✨ 新增
+
 - 收件箱：批量转为目标功能（多选事项 → 创建目标 + 里程碑）
+
 - 收件箱：状态筛选标签（待处理 / 已完成 / 全部），默认显示待处理
+
 - 仪表盘：顶部可编辑系统宣言，保存至 localStorage
+
 - 仪表盘：随机回顾卡片，随机展示日记/小确幸/读后感历史记录
+
 - 里程碑：完成时弹出 🎉 庆祝动画浮层
+
 - 通知服务：新建 `Notification` 模型 + `notification_service.py`（关系/目标/资产三模块检查），注册 `apps.core` app
 
 ### 🔧 优化
+
 - 仪表盘：每个卡片独立加载骨架屏，互不阻塞
+
 - 仪表盘：进行中目标、本周日记显示真实数据
+
 - 时间统计：删除时段分布图表，人生平衡轮与月度趋势并排显示
+
 - 时间统计：删除 TOP10 任务排行图表
+
 - 收件箱：已完成事项也可正常删除（修复 get_queryset 默认过滤导致 404）
 
 ### 🗑️ 删除
+
 - 收件箱：移除"转为互动"功能及相关代码（types、ConvertModal、后端 service/model/serializer）
 
 ### 📝 文档
+
 - 根 `README.md`：收件箱描述移除"互动"
+
 - `inbox/README.md`：移除"转为互动"引用，补全 `today_pending`、`convert_to_goal` 端点
+
 - `temporal/README.md`：修正模型名 `OneDayRecord` → `OneDayPage`，补全 API 端点表
+
 - `goals/README.md`：修正端点路径与实际代码匹配，补全缺失端点
 
 ---
@@ -1048,22 +1423,31 @@
 ## [2026-05-16] v3.1.1 - 文档整理与分页修复
 
 ### 📝 文档
+
 - 补充 `frontend/README.md`：技术栈、目录结构、开发命令、模块规范
+
 - 修正 `CLAUDE.md` 中过时的前端模块 README 引用
+
 - 创建 `CHANGELOG.md` 系统更新日志
 
 ### ✨ 新增
+
 - 书籍模块：新增 `action_item`（行动项）字段，读完书强制输出一个行动
+
 - 关系模块：新增 `my_action`（我为对方做了什么）字段，记录关系中的付出
 
 ### 🔧 优化
+
 - 小确幸页面：删除"我的模板"模块，保留自定义记录表单和历史列表
 
 ### 🗂️ 归档
+
 - 舞蹈模块：侧边栏标记为"归档"，页面顶部添加归档提示条，保留数据和页面，可随时恢复
 
 ### 🐛 修复
+
 - 修复关系档案列表分页不生效：服务端 `RelationshipPagination` + 前端 store 分页状态 + 筛选参数联动
+
 - 修复小确幸页面统计卡片中"累计获得"在分页后显示错误（此前已修复）
 
 ---
@@ -1071,61 +1455,103 @@
 ## [2026-05-16 00:00:00] v3.1.0 - 庄子墨子优化 + 模块整合
 
 ### ✨ 新增
+
 - 书籍模块：新增 `action_item`（行动项）字段，读完书强制输出一个行动
+
 - 关系模块：新增 `my_action`（我为对方做了什么）字段，记录关系中的付出
 
 ### 🔧 优化
+
 - 时间感知：活动追踪与时间统计合并为一个页面
+
 - 财富管理：去除月度日历中重复的视图切换按钮
+
 - 财富管理：新增随手记 CSV 导入功能
+
 - 关系管理：合并"读者群体"到关系管理页面（TAB 切换）
+
 - 健康管理：去除每日步数趋势和运动类型占比，精简为里程碑地图+年度步数对比
+
 - 侧边栏：去除"分析统计"分组，精简为"总览"
+
 - 侧边栏：去除"今日进度"静态假数据模块
+
 - 侧边栏：精神滋养去除"精神花园"聚合入口，书籍阅读和小确幸平级显示
+
 - 侧边栏：快乐银行与礼物清单平级显示
+
 - 侧边栏：去除静态数字徽章（如书籍管理的红色5）
+
 - 侧边栏：新增"读者群体""工具箱""美食地图"入口
 
 ### 🗂️ 归档
+
 - 舞蹈模块：侧边栏标记为"归档"，保留数据和页面，可随时恢复
 
 ### 🐛 修复
+
 - 修复现金流热力图颜色未根据账单数据映射
+
 - 修复健康模块 BMI 指示器位置偏移
+
 - 修复日记流日历热图格子大小和月份对齐
+
 - 修复月度日历农历显示异常（十十六、初初八）
+
 - 修复现金盘点编辑回填失败
+
 - 修复定期存款统计包含已取出记录
+
 - 修复目标进度计算错误（里程碑完成率与实际不符）
+
 - 修复里程碑完成后奖励未发放到奖励池
+
 - 修复小确幸页面预设模板清空
+
 - 修复关系管理详情页互动记录串号
+
 - 修复美食模块图片上传和卡片展示
+
 - 修复工具箱页面繁简转换和图片转GIF未显示
+
 - 修复侧边栏菜单点击后需刷新才显示内容
 
 ---
 
 ## 版本说明
+
 - 主版本号：重大架构变更
+
 - 次版本号：新功能模块、页面整合
+
 - 修订号：Bug 修复、样式调整
 
 ## 历史迭代
 
 ### v3.0.0 (2026-04) - 新架构重构
+
 - 从 sycamore_django 重构为新架构 sycamore
+
 - 按生命维度组织模块：时间感知、身心健康、精神滋养、财富管理、连接与足迹、目标与项目
+
 - 前后端分离：Django REST + Vue 3 Composition API
+
 - 数据库从 SQLite 迁移至 MySQL
+
 - 新增综合进度看板（summary）模块
+
 - 新增工具箱模块
+
 - 新增奖励池与目标管理联动
+
 - 新增读者群体（关系管理子模块）
+
 - 新增美食地图模块
+
 - 新增现金流热力图和月度日历
 
 ### v2.0.0 (2024) - 旧系统
+
 - 基于 Django + Bootstrap + ECharts 的初始版本
+
 - 包含：oneday、times、health、wealth、goals、book、dance、sugar、travel、relation、dams、summary 等模块

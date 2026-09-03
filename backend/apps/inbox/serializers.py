@@ -38,7 +38,7 @@ class InboxItemSerializer(serializers.ModelSerializer):
             'user_id', 'created_at', 'updated_at',
             'completion_note', 'hesitate_reason', 'abandon_reason',
         ]
-        read_only_fields = ['id', 'processed_at', 'created_at', 'updated_at', 'completion_note']
+        read_only_fields = ['id', 'processed_at', 'created_at', 'updated_at']
 
     def get_category_display(self, obj):
         return obj.get_category_display()

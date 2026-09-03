@@ -47,10 +47,11 @@ export function bulkDeleteBooks(bids: number[]) {
   })
 }
 
-export function getBookStats() {
+export function getBookStats(params?: { year?: string }) {
   return request<BookStats>({
     url: '/books/stats/',
     method: 'get',
+    params,
   })
 }
 

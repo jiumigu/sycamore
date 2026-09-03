@@ -127,3 +127,7 @@ export function getMenstrualTrend() {
 export function getStepContrib() {
   return request({ url: '/health/records/contrib/', method: 'get' })
 }
+
+export function getStepDailyDetail(params: { date: string }) {
+  return request<{ date: string; total?: number; items: any[] }>({ url: '/health/records/daily_detail/', method: 'get', params })
+}

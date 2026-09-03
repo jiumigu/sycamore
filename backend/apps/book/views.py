@@ -68,7 +68,8 @@ class BookViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
-        data = BookService.get_stats()
+        year = request.query_params.get('year') or None
+        data = BookService.get_stats(year)
         serializer = BookStatsSerializer(data)
         return Response(serializer.data)
 

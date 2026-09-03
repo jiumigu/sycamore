@@ -190,54 +190,6 @@
       </div>
     </el-card>
 
-    <!-- 年度进度 -->
-    <el-card shadow="never" class="section-card">
-      <template #header>
-        <div class="card-header">
-          <span>📈 年度进度</span>
-          <span v-if="!loadingProgress && progress" class="progress-sub">
-            {{ progress.total_points }} / {{ progress.yearly_target }} 分
-            ({{ progress.progress_percent }}%)
-          </span>
-        </div>
-      </template>
-      <el-skeleton :loading="loadingProgress" animated>
-        <template #template>
-          <el-skeleton-item variant="text" style="width:100%;height:16px" />
-          <div style="margin-top:20px">
-            <el-skeleton-item variant="text" style="width:80%;height:10px;display:block;margin-bottom:12px" />
-            <el-skeleton-item variant="text" style="width:80%;height:10px;display:block;margin-bottom:12px" />
-            <el-skeleton-item variant="text" style="width:80%;height:10px;display:block;margin-bottom:12px" />
-          </div>
-        </template>
-        <template #default>
-          <div v-if="progress" class="progress-section">
-            <el-progress
-              :percentage="Math.min(progress.progress_percent, 100)"
-              :stroke-width="16"
-              :text-inside="true"
-              :color="progressColors"
-            />
-            <div class="module-bars">
-              <div v-for="mod in progress.modules" :key="mod.module" class="module-bar">
-                <div class="module-bar-label">
-                  <span>{{ mod.label }}</span>
-                  <span>{{ mod.points }}分</span>
-                </div>
-                <el-progress
-                  :percentage="Math.min(Math.round(mod.points / progress.yearly_target * 100), 100)"
-                  :stroke-width="10"
-                  :color="mod.color"
-                  :show-text="false"
-                />
-              </div>
-            </div>
-          </div>
-          <el-empty v-else description="年度进度看板已就绪，数据加载中…" :image-size="60" />
-        </template>
-      </el-skeleton>
-    </el-card>
-
     <!-- 每日金句 -->
     <el-card shadow="never" class="section-card">
       <template #header>
@@ -285,7 +237,7 @@ import { getDueReminders, createQuickReaderInteraction, getRecentReaderInteracti
 import { INTERACTION_TYPE_OPTIONS, ENERGY_OPTIONS } from '@/modules/relation/types/relationshipTypes'
 import type { ReaderInteraction } from '@/modules/relation/types/relationshipTypes'
 import { getYearlyOverview } from '@/modules/summary/api/summaryApi'
-import { getWeekCount } from '@/modules/temporal/api/temporalApi'
+import { getWeekCount, getWeekStats } from '@/modules/temporal/api/temporalApi'
 import { getRandomRetro } from '@/modules/summary/api/summaryApi'
 import { getRandomQuote } from '@/modules/toolkit/api/quoteApi'
 import type { InboxItem } from '@/modules/inbox/types/inboxTypes'
@@ -294,13 +246,6 @@ import type { Quote } from '@/modules/toolkit/types/quoteTypes'
 interface AlertItem {
   type: 'danger' | 'warning'
   text: string
-}
-
-interface ProgressData {
-  total_points: number
-  yearly_target: number
-  progress_percent: number
-  modules: { module: string; label: string; color: string; points: number }[]
 }
 
 interface RetroItem {
@@ -331,12 +276,11 @@ const stats = reactive({
   goalCount: 0,
   diaryCount: null as number | null,
   stepCount: null as number | null,
-  weeklyExpense: null as string | null,
+  weeklyExpense: null as number | null,
 })
 
 const pendingItems = ref<InboxItem[]>([])
 const alerts = reactive<AlertItem[]>([])
-const progress = ref<ProgressData | null>(null)
 const retroItem = ref<RetroItem | null>(null)
 const dailyQuote = ref<Quote | null>(null)
 const showQuoteFull = ref(false)
@@ -362,15 +306,7 @@ const loadingGoals = ref(true)
 const loadingDiary = ref(true)
 const loadingInbox = ref(true)
 const loadingAlerts = ref(true)
-const loadingProgress = ref(true)
 const loadingRetro = ref(true)
-
-const progressColors = [
-  { color: '#F97316', percentage: 25 },
-  { color: '#F59E0B', percentage: 50 },
-  { color: '#10B981', percentage: 75 },
-  { color: '#3B82F6', percentage: 100 },
-]
 
 async function fetchGoalStats() {
   loadingGoals.value = true
@@ -386,11 +322,13 @@ async function fetchGoalStats() {
   }
 }
 
-async function fetchDiaryCount() {
+async function fetchWeekStats() {
   loadingDiary.value = true
   try {
-    const res = await getWeekCount()
+    const res = await getWeekStats()
     stats.diaryCount = res.data.count
+    stats.stepCount = res.data.step_count
+    stats.weeklyExpense = res.data.weekly_expense
   } catch {
     stats.diaryCount = 0
   } finally {
@@ -447,27 +385,6 @@ async function fetchAlerts() {
   }
 
   loadingAlerts.value = false
-}
-
-async function fetchProgress() {
-  loadingProgress.value = true
-  try {
-    const year = new Date().getFullYear()
-    const res = await getYearlyOverview({ year })
-    const data = res.data
-    if (data) {
-      progress.value = {
-        total_points: data.total_points,
-        yearly_target: data.yearly_target,
-        progress_percent: data.progress_percent,
-        modules: data.modules ?? [],
-      }
-    }
-  } catch {
-    // noop
-  } finally {
-    loadingProgress.value = false
-  }
 }
 
 async function fetchRandomRetro() {
@@ -535,8 +452,7 @@ async function refreshAll() {
     fetchGoalStats(),
     fetchPendingItems(),
     fetchAlerts(),
-    fetchProgress(),
-    fetchDiaryCount(),
+    fetchWeekStats(),
     fetchRandomRetro(),
     refreshQuote(),
     fetchRecentInteractions(),
@@ -546,10 +462,9 @@ async function refreshAll() {
 onMounted(() => {
   // 各自独立加载，不互相阻塞
   fetchGoalStats()
-  fetchDiaryCount()
+  fetchWeekStats()
   fetchPendingItems()
   fetchAlerts()
-  fetchProgress()
   fetchRandomRetro()
   refreshQuote()
   fetchRecentInteractions()

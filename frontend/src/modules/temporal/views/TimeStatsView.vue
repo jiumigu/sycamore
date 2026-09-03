@@ -68,7 +68,7 @@
             <div class="stat-icon" style="background: #f0f5ff"><el-icon color="#2f54eb" :size="22"><TrendCharts /></el-icon></div>
             <div class="stat-info">
               <div class="stat-value">{{ store.overview?.production_percentage ?? 0 }}%</div>
-              <div class="stat-label">生产占比</div>
+              <div class="stat-label">学习占比</div>
             </div>
           </div>
         </el-card>
@@ -91,31 +91,6 @@
       </el-col>
     </el-row>
 
-    <!-- 📋 年度统计 -->
-    <el-card class="section-card">
-      <template #header><span>📋 年度统计</span></template>
-      <el-table :data="yearStats" style="width: 100%" size="small" stripe>
-        <el-table-column prop="years" label="年份" width="80" />
-        <el-table-column label="记录数" prop="count" align="right" min-width="100" />
-        <el-table-column label="OneDay 字数" prop="total_oneday" align="right" min-width="120" />
-        <el-table-column label="Page 字数" prop="total_page" align="right" min-width="120" />
-        <el-table-column label="总字数" prop="total_words" align="right" min-width="120" />
-        <el-table-column label="平均字数" prop="avg_words" align="right" min-width="120" />
-      </el-table>
-    </el-card>
-
-    <!-- 📅 月度统计 -->
-    <el-card class="section-card">
-      <template #header><span>📅 月度统计</span></template>
-      <el-table :data="monthlyStats" style="width: 100%" size="small" stripe>
-        <el-table-column prop="month" label="月份" width="100" />
-        <el-table-column label="OneDay 字数" prop="oneday_words" align="right" min-width="120" />
-        <el-table-column label="Page 字数" prop="page_words" align="right" min-width="120" />
-        <el-table-column label="总字数" prop="total_words" align="right" min-width="120" />
-        <el-table-column label="记录数" prop="record_count" align="right" min-width="100" />
-        <el-table-column label="日均字数" prop="avg_words" align="right" min-width="120" />
-      </el-table>
-    </el-card>
 
     <!-- 周度追踪 -->
     <el-divider />
@@ -256,10 +231,50 @@
       <el-button size="small" type="primary" @click="openTaskForm()">+ 新增任务</el-button>
       <span class="hint" style="margin-left:8px">共 {{ taskTotal }} 条 · 备注可在此编辑完善</span>
     </div>
+    <!-- 筛选栏 -->
+    <div class="task-filter-bar">
+      <el-date-picker
+        v-model="taskFilter.dateRange"
+        type="daterange"
+        range-separator="~"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        value-format="YYYY-MM-DD"
+        size="small"
+        style="width:230px"
+        @change="applyTaskFilter"
+      />
+      <el-select
+        v-model="taskFilter.category"
+        placeholder="分类"
+        clearable
+        size="small"
+        style="width:130px"
+        @change="applyTaskFilter"
+      >
+        <el-option v-for="c in TASK_CATEGORIES" :key="c" :label="c" :value="c" />
+      </el-select>
+      <el-input
+        v-model="taskFilter.keyword"
+        placeholder="搜索任务名 / 备注"
+        clearable
+        size="small"
+        style="width:180px"
+        @keyup.enter="applyTaskFilter"
+        @clear="applyTaskFilter"
+      >
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
+      <el-button size="small" @click="applyTaskFilter">查询</el-button>
+      <el-button size="small" @click="resetTaskFilter">重置</el-button>
+    </div>
     <el-table :data="tasks" v-loading="tasksLoading" stripe size="small" max-height="420">
       <el-table-column label="任务" prop="task_name" min-width="130" show-overflow-tooltip />
       <el-table-column label="开始时间" width="140">
         <template #default="{ row }">{{ (row.start_time || '').slice(0, 16) }}</template>
+      </el-table-column>
+      <el-table-column label="结束时间" width="140">
+        <template #default="{ row }">{{ (row.end_time || '').slice(0, 16) || '-' }}</template>
       </el-table-column>
       <el-table-column label="时长" width="70">
         <template #default="{ row }">{{ row.duration_display || '-' }}</template>
@@ -327,7 +342,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Upload, Clock, Document, Calendar, TrendCharts } from '@element-plus/icons-vue'
+import { Refresh, Upload, Clock, Document, Calendar, TrendCharts, Search } from '@element-plus/icons-vue'
 import { useTemporalStore } from '../stores/temporalStore'
 import * as temporalApi from '@/modules/temporal/api/temporalApi'
 import * as echarts from 'echarts'
@@ -350,28 +365,7 @@ const trendRef = ref<HTMLElement>()
 let balanceChart: echarts.ECharts | null = null
 let trendChart: echarts.ECharts | null = null
 
-// ─── 年度统计（来自日记流 stats） ───
-const yearStats = computed(() => {
-  return (store.stats?.year_stats || []).map(s => ({
-    ...s,
-    total_oneday: s.total_oneday || 0,
-    total_page: s.total_page || 0,
-    total_words: s.total_words || 0,
-    avg_words: Math.round(s.avg_words || 0),
-  }))
-})
 
-// ─── 每月字数（来自日记流 stats） ───
-const monthlyStats = computed(() => {
-  return (store.stats?.month_stats || []).map(m => ({
-    month: m.month,
-    oneday_words: m.total_oneday || 0,
-    page_words: m.total_page || 0,
-    total_words: m.total_words || 0,
-    record_count: m.count || 0,
-    avg_words: m.count ? Math.round((m.total_words || 0) / m.count) : 0,
-  }))
-})
 
 // ─── 导入 ───
 const importVisible = ref(false)
@@ -463,8 +457,8 @@ function initTrendChart() {
   if (!trendChart) trendChart = echarts.init(trendRef.value)
 
   const data = store.trendData || []
-  const categories = ['生产与创造', '维护与秩序', '滋养与成长', '连接与记录']
-  const colorMap = ['#10B981', '#9CA3AF', '#F59E0B', '#3B82F6']
+  const categories = ['工作', '学习', '生活', '兴趣记录']
+  const colorMap = ['#EF4444', '#10B981', '#F59E0B', '#3B82F6']
 
   trendChart.setOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -590,6 +584,26 @@ onMounted(async () => {
 })
 
 // ─── 任务清单 CRUD ───
+const TASK_CATEGORIES = ['工作', '学习', '生活', '兴趣记录']
+
+const taskFilter = reactive<{ dateRange: string[]; category: string; keyword: string }>({
+  dateRange: [],
+  category: '',
+  keyword: '',
+})
+
+function applyTaskFilter() {
+  taskPage.value = 1
+  loadTasks()
+}
+
+function resetTaskFilter() {
+  taskFilter.dateRange = []
+  taskFilter.category = ''
+  taskFilter.keyword = ''
+  applyTaskFilter()
+}
+
 const taskDialogVisible = ref(false)
 const taskFormVisible = ref(false)
 const tasks = ref<any[]>([])
@@ -606,7 +620,14 @@ const taskForm = reactive({
 async function loadTasks() {
   tasksLoading.value = true
   try {
-    const res = await temporalApi.getTaskList({ page: taskPage.value, page_size: 20 })
+    const params: Record<string, unknown> = { page: taskPage.value, page_size: 20 }
+    if (taskFilter.dateRange?.length === 2) {
+      params.date_from = taskFilter.dateRange[0]
+      params.date_to = taskFilter.dateRange[1]
+    }
+    if (taskFilter.category) params.category = taskFilter.category
+    if (taskFilter.keyword.trim()) params.search = taskFilter.keyword.trim()
+    const res = await temporalApi.getTaskList(params)
     const data = res.data
     tasks.value = (data.results || data) as any[]
     taskTotal.value = data.count ?? tasks.value.length
@@ -758,5 +779,12 @@ async function handleDeleteTask(row: any) {
       .legend-color { display: inline-block; width: 16px; height: 16px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
     }
   }
+}
+.task-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 </style>

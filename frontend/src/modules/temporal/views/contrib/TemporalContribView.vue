@@ -22,9 +22,19 @@
         :title="title"
         :unit-label="unitLabel"
         :positive-negative="posNeg"
+        @cell-click="onCellClick"
       />
       <el-empty v-else-if="!loading" description="暂无数据" />
     </el-card>
+
+    <DailyDetailDialog
+      v-model:visible="detailVisible"
+      :title="`${detailDate} 时间任务`"
+      :data="detailItems"
+      :columns="detailColumns"
+      :loading="detailLoading"
+      :summary="detailSummary"
+    />
   </div>
 </template>
 
@@ -33,6 +43,8 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Refresh } from '@element-plus/icons-vue'
 import ContributionGraph from '@/shared/components/ContributionGraph.vue'
+import DailyDetailDialog from '@/shared/components/DailyDetailDialog.vue'
+import { getTaskDailyDetail } from '@/modules/temporal/api/temporalApi'
 import * as temporalApi from '@/modules/temporal/api/temporalApi'
 
 const title = '时间贡献图'
@@ -42,6 +54,38 @@ const graphData = ref<Array<{ date: string; value: number }>>([])
 const minYear = ref(2020)
 const maxYear = ref(new Date().getFullYear())
 const loading = ref(false)
+
+// ─── 每日明细弹窗 ───
+const detailVisible = ref(false)
+const detailDate = ref('')
+const detailItems = ref<any[]>([])
+const detailLoading = ref(false)
+const detailSummary = ref('')
+const detailColumns = [
+  { prop: 'start_time', label: '开始', width: 130, formatter: (v: string) => v ? v.slice(0, 16) : '' },
+  { prop: 'task_name', label: '任务', minWidth: 200 },
+  { prop: 'category_level1', label: '一级分类', width: 90 },
+  { prop: 'duration_hours', label: '时长(小时)', width: 90, align: 'right' as const },
+  { prop: 'notes', label: '备注', minWidth: 120 },
+]
+
+async function onCellClick(date: string) {
+  detailDate.value = date
+  detailVisible.value = true
+  detailItems.value = []
+  detailSummary.value = ''
+  detailLoading.value = true
+  try {
+    const res = await getTaskDailyDetail({ date })
+    const data: any = res.data
+    detailItems.value = data.items || []
+    detailSummary.value = data.items?.length ? `共 ${data.items.length} 项，总时长 ${data.total} 小时` : ''
+  } catch {
+    ElMessage.error('获取明细失败')
+  } finally {
+    detailLoading.value = false
+  }
+}
 
 const CACHE_KEY = 'contrib_cache_TemporalContribView'
 

@@ -92,6 +92,7 @@
           :max-year="currentYear"
           :title="`${currentYear} 年日记字数`"
           :unit-label="'字'"
+          @cell-click="onCellClick"
         />
         <el-empty v-else-if="!loadingHeatmap" description="该年暂无日记" />
       </div>
@@ -127,6 +128,17 @@
         >
           <template #prefix><el-icon><CollectionTag /></el-icon></template>
         </el-input>
+        <el-date-picker
+          v-model="searchForm.dateRange"
+          type="daterange"
+          range-separator="~"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          class="filter-select"
+          style="width: 230px"
+          @change="handleSearch"
+        />
         <el-button type="danger" :disabled="!selectedIds.length" @click="handleBulkDelete" class="bulk-delete-btn">
           <el-icon><Delete /></el-icon>
           批量删除
@@ -354,6 +366,13 @@
       </template>
     </el-dialog>
   </div>
+    <DailyDetailDialog
+      v-model:visible="detailVisible"
+      :title="`${detailDate} 日记`"
+      :data="detailItems"
+      :columns="detailColumns"
+      :loading="detailLoading"
+    />
 </template>
 
 <script setup lang="ts">
@@ -367,6 +386,8 @@ import { useTemporalStore } from '../stores/temporalStore'
 import { OTYPE_OPTIONS } from '../types/temporalTypes'
 import { getYearlyHeatmap } from '../api/temporalApi'
 import ContributionGraph from '@/shared/components/ContributionGraph.vue'
+import DailyDetailDialog from '@/shared/components/DailyDetailDialog.vue'
+import { getOnedayDailyDetail } from '@/modules/temporal/api/temporalApi'
 import type { OneDayPage } from '../types/temporalTypes'
 import LogseqViewer from '../components/LogseqViewer.vue'
 import { getPresetByType } from '@/shared/api/coreApi'
@@ -439,6 +460,7 @@ const searchForm = reactive({
   otype: '',
   title: '',
   flag: '',
+  dateRange: [] as string[],
 })
 
 const formData = reactive({
@@ -548,6 +570,7 @@ function resetSearch() {
   searchForm.otype = ''
   searchForm.title = ''
   searchForm.flag = ''
+  searchForm.dateRange = []
   handleSearch()
 }
 
@@ -558,8 +581,12 @@ async function fetchData() {
   }
   if (searchForm.years) params.years = searchForm.years
   if (searchForm.otype) params.otype = searchForm.otype
-  if (searchForm.title) params.title = searchForm.title
+  if (searchForm.title) params.search = searchForm.title
   if (searchForm.flag) params.flag = searchForm.flag
+  if (searchForm.dateRange?.length === 2) {
+    params.date_from = searchForm.dateRange[0]
+    params.date_to = searchForm.dateRange[1]
+  }
   await store.fetchOneDayList(params)
 }
 
@@ -677,15 +704,38 @@ onMounted(() => {
   fetchYearlyHeatmap(currentYear.value)
   loadPresetTags()
 })
+
+// ─── 贡献图点击查看当日日记 ───
+const detailVisible = ref(false)
+const detailDate = ref('')
+const detailItems = ref<any[]>([])
+const detailLoading = ref(false)
+const detailColumns = [
+  { prop: 'title', label: '主题', minWidth: 200 },
+  { prop: 'otype', label: '类型', width: 100 },
+  { prop: 'total', label: '总字数', width: 100, align: 'right' as const },
+  { prop: 'flag', label: '标签', minWidth: 100 },
+  { prop: 'remark', label: '备注', minWidth: 180 },
+]
+
+async function onCellClick(date: string) {
+  detailDate.value = date
+  detailVisible.value = true
+  detailItems.value = []
+  detailLoading.value = true
+  try {
+    const res = await getOnedayDailyDetail({ date })
+    const data: any = res.data
+    detailItems.value = data.items || []
+  } catch {
+    ElMessage.error('获取明细失败')
+  } finally {
+    detailLoading.value = false
+  }
+}
 </script>
 
 <style scoped lang="scss">
-.daily-log-view {
-  padding: 20px;
-  background: var(--el-bg-color-page);
-  min-height: 100vh;
-}
-
 // ── 页面头部 ──
 .page-header {
   display: flex;

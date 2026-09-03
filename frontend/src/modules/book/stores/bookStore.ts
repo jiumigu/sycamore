@@ -53,9 +53,9 @@ export const useBookStore = defineStore('book', () => {
     }
   }
 
-  async function fetchStats() {
+  async function fetchStats(params?: { year?: string }) {
     try {
-      const response = await bookApi.getBookStats()
+      const response = await bookApi.getBookStats(params)
       stats.value = response.data
       return response.data
     } catch (error) {

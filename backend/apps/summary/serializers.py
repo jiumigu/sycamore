@@ -1,6 +1,7 @@
 """综合进度看板 — 响应结构序列化器"""
 
 from rest_framework import serializers
+from apps.summary.models import SevenDimConfig
 
 
 class ModuleEntrySerializer(serializers.Serializer):
@@ -110,3 +111,21 @@ class InsightSerializer(serializers.Serializer):
     type = serializers.CharField()
     icon = serializers.CharField()
     message = serializers.CharField()
+
+
+class SevenDimConfigSerializer(serializers.ModelSerializer):
+    """七维封顶配置序列化器"""
+
+    class Meta:
+        model = SevenDimConfig
+        fields = [
+            'id', 'wealth_max', 'health_max', 'times_max',
+            'words_max', 'sugar_max', 'travel_max', 'book_max',
+            'note', 'is_active', 'created_at',
+        ]
+        read_only_fields = ['id', 'is_active', 'created_at']
+        extra_kwargs = {
+            f: {'min_value': 1, 'required': False}
+            for f in ['wealth_max', 'health_max', 'times_max',
+                      'words_max', 'sugar_max', 'travel_max', 'book_max']
+        }

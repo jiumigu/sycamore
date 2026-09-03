@@ -63,7 +63,6 @@ export const allMenuItems: MenuItem[] = [
   { key: 'toolkit_history', path: '/toolkit/history', label: '执行历史', icon: 'Timer', group: 'tools' },
 
   // ── 系统运维 ──
-  { key: 'admin_tags', path: '/admin/tag-manager', label: '标签管理器', icon: 'PriceTag', group: 'system' },
   { key: 'admin_settings', path: '/admin/settings', label: '系统设置', icon: 'Setting', group: 'system' },
   { key: 'admin_presets', path: '/admin/presets', label: '系统预设', icon: 'Collection', group: 'system' },
   { key: 'admin_menus', path: '/admin/menus', label: '菜单管理', icon: 'Menu', group: 'system' },

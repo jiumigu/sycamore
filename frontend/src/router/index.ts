@@ -98,6 +98,7 @@ const routes: RouteRecordRaw[] = [
   // 精神滋养
   { path: '/nourishment', name: 'nourishment', component: () => import('@/modules/sugar/views/SugarView.vue'), meta: { title: '精神花园' } },
   { path: '/books', name: 'books', component: BookView, meta: { title: '书籍阅读' } },
+  { path: '/books/charts', name: 'books-charts', component: () => import('@/modules/book/views/BookChartView.vue'), meta: { title: '阅读图形分析' } },
   { path: '/sugar', name: 'sugar', component: () => import('@/modules/sugar/views/SugarView.vue'), meta: { title: '小确幸' } },
   { path: '/sugar/joy-types', name: 'sugar-joy-types', component: () => import('@/modules/sugar/views/JoyTypeChart.vue'), meta: { title: '快乐偏好图谱' } },
   { path: '/treasure', name: 'treasure', component: () => import('@/modules/treasure/views/TreasureHub.vue'), meta: { title: '好东西档案馆' } },
@@ -269,12 +270,6 @@ const routes: RouteRecordRaw[] = [
   },
 
   // 系统运维
-  {
-    path: '/admin/tag-manager',
-    name: 'TagManager',
-    component: () => import('@/modules/toolkit/views/tools/TagManager.vue'),
-    meta: { title: '标签管理器' },
-  },
   {
     path: '/admin/settings',
     name: 'AdminSettings',

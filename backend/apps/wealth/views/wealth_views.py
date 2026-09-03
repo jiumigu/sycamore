@@ -901,6 +901,39 @@ class BillViewSet(viewsets.ModelViewSet):
         return qs
 
     @action(detail=False, methods=['get'])
+    def daily_detail(self, request):
+        # 每日明细：按日期查当日所有账单
+        from datetime import datetime
+
+        date_str = request.query_params.get('date')
+        if not date_str:
+            return Response({'error': 'date 参数必填'}, status=400)
+        try:
+            d = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'error': 'date 格式 YYYY-MM-DD'}, status=400)
+        ws = datetime.combine(d, datetime.min.time())
+        we = datetime.combine(d, datetime.max.time())
+        qs = WealthBillList.objects.filter(date__gte=ws, date__lte=we).order_by('date')
+        items = [{
+            'id': b.id,
+            'time': b.date.isoformat() if b.date else None,
+            'transaction_type': b.transaction_type,
+            'category': b.category or '',
+            'merchant': b.merchant or '',
+            'amount': float(b.amount or 0),
+            'notes': b.notes or '',
+        } for b in qs]
+        income = round(sum(x['amount'] for x in items if x['transaction_type'] == '收入'), 2)
+        expense = round(sum(x['amount'] for x in items if x['transaction_type'] == '支出'), 2)
+        return Response({
+            'date': date_str,
+            'income': income,
+            'expense': expense,
+            'items': items,
+        })
+
+    @action(detail=False, methods=["get"])
     def contrib(self, request):
         """贡献图：单日收支净值（收入 - 支出）聚合"""
         rows = list(

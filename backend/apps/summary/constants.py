@@ -38,13 +38,13 @@ MONTHLY_TARGET_RATIO = 1 / 12  # 33.33 点/月
 
 # ── 雷达图最大参考值 ──────────────────────────────────────
 RADAR_MAX: dict[str, float] = {
-    WEALTH: 100.0,
-    HEALTH: 80.0,
-    TIMES: 80.0,
-    BOOK: 60.0,
-    SUGAR: 50.0,
-    TRAVEL: 20.0,
-    WORDS: 20.0,
+    WEALTH: 10.0,    # 财富封顶 10 万元（不设 100，让"财富满分"可实现）
+    HEALTH: 80.0,    # 万步/年
+    TIMES: 80.0,     # 千小时级/年
+    BOOK: 20.0,      # 阅读封顶 20 本/年（好书要细嚼慢咽）
+    SUGAR: 50.0,     # 幸福等级
+    TRAVEL: 20.0,    # 旅行次数
+    WORDS: 20.0,     # 万字/年
 }
 
 MODULE_LIST = [WEALTH, HEALTH, TIMES, WORDS, SUGAR, TRAVEL, BOOK]

@@ -12,9 +12,12 @@ DATABASES = {
         'PASSWORD': env('DB_PASSWORD', default='Syca@2026..'),  # noqa: F405
         'HOST': env('DB_HOST', default='127.0.0.1'),       # noqa: F405
         'PORT': env('DB_PORT', default='3306'),             # noqa: F405
+        # 历史数据 start_time 等均为 naive 本地时间（CSV 导入），
+        # 指定数据库时区为 Asia/Shanghai，避免 Django 误按 UTC 解释导致 +8h 偏移
+        'TIME_ZONE': 'Asia/Shanghai',
         'OPTIONS': {
             'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES', time_zone='+08:00'",
         },
     },
 }

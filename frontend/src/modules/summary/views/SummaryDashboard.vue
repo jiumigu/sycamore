@@ -27,54 +27,6 @@
       </div>
     </div>
 
-    <!-- 概览统计卡片 -->
-    <el-row :gutter="16" class="stats-row">
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-body">
-            <div class="stat-icon" style="background: #D1FAE5; color: #059669">🎯</div>
-            <div>
-              <div class="stat-value">{{ overview?.total_points ?? '--' }}</div>
-              <div class="stat-label">年度总进度 / {{ YEARLY_TARGET }}</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-body">
-            <div class="stat-icon" style="background: #FEF3C7; color: #D97706">📈</div>
-            <div>
-              <div class="stat-value">{{ overview?.progress_percent ?? '--' }}%</div>
-              <div class="stat-label">目标完成率</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-body">
-            <div class="stat-icon" style="background: #DBEAFE; color: #2563EB">⏳</div>
-            <div>
-              <div class="stat-value">{{ overview?.remaining_points ?? '--' }}</div>
-              <div class="stat-label">剩余目标 / 还需</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-body">
-            <div class="stat-icon" style="background: #FCE4EC; color: #DB2777">📅</div>
-            <div>
-              <div class="stat-value">{{ overview?.monthly_target ?? '--' }}</div>
-              <div class="stat-label">月度目标 / 月均</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
     <!-- 进度环 + 模块贡献 + 雷达图 -->
     <el-row :gutter="16" class="summary-top-row">
       <!-- 年度进度环 -->
@@ -95,7 +47,13 @@
       <el-col :span="8">
         <el-card shadow="hover" class="summary-card">
           <template #header>
-            <span class="card-title">📊 各模块贡献</span>
+            <div class="card-header-flex">
+              <span class="card-title">📊 各模块贡献</span>
+              <span v-if="overview?.total_points != null" class="year-progress-badge">
+                {{ overview.total_points }} / {{ overview.yearly_target }} 分
+                ({{ overview.progress_percent }}%)
+              </span>
+            </div>
           </template>
           <ModuleBar
             v-if="overview?.modules"
@@ -110,9 +68,17 @@
       <!-- 雷达图 -->
       <el-col :span="8">
         <el-card shadow="hover" class="summary-card">
-          <template #header><span class="card-title">📡 七维平衡</span></template>
-          <RadarChart v-if="store.radarData" />
-          <div v-else class="chart-empty">暂无数据</div>
+          <template #header>
+          <div class="card-header-flex">
+            <span class="card-title">📡 七维平衡</span>
+            <el-button size="small" text type="primary" @click="openRadarConfig">
+              <el-icon style="margin-right:2px"><Setting /></el-icon>配置
+            </el-button>
+          </div>
+        </template>
+          <!-- v-show 保持组件常驻，避免 v-if 卸载/重挂载导致 ECharts DOM 竞态 -->
+          <RadarChart v-show="!!store.radarData" />
+          <div v-if="!store.radarData" class="chart-empty">暂无数据</div>
         </el-card>
       </el-col>
     </el-row>
@@ -139,9 +105,10 @@
       <template #header>
         <div class="card-header">
           <span class="card-title">📅 月度明细</span>
-          <el-button size="small" @click="showMonthModal = true">
-            查看本月详情
-          </el-button>
+          <div class="header-actions">
+            <el-button size="small" @click="openYearDetail">📆 年度明细</el-button>
+            <el-button size="small" @click="showMonthModal = true">查看本月详情</el-button>
+          </div>
         </div>
       </template>
       <el-table :data="monthTableData" stripe size="small" style="width: 100%" @row-click="handleRowClick">
@@ -198,6 +165,21 @@
     </el-dialog>
 
     <!-- 月度详情弹窗 -->
+    <!-- 年度明细弹窗 -->
+    <el-dialog v-model="showYearModal" title="📆 年度明细" width="960" append-to-body>
+      <el-table :data="yearRows" v-loading="yearLoading" stripe size="small" max-height="420" style="width: 100%">
+        <el-table-column v-for="col in YEAR_COLUMNS" :key="col.key" :label="col.label" :prop="col.key"
+          align="right" :min-width="col.width" />
+        <el-table-column label="达成率" min-width="90" align="right" fixed="right">
+          <template #default="{ row }">
+            <span :class="row.progress_percent >= 100 ? 'text-success' : row.progress_percent >= 50 ? 'text-primary' : 'text-warning'">
+              {{ row.progress_percent }}%
+            </span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
     <MonthlyModal
       v-model:visible="showMonthModal"
       :year="store.currentYear"
@@ -208,8 +190,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { Refresh, Setting } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { getRadarConfig, saveRadarConfig as apiSaveRadarConfig, getRadarConfigHistory, getYearlyDetail } from '../api/summaryApi'
 import { useSummaryStore } from '../stores/summaryStore'
 import { YEARLY_TARGET } from '../types/summaryTypes'
 import QuarterlyDecisionCards from '../components/QuarterlyDecisionCards.vue'
@@ -226,8 +210,87 @@ const store = useSummaryStore()
 const currentYear = computed(() => store.currentYear)
 const overview = computed(() => store.overview)
 const showMonthModal = ref(false)
+
+// ─── 年度明细 ───
+const YEAR_COLUMNS = [
+  { key: 'year', label: '年份', width: 70 },
+  { key: 'total_points', label: '总进度', width: 80 },
+  { key: 'yearly_target', label: '目标', width: 70 },
+  { key: 'wealth', label: '财富', width: 70 },
+  { key: 'health', label: '健康', width: 70 },
+  { key: 'times', label: '时间投入', width: 85 },
+  { key: 'book', label: '阅读', width: 70 },
+  { key: 'sugar', label: '小确幸', width: 70 },
+  { key: 'travel', label: '旅行', width: 70 },
+  { key: 'words', label: '文字', width: 70 },
+]
+const showYearModal = ref(false)
+const yearRows = ref<Array<Record<string, any>>>([])
+const yearLoading = ref(false)
+
+async function openYearDetail() {
+  showYearModal.value = true
+  if (yearRows.value.length) return
+  yearLoading.value = true
+  try {
+    const res = await getYearlyDetail()
+    yearRows.value = res.data.years || []
+  } catch {
+    ElMessage.error('获取年度明细失败')
+  } finally {
+    yearLoading.value = false
+  }
+}
 const dailyQuote = ref<Quote | null>(null)
 const showQuoteFull = ref(false)
+
+// ─── 七维平衡封顶配置 ───
+const CONFIG_ITEMS = [
+  { key: 'wealth_max', label: '财富', unit: '万元' },
+  { key: 'health_max', label: '健康', unit: '万步' },
+  { key: 'times_max', label: '时间投入', unit: '小时/30' },
+  { key: 'words_max', label: '文字记录', unit: '万字' },
+  { key: 'sugar_max', label: '小确幸', unit: '级' },
+  { key: 'travel_max', label: '旅行', unit: '次' },
+  { key: 'book_max', label: '阅读', unit: '本' },
+]
+const configItems = CONFIG_ITEMS
+const configVisible = ref(false)
+const savingConfig = ref(false)
+const configForm = reactive<Record<string, number | string>>({
+  wealth_max: 10, health_max: 80, times_max: 80,
+  words_max: 20, sugar_max: 50, travel_max: 20, book_max: 20, note: '',
+})
+const configHistory = ref<Array<Record<string, any>>>([])
+
+async function openRadarConfig() {
+  try {
+    const res = await getRadarConfig()
+    for (const item of CONFIG_ITEMS) {
+      if (res.data[item.key] != null) configForm[item.key] = res.data[item.key]
+    }
+    configForm.note = ''
+    configVisible.value = true
+    const his = await getRadarConfigHistory()
+    configHistory.value = his.data || []
+  } catch {
+    ElMessage.error('获取配置失败')
+  }
+}
+
+async function saveRadarConfig() {
+  savingConfig.value = true
+  try {
+    await apiSaveRadarConfig({ ...configForm })
+    ElMessage.success('封顶配置已保存')
+    configVisible.value = false
+    await store.fetchRadar()  // 立即刷新雷达图
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } finally {
+    savingConfig.value = false
+  }
+}
 
 async function refreshQuote() {
   try {
@@ -293,49 +356,6 @@ onMounted(() => {
   align-items: center;
 }
 
-/* 统计卡片 */
-.stats-row {
-  margin-bottom: 16px;
-}
-
-.stat-card {
-  border: none;
-  border-radius: 10px;
-  margin-bottom: 16px;
-}
-.stat-card :deep(.el-card__body) {
-  padding: 16px;
-}
-
-.stat-body {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.stat-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-.stat-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  line-height: 1.2;
-}
-
-.stat-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 2px;
-}
 
 /* 图表卡片 */
 .charts-row {
@@ -450,5 +470,75 @@ onMounted(() => {
 .full-quote-source {
   font-size: 13px;
   color: #9CA3AF;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+.card-header-flex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.year-progress-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1F2937;
+  background: #F3F4F6;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+.config-hint {
+  font-size: 12px;
+  color: #6B7280;
+  margin-bottom: 12px;
+}
+.config-unit {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #9CA3AF;
+}
+.history-divider {
+  margin: 4px 0 8px;
+}
+.history-collapse {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.history-time {
+  font-size: 12px;
+  color: #4B5563;
+  margin-right: 6px;
+}
+.history-tag {
+  margin-right: 6px;
+}
+.history-note {
+  font-size: 12px;
+  color: #6B7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.history-detail {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 16px;
+  padding: 4px 8px;
+}
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.history-label {
+  color: #6B7280;
+}
+.history-empty {
+  font-size: 12px;
+  color: #9CA3AF;
+  text-align: center;
+  padding: 8px 0;
 }
 </style>

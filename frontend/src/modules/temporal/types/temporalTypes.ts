@@ -35,21 +35,6 @@ export interface OneDayPageStats {
     total_words: number
     avg_words: number
   }>
-  year_stats: Array<{
-    years: string
-    count: number
-    total_oneday: number
-    total_page: number
-    total_words: number
-    avg_words: number
-  }>
-  month_stats: Array<{
-    month: string
-    count: number
-    total_oneday: number
-    total_page: number
-    total_words: number
-  }>
 }
 
 export const OTYPE_OPTIONS = [
@@ -147,8 +132,8 @@ export interface ImportResult {
 }
 
 export const CATEGORY_MAP: Record<string, { color: string; icon: string }> = {
-  '生产与创造': { color: '#10B981', icon: '💡' },
-  '维护与秩序': { color: '#9CA3AF', icon: '🔧' },
-  '滋养与成长': { color: '#F59E0B', icon: '🌱' },
-  '连接与记录': { color: '#3B82F6', icon: '📝' },
+  '工作': { color: '#EF4444', icon: '💼' },
+  '学习': { color: '#10B981', icon: '📖' },
+  '生活': { color: '#F59E0B', icon: '🏠' },
+  '兴趣记录': { color: '#3B82F6', icon: '🎨' },
 }

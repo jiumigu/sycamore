@@ -18,6 +18,22 @@ export function getRadar(params?: { year?: number }) {
   return request({ url: '/summary/radar/', method: 'get', params })
 }
 
+export function getRadarConfig() {
+  return request({ url: '/summary/radar_config/', method: 'get' })
+}
+
+export function saveRadarConfig(data: Record<string, number | string>) {
+  return request({ url: '/summary/radar_config/', method: 'patch', data })
+}
+
+export function getRadarConfigHistory() {
+  return request({ url: '/summary/radar_config_history/', method: 'get' })
+}
+
+export function getYearlyDetail() {
+  return request({ url: '/summary/yearly_detail/', method: 'get' })
+}
+
 export function getYears() {
   return request({ url: '/summary/years/', method: 'get' })
 }

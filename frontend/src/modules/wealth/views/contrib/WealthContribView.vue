@@ -22,9 +22,19 @@
         :title="title"
         :unit-label="unitLabel"
         :positive-negative="posNeg"
+        @cell-click="onCellClick"
       />
       <el-empty v-else-if="!loading" description="暂无数据" />
     </el-card>
+
+    <DailyDetailDialog
+      v-model:visible="detailVisible"
+      :title="`${detailDate} 账单`"
+      :data="detailItems"
+      :columns="detailColumns"
+      :loading="detailLoading"
+      :summary="detailSummary"
+    />
   </div>
 </template>
 
@@ -33,6 +43,8 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Refresh } from '@element-plus/icons-vue'
 import ContributionGraph from '@/shared/components/ContributionGraph.vue'
+import DailyDetailDialog from '@/shared/components/DailyDetailDialog.vue'
+import { getBillDailyDetail } from '@/modules/wealth/api/wealthApi'
 import * as wealthApi from '@/modules/wealth/api/wealthApi'
 
 const title = '财富贡献图'
@@ -42,6 +54,39 @@ const graphData = ref<Array<{ date: string; value: number }>>([])
 const minYear = ref(2020)
 const maxYear = ref(new Date().getFullYear())
 const loading = ref(false)
+
+// ─── 每日明细弹窗 ───
+const detailVisible = ref(false)
+const detailDate = ref('')
+const detailItems = ref<any[]>([])
+const detailLoading = ref(false)
+const detailSummary = ref('')
+const detailColumns = [
+  { prop: 'time', label: '时间', width: 130, formatter: (v: string) => v ? v.slice(0, 16) : '' },
+  { prop: 'transaction_type', label: '收支', width: 70 },
+  { prop: 'category', label: '分类', width: 100 },
+  { prop: 'merchant', label: '商户', minWidth: 120 },
+  { prop: 'amount', label: '金额', width: 100, align: 'right' as const },
+  { prop: 'notes', label: '备注', minWidth: 120 },
+]
+
+async function onCellClick(date: string) {
+  detailDate.value = date
+  detailVisible.value = true
+  detailItems.value = []
+  detailSummary.value = ''
+  detailLoading.value = true
+  try {
+    const res = await getBillDailyDetail({ date })
+    const data: any = res.data
+    detailItems.value = data.items || []
+    detailSummary.value = data.items?.length ? `收入 ¥${data.income} · 支出 ¥${data.expense}` : ''
+  } catch {
+    ElMessage.error('获取明细失败')
+  } finally {
+    detailLoading.value = false
+  }
+}
 
 const CACHE_KEY = 'contrib_cache_WealthContribView'
 
