@@ -226,22 +226,38 @@ CREATE TABLE IF NOT EXISTS `toolkit_decision_record` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
-# toolkit_ask_topic / toolkit_ask_answer（managed 新表，--no-migrations 下镜像）
+# toolkit_ask_topic / toolkit_ask_answer / toolkit_ask_scene（managed 表，--no-migrations 下镜像）
+_CREATE_ASK_SCENE_SQL = """
+CREATE TABLE IF NOT EXISTS `toolkit_ask_scene` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` integer NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `description` longtext NOT NULL,
+  `sort` integer NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
 _CREATE_ASK_TOPIC_SQL = """
 CREATE TABLE IF NOT EXISTS `toolkit_ask_topic` (
   `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `user_id` integer NOT NULL,
+  `scene_id` integer NULL,
   `title` varchar(200) NOT NULL,
   `question` longtext NOT NULL,
   `background` longtext NOT NULL,
   `tags` json NOT NULL,
   `created_at` datetime(6) NOT NULL,
-  `updated_at` datetime(6) NOT NULL
+  `updated_at` datetime(6) NOT NULL,
+  KEY `ask_topic_scene_idx` (`scene_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 _CREATE_ASK_ANSWER_SQL = """
 CREATE TABLE IF NOT EXISTS `toolkit_ask_answer` (
   `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `parent_id` integer NULL,
+  `question` longtext NOT NULL,
   `ai` varchar(50) NOT NULL,
   `session` varchar(100) NOT NULL,
   `answer` longtext NOT NULL,
@@ -250,7 +266,8 @@ CREATE TABLE IF NOT EXISTS `toolkit_ask_answer` (
   `note` longtext NOT NULL,
   `created_at` datetime(6) NOT NULL,
   `topic_id` integer NOT NULL,
-  KEY `ask_topic_asked_idx` (`topic_id`, `asked_at`)
+  KEY `ask_topic_asked_idx` (`topic_id`, `asked_at`),
+  KEY `ask_answer_parent_idx` (`parent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
@@ -271,5 +288,6 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_TOOLKIT_DEF_TABLE_SQL)
             cursor.execute(_CREATE_TRACKER_TABLE_SQL)
             cursor.execute(_CREATE_RECORD_TABLE_SQL)
+            cursor.execute(_CREATE_ASK_SCENE_SQL)
             cursor.execute(_CREATE_ASK_TOPIC_SQL)
             cursor.execute(_CREATE_ASK_ANSWER_SQL)

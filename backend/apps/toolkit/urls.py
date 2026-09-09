@@ -14,6 +14,7 @@ router.register(r'decision-trackers', views.DecisionTrackerViewSet, basename='de
 router.register(r'decision-records', views.DecisionRecordViewSet, basename='decision-record')
 router.register(r'ask-topics', views.AskTopicViewSet, basename='ask-topic')
 router.register(r'ask-answers', views.AskAnswerViewSet, basename='ask-answer')
+router.register(r'ask-scenes', views.AskSceneViewSet, basename='ask-scene')
 router.register(r'health-self-checks', views.HealthSelfCheckViewSet, basename='health-self-check')
 router.register(r'free-spending', views.FreeSpendingCalculatorViewSet, basename='free-spending')
 router.register(r'fixed-expenses', views.FixedExpenseViewSet, basename='fixed-expense')

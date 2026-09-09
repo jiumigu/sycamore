@@ -660,10 +660,33 @@ class DecisionRecord(models.Model):
         return f'{self.record_date} {self.get_tendency_display()}'
 
 
+class AskScene(models.Model):
+    """AI 问答库·业务场景容器——区分不同业务场景（工作/备考/写作…），场景下聚合主题与多轮对话"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    name = models.CharField(max_length=100, unique=True, verbose_name='场景名称')
+    description = models.TextField(blank=True, default='', verbose_name='场景说明')
+    sort = models.IntegerField(default=0, verbose_name='排序（小在前）')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'toolkit_ask_scene'
+        ordering = ['sort', 'id']
+        verbose_name = 'AI 问答场景'
+
+    def __str__(self):
+        return self.name
+
+
 class AskTopic(models.Model):
     """AI 问答库·主题——聚合同一问题（多 AI / 多会话 / 多次追问）的全部回答"""
 
     user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    scene = models.ForeignKey(
+        AskScene, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='topics', verbose_name='所属业务场景',
+    )
     title = models.CharField(max_length=200, blank=True, default='', verbose_name='主题标题')
     question = models.TextField(verbose_name='完整提问（prompt 原文）')
     background = models.TextField(blank=True, default='', verbose_name='提问背景')
@@ -681,7 +704,7 @@ class AskTopic(models.Model):
 
 
 class AskAnswer(models.Model):
-    """AI 问答库·回答——某一 AI 在某一对话会话中的一次回答"""
+    """AI 问答库·回答——某一 AI 在某一对话会话中的一次回答；可被追问形成多轮链"""
 
     VERDICT_CHOICES = [
         ('采纳', '采纳'),
@@ -692,6 +715,11 @@ class AskAnswer(models.Model):
     topic = models.ForeignKey(
         AskTopic, on_delete=models.CASCADE, related_name='answers', verbose_name='所属主题',
     )
+    parent = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.CASCADE,
+        related_name='followups', verbose_name='追问自哪条回答（首轮为空）',
+    )
+    question = models.TextField(blank=True, default='', verbose_name='本轮提问（追问文本；首轮留空沿用主题 question）')
     ai = models.CharField(max_length=50, verbose_name='回答的 AI 对象')
     session = models.CharField(max_length=100, blank=True, default='', verbose_name='对话会话背景')
     answer = models.TextField(verbose_name='回答全文')
@@ -706,6 +734,7 @@ class AskAnswer(models.Model):
         verbose_name = 'AI 回答记录'
         indexes = [
             models.Index(fields=['topic', 'asked_at']),
+            models.Index(fields=['parent']),
         ]
 
     def __str__(self):

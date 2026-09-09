@@ -18,13 +18,14 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import AskAnswer, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import AskAnswer, AskScene, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 
 from apps.sugar.models import SugarRecord
 from apps.treasure.models import GoodThing
 from .registry import ToolRegistry
 from .serializers import (
     AskAnswerSerializer,
+    AskSceneSerializer,
     AskTopicSerializer,
     CareerEnergyAuditSerializer,
     CityCoordinateSerializer,
@@ -892,7 +893,7 @@ class DecisionRecordViewSet(viewsets.ModelViewSet):
 
 
 class AskTopicViewSet(viewsets.ModelViewSet):
-    """AI 问答库·主题：全文检索（问题/背景/回答/会话/AI）+ 标签/AI/日期过滤"""
+    """AI 问答库·主题：全文检索（问题/追问/背景/回答/会话/AI）+ 场景/标签/AI/日期过滤"""
 
     permission_classes = [AllowAny]
     queryset = AskTopic.objects.all()
@@ -908,9 +909,13 @@ class AskTopicViewSet(viewsets.ModelViewSet):
                 | Q(question__icontains=keyword)
                 | Q(background__icontains=keyword)
                 | Q(answers__answer__icontains=keyword)
+                | Q(answers__question__icontains=keyword)
                 | Q(answers__session__icontains=keyword)
                 | Q(answers__ai__icontains=keyword)
             ).distinct()
+        scene = (params.get('scene') or '').strip()
+        if scene:
+            qs = qs.filter(scene_id=scene) if scene != 'none' else qs.filter(scene__isnull=True)
         tag = (params.get('tag') or '').strip()
         if tag:
             qs = qs.filter(tags__contains=[tag])
@@ -925,6 +930,17 @@ class AskTopicViewSet(viewsets.ModelViewSet):
             qs = qs.filter(created_at__date__lte=date_to)
         # distinct()/filter 后会丢 Meta ordering，统一按创建时间倒序
         return qs.order_by('-created_at')
+
+
+class AskSceneViewSet(viewsets.ModelViewSet):
+    """AI 问答库·业务场景容器 CRUD（list 带 topic_count 注解）"""
+
+    permission_classes = [AllowAny]
+    queryset = AskScene.objects.all()
+    serializer_class = AskSceneSerializer
+
+    def get_queryset(self):
+        return AskScene.objects.annotate(topic_count=Count('topics')).order_by('sort', 'id')
 
 
 class AskAnswerViewSet(viewsets.ModelViewSet):

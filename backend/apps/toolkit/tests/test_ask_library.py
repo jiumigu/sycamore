@@ -1,29 +1,39 @@
-"""AI 问答库测试 — 主题/回答 CRUD · 全文检索 · 标签与 AI 过滤 · nested answers · 采纳标记"""
+"""AI 问答库测试 — 主题/回答 CRUD · 全文检索 · 标签与 AI 过滤 · nested answers · 采纳标记 · 场景容器 · 追问链"""
 from datetime import timedelta
 
 import pytest
 from rest_framework.test import APIClient
 
-from apps.toolkit.models import AskAnswer, AskTopic
+from apps.toolkit.models import AskAnswer, AskScene, AskTopic
 
 TOPICS_URL = '/api/toolkit/ask-topics/'
 ANSWERS_URL = '/api/toolkit/ask-answers/'
+SCENES_URL = '/api/toolkit/ask-scenes/'
 
 
-def _create_topic(question: str = '这份工作还值得继续吗', tags: list | None = None) -> dict:
+def _create_scene(name: str = '备考·网络', description: str = '') -> dict:
+    resp = APIClient().post(SCENES_URL, {'name': name, 'description': description}, format='json')
+    assert resp.status_code == 201, resp.data
+    return resp.data
+
+
+def _create_topic(question: str = '这份工作还值得继续吗', tags: list | None = None, scene: int | None = None) -> dict:
     payload = {
         'title': '',
         'question': question,
         'background': '考虑年中是否离职',
         'tags': tags or ['工作', '决策'],
     }
+    if scene is not None:
+        payload['scene'] = scene
     resp = APIClient().post(TOPICS_URL, payload, format='json')
     assert resp.status_code == 201, resp.data
     return resp.data
 
 
 def _add_answer(topic_id: int, ai: str = 'WorkBuddy', session: str = '', verdict: str = '',
-                days_ago: int = 0, answer: str = '结合你近三个月的打卡数据来看…') -> dict:
+                days_ago: int = 0, answer: str = '结合你近三个月的打卡数据来看…',
+                question: str = '', parent: int | None = None) -> dict:
     from django.utils import timezone
     payload = {
         'topic': topic_id,
@@ -33,6 +43,10 @@ def _add_answer(topic_id: int, ai: str = 'WorkBuddy', session: str = '', verdict
         'asked_at': (timezone.now() - timedelta(days=days_ago)).isoformat(),
         'verdict': verdict,
     }
+    if question:
+        payload['question'] = question
+    if parent is not None:
+        payload['parent'] = parent
     resp = APIClient().post(ANSWERS_URL, payload, format='json')
     assert resp.status_code == 201, resp.data
     return resp.data
@@ -109,3 +123,71 @@ def test_answer_verdict_update_and_filter_by_topic() -> None:
     assert listed['count'] == 1 and listed['results'][0]['verdict'] == '采纳'
     AskAnswer.objects.get(id=a['id']).delete()
     assert AskAnswer.objects.filter(topic_id=t['id']).count() == 0
+
+
+# ─────────── 业务场景容器 ───────────
+
+@pytest.mark.django_db
+def test_scene_crud_and_topic_scene_filter() -> None:
+    """场景 CRUD；主题挂场景；?scene= 按场景过滤、?scene=none 筛未分类"""
+    scene = _create_scene(name='备考·网络')
+    other = _create_scene(name='工作')
+    t1 = _create_topic(question='CIDR 怎么划', scene=scene['id'])
+    _create_topic(question='无场景主题')
+    c = APIClient()
+    # 场景列表 topic_count 注解
+    listed = c.get(SCENES_URL).data['results']
+    by_name = {s['name']: s['topic_count'] for s in listed}
+    assert by_name == {'备考·网络': 1, '工作': 0}
+    # 主题带 scene / scene_name 回显
+    detail = c.get(f"{TOPICS_URL}{t1['id']}/").data
+    assert detail['scene'] == scene['id'] and detail['scene_name'] == '备考·网络'
+    # 过滤
+    assert c.get(TOPICS_URL, {'scene': scene['id']}).data['count'] == 1
+    assert c.get(TOPICS_URL, {'scene': other['id']}).data['count'] == 0
+    assert c.get(TOPICS_URL, {'scene': 'none'}).data['count'] == 1
+    # 删除场景 → 主题 scene 置空（SET_NULL）
+    c.delete(f"{SCENES_URL}{scene['id']}/")
+    assert AskTopic.objects.get(id=t1['id']).scene_id is None
+    assert c.get(TOPICS_URL, {'scene': 'none'}).data['count'] == 2
+
+
+# ─────────── 多轮追问链 ───────────
+
+@pytest.mark.django_db
+def test_followup_chain_create_nested_and_delete_cascade() -> None:
+    """首轮回答 → 带 question/parent 的追问；detail 返回 parent/question；删除父回答级联删追问"""
+    t = _create_topic(question='如何准备面试')
+    root = _add_answer(t['id'], ai='WorkBuddy', answer='先看岗位 JD 拆能力点')
+    followup = _add_answer(t['id'], ai='WorkBuddy', parent=root['id'],
+                           question='追问：如果时间只有三天呢？', answer='那就主攻高频题 + 模拟面')
+    deep = _add_answer(t['id'], ai='WorkBuddy', parent=followup['id'],
+                       question='再追问：模拟面找谁？', answer='找朋友扮演面试官')
+    detail = APIClient().get(f"{TOPICS_URL}{t['id']}/").data
+    by_id = {a['id']: a for a in detail['answers']}
+    assert by_id[root['id']]['parent'] is None and by_id[root['id']]['question'] == ''
+    assert by_id[followup['id']]['parent'] == root['id']
+    assert by_id[followup['id']]['question'].startswith('追问')
+    assert by_id[deep['id']]['parent'] == followup['id']
+    # 检索命中追问文本
+    c = APIClient()
+    assert c.get(TOPICS_URL, {'search': '三天'}).data['count'] == 1
+    assert c.get(TOPICS_URL, {'search': '模拟面'}).data['count'] == 1
+    # 删除中间父回答 → 其下追问级联删除，兄弟链不受影响
+    AskAnswer.objects.get(id=followup['id']).delete()
+    assert AskAnswer.objects.filter(id=deep['id']).count() == 0
+    assert AskAnswer.objects.filter(id=root['id']).count() == 1
+
+
+@pytest.mark.django_db
+def test_scene_delete_leaves_topic_but_followups_deleted_with_topic() -> None:
+    """删场景主题仍在（场景 SET_NULL）；删主题整链级联（含追问）"""
+    scene = _create_scene(name='生活')
+    t = _create_topic(question='旅行带什么', scene=scene['id'])
+    root = _add_answer(t['id'], ai='DeepSeek')
+    child = _add_answer(t['id'], ai='DeepSeek', parent=root['id'], question='充电宝多大')
+    assert AskAnswer.objects.filter(topic_id=t['id']).count() == 2
+    APIClient().delete(f"{TOPICS_URL}{t['id']}/")
+    assert AskTopic.objects.filter(id=t['id']).count() == 0
+    assert AskAnswer.objects.filter(id=child['id']).count() == 0
+    assert AskScene.objects.filter(id=scene['id']).count() == 1  # 场景本身保留

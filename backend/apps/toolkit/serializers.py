@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import AskAnswer, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
+from .models import AskAnswer, AskScene, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
 from .services import _extra_income_monthly
 
 
@@ -193,15 +193,29 @@ class ElectricityRecordSerializer(serializers.ModelSerializer):
 
 
 class AskAnswerSerializer(serializers.ModelSerializer):
-    """AI 问答库·回答（同一 AI 不同会话 = 独立一条）"""
+    """AI 问答库·回答（同一 AI 不同会话 = 独立一条；parent 非空 = 对某条回答的追问）"""
 
     class Meta:
         model = AskAnswer
         fields = [
-            'id', 'topic', 'ai', 'session', 'answer', 'asked_at',
+            'id', 'topic', 'parent', 'question', 'ai', 'session', 'answer', 'asked_at',
             'verdict', 'note', 'created_at',
         ]
         read_only_fields = ['id', 'created_at']
+
+
+class AskSceneSerializer(serializers.ModelSerializer):
+    """AI 问答库·业务场景容器"""
+
+    topic_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AskScene
+        fields = ['id', 'name', 'description', 'sort', 'topic_count', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_topic_count(self, obj) -> int:
+        return getattr(obj, 'topic_count', None) or obj.topics.count()
 
 
 class AskTopicSerializer(serializers.ModelSerializer):
@@ -211,15 +225,19 @@ class AskTopicSerializer(serializers.ModelSerializer):
     answer_count = serializers.SerializerMethodField()
     latest_asked_at = serializers.SerializerMethodField()
     accepted_count = serializers.SerializerMethodField()
+    scene_name = serializers.SerializerMethodField()
 
     class Meta:
         model = AskTopic
         fields = [
-            'id', 'title', 'question', 'background', 'tags',
+            'id', 'scene', 'scene_name', 'title', 'question', 'background', 'tags',
             'answers', 'answer_count', 'latest_asked_at', 'accepted_count',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_scene_name(self, obj) -> str:
+        return obj.scene.name if obj.scene_id else ''
 
     def get_answer_count(self, obj) -> int:
         return getattr(obj, 'answer_count', None) or obj.answers.count()
