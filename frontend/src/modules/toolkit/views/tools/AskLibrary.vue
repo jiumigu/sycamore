@@ -355,6 +355,19 @@ function formatDateTime(iso?: string | null): string {
   if (!iso) return ''
   return iso.slice(0, 16).replace('T', ' ')
 }
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+/** 本地时区当前时间 YYYY-MM-DD HH:mm:ss（勿用 toISOString——那是 UTC，会差 8 小时） */
+function nowLocal(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+}
+/** 本地时区当前日期 YYYY-MM-DD */
+function todayLocal(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
 
 // ─── 场景 ───
 async function loadScenes() {
@@ -593,7 +606,7 @@ function openAnswerDialog(ans?: AskAnswerItem, opts?: { parent?: number }) {
   answerForm.question = ans?.question ?? ''
   answerForm.ai = ans?.ai ?? 'WorkBuddy'
   answerForm.session = ans?.session ?? ''
-  answerForm.asked_at = ans?.asked_at ? ans.asked_at.slice(0, 19).replace('T', ' ') : new Date().toISOString().slice(0, 19).replace('T', ' ')
+  answerForm.asked_at = ans?.asked_at ? ans.asked_at.slice(0, 19).replace('T', ' ') : nowLocal()
   answerForm.answer = ans?.answer ?? ''
   answerForm.verdict = (ans?.verdict as '' | '采纳' | '备用' | '不采用') ?? ''
   answerForm.note = ans?.note ?? ''
@@ -608,7 +621,7 @@ function openFollowUp(ans: AskAnswerItem) {
   answerForm.question = ''
   answerForm.ai = ans.ai
   answerForm.session = ans.session
-  answerForm.asked_at = new Date().toISOString().slice(0, 19).replace('T', ' ')
+  answerForm.asked_at = nowLocal()
   answerForm.answer = ''
   answerForm.verdict = ''
   answerForm.note = ''
@@ -634,7 +647,7 @@ async function saveAnswer() {
       question: answerForm.question.trim(),
       ai: answerForm.ai,
       session: answerForm.session.trim(),
-      asked_at: answerForm.asked_at || new Date().toISOString().slice(0, 19).replace('T', ' '),
+      asked_at: answerForm.asked_at || nowLocal(),
       answer: answerForm.answer,
       verdict: answerForm.verdict,
       note: answerForm.note,
@@ -704,7 +717,7 @@ function buildMarkdown(topic: AskTopicItem): string {
   lines.push(`scene: ${topic.scene_name || '未分类'}`)
   lines.push(`created_at: ${(topic.created_at || '').slice(0, 10)}`)
   lines.push(`tags: [${(topic.tags || []).join(', ')}]`)
-  lines.push(`exported_at: ${new Date().toISOString().slice(0, 10)}`)
+  lines.push(`exported_at: ${todayLocal()}`)
   lines.push('---')
   lines.push('')
   lines.push(`# ${title}`)
