@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from django.db import models
 from django.conf import settings
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from rest_framework import status, views, viewsets
@@ -17,12 +18,14 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import AskAnswer, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 
 from apps.sugar.models import SugarRecord
 from apps.treasure.models import GoodThing
 from .registry import ToolRegistry
 from .serializers import (
+    AskAnswerSerializer,
+    AskTopicSerializer,
     CareerEnergyAuditSerializer,
     CityCoordinateSerializer,
     DecisionLogSerializer,
@@ -885,4 +888,55 @@ class DecisionRecordViewSet(viewsets.ModelViewSet):
         tracker_id = self.request.query_params.get('tracker')
         if tracker_id:
             qs = qs.filter(tracker_id=tracker_id)
+        return qs
+
+
+class AskTopicViewSet(viewsets.ModelViewSet):
+    """AI 问答库·主题：全文检索（问题/背景/回答/会话/AI）+ 标签/AI/日期过滤"""
+
+    permission_classes = [AllowAny]
+    queryset = AskTopic.objects.all()
+    serializer_class = AskTopicSerializer
+
+    def get_queryset(self):
+        qs = AskTopic.objects.annotate(answer_count=Count('answers'))
+        params = self.request.query_params
+        keyword = (params.get('search') or '').strip()
+        if keyword:
+            qs = qs.filter(
+                Q(title__icontains=keyword)
+                | Q(question__icontains=keyword)
+                | Q(background__icontains=keyword)
+                | Q(answers__answer__icontains=keyword)
+                | Q(answers__session__icontains=keyword)
+                | Q(answers__ai__icontains=keyword)
+            ).distinct()
+        tag = (params.get('tag') or '').strip()
+        if tag:
+            qs = qs.filter(tags__contains=[tag])
+        ai = (params.get('ai') or '').strip()
+        if ai:
+            qs = qs.filter(answers__ai__icontains=ai).distinct()
+        date_from = (params.get('date_from') or '').strip()
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        date_to = (params.get('date_to') or '').strip()
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+        # distinct()/filter 后会丢 Meta ordering，统一按创建时间倒序
+        return qs.order_by('-created_at')
+
+
+class AskAnswerViewSet(viewsets.ModelViewSet):
+    """AI 问答库·回答：按 topic 过滤；verdict 采纳标记行内可改"""
+
+    permission_classes = [AllowAny]
+    queryset = AskAnswer.objects.all()
+    serializer_class = AskAnswerSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        topic_id = self.request.query_params.get('topic')
+        if topic_id:
+            qs = qs.filter(topic_id=topic_id)
         return qs

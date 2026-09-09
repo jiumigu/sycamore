@@ -11,6 +11,10 @@
           <el-icon><Calendar /></el-icon>
           月度日历
         </el-button>
+        <el-button @click="switchToHeatmap">
+          <el-icon><Grid /></el-icon>
+          现金流热力图
+        </el-button>
         <el-button @click="switchToCashflow">
           <el-icon><Money /></el-icon>
           现金盘点
@@ -87,6 +91,9 @@ const editingData = ref<MonthlyListItem | null>(null)
 
 function switchToMonthly() {
   router.push('/wealth/monthly')
+}
+function switchToHeatmap() {
+  router.push('/wealth/heatmap')
 }
 function switchToCashflow() {
   router.push('/wealth/cashflow')

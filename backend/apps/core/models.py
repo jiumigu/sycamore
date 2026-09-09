@@ -9,6 +9,7 @@ class SystemPreset(models.Model):
         ('quick_phrases', '快捷短语（里程碑完成感悟）'),
         ('sugar_tags', '小确幸预设标签'),
         ('diary_tags', '日记流预设标签'),
+        ('ask_tags', 'AI 问答库标签'),
     ]
 
     preset_type = models.CharField('预设类型', max_length=50, choices=PRESET_TYPE_CHOICES, unique=True)

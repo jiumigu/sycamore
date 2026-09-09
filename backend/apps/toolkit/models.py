@@ -658,3 +658,55 @@ class DecisionRecord(models.Model):
 
     def __str__(self):
         return f'{self.record_date} {self.get_tendency_display()}'
+
+
+class AskTopic(models.Model):
+    """AI 问答库·主题——聚合同一问题（多 AI / 多会话 / 多次追问）的全部回答"""
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    title = models.CharField(max_length=200, blank=True, default='', verbose_name='主题标题')
+    question = models.TextField(verbose_name='完整提问（prompt 原文）')
+    background = models.TextField(blank=True, default='', verbose_name='提问背景')
+    tags = models.JSONField(default=list, blank=True, verbose_name='标签列表（来自系统预设 ask_tags）')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'toolkit_ask_topic'
+        ordering = ['-created_at']
+        verbose_name = 'AI 问答主题'
+
+    def __str__(self):
+        return self.title or self.question[:30]
+
+
+class AskAnswer(models.Model):
+    """AI 问答库·回答——某一 AI 在某一对话会话中的一次回答"""
+
+    VERDICT_CHOICES = [
+        ('采纳', '采纳'),
+        ('备用', '备用'),
+        ('不采用', '不采用'),
+    ]
+
+    topic = models.ForeignKey(
+        AskTopic, on_delete=models.CASCADE, related_name='answers', verbose_name='所属主题',
+    )
+    ai = models.CharField(max_length=50, verbose_name='回答的 AI 对象')
+    session = models.CharField(max_length=100, blank=True, default='', verbose_name='对话会话背景')
+    answer = models.TextField(verbose_name='回答全文')
+    asked_at = models.DateTimeField(verbose_name='提问时间')
+    verdict = models.CharField(max_length=10, blank=True, default='', choices=VERDICT_CHOICES, verbose_name='采纳标记')
+    note = models.TextField(blank=True, default='', verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_ask_answer'
+        ordering = ['-asked_at', '-id']
+        verbose_name = 'AI 回答记录'
+        indexes = [
+            models.Index(fields=['topic', 'asked_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.ai}@{self.asked_at:%Y-%m-%d}'

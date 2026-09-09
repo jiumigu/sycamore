@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
+from .models import AskAnswer, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
 from .services import _extra_income_monthly
 
 
@@ -190,3 +190,43 @@ class ElectricityRecordSerializer(serializers.ModelSerializer):
         model = ElectricityRecord
         fields = '__all__'
         read_only_fields = ['id', 'interval_usage', 'interval_days', 'daily_avg', 'month_usage', 'created_at']
+
+
+class AskAnswerSerializer(serializers.ModelSerializer):
+    """AI 问答库·回答（同一 AI 不同会话 = 独立一条）"""
+
+    class Meta:
+        model = AskAnswer
+        fields = [
+            'id', 'topic', 'ai', 'session', 'answer', 'asked_at',
+            'verdict', 'note', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class AskTopicSerializer(serializers.ModelSerializer):
+    """AI 问答库·主题（nested answers 供详情对照）"""
+
+    answers = AskAnswerSerializer(many=True, read_only=True)
+    answer_count = serializers.SerializerMethodField()
+    latest_asked_at = serializers.SerializerMethodField()
+    accepted_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AskTopic
+        fields = [
+            'id', 'title', 'question', 'background', 'tags',
+            'answers', 'answer_count', 'latest_asked_at', 'accepted_count',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_answer_count(self, obj) -> int:
+        return getattr(obj, 'answer_count', None) or obj.answers.count()
+
+    def get_latest_asked_at(self, obj):
+        ans = obj.answers.order_by('-asked_at').first()
+        return ans.asked_at if ans else None
+
+    def get_accepted_count(self, obj) -> int:
+        return obj.answers.filter(verdict='采纳').count()

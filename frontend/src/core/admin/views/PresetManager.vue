@@ -62,6 +62,7 @@ const PRESET_TYPE_LABELS: Record<string, string> = {
   quick_phrases: '快捷短语（里程碑完成感悟）',
   sugar_tags: '小确幸预设标签',
   diary_tags: '日记流预设标签',
+  ask_tags: 'AI 问答库标签',
 }
 
 const DEFAULT_PRESETS: Record<string, string[]> = {
@@ -79,6 +80,7 @@ const DEFAULT_PRESETS: Record<string, string[]> = {
     '美食', '旅行', '人际关系', '学习成长', '工作成就',
     '自然', '音乐', '阅读', '运动', '意外惊喜', '日常', '思考', '复盘',
   ],
+  ask_tags: ['工作', '学习', '代码', '写作', '决策', '健康', '生活', '工具'],
 }
 
 const presets = ref<SystemPreset[]>([])

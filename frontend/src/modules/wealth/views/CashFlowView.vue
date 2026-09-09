@@ -164,7 +164,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Calendar, DataAnalysis } from '@element-plus/icons-vue'
+import { Plus, Refresh, Calendar, DataAnalysis, Grid } from '@element-plus/icons-vue'
 import { useCashflowStore } from '../stores/cashflowStore'
 import AssetOverview from '../components/cashflow/AssetOverview.vue'
 import AssetTrend from '../components/cashflow/AssetTrend.vue'
@@ -222,6 +222,9 @@ function switchToMonthly() {
 }
 function switchToReview() {
   router.push('/wealth/review')
+}
+function switchToHeatmap() {
+  router.push('/wealth/heatmap')
 }
 
 function handleRefresh() {

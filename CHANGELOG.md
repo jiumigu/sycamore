@@ -1,3 +1,9 @@
+## [2026-09-09] v3.50.0 — AI 问答库（结构化沉淀 AI 答案档案）
+
+### ✨ 新增
+
+- **AI 问答库**：把散在 Logseq/摘录里的 AI 问答升级为结构化档案——完整记录问答（回答的 AI 对象 + 回答内容 + 提问时间 + 隔断时间 + 重复询问）+ 检索 + 预设标签 + 导出整个对话 .md。① 后端 `AskTopic`/`AskAnswer` 两表（`toolkit_ask_topic`：title/question/background/tags JSON/timestamps；`toolkit_ask_answer`：topic FK/ai/session/answer/asked_at/verdict[采纳/备用/不采用]/note，迁移 0018）+ `AskTopicViewSet`（6 字段全文检索——`search` 跨 question/title/background/answers__answer/answers__session/answers__ai，distinct 后补 order_by 防 MySQL 警告；`?tag=` tags__contains、`?ai=` answers__ai、日期范围；detail 嵌套 answers）+ `AskAnswerViewSet`（`?topic=` 过滤）；② **同一 AI 不同会话问同一问题用「会话背景」区分**（background 字段，记录提问时的场景/上下文）；③ 标签预设接入「系统预设管理」统一管——`PRESET_TYPE_CHOICES` 加 `ask_tags`（AI 问答库标签），seed 8 个默认种子（工作/学习/代码/写作/决策/健康/生活/工具）；④ 前端 `AskLibrary.vue`（`/toolkit/ask-library`，工具卡归「其他」）：表格多选 + 详情抽屉折叠对照（同一 topic 多 AI/会话答案并列对比）+ verdict 行内 select + 单条/批量导出 .md（含 YAML frontmatter：title/tags/asked_at/ai/session）；⑤ 新增 5 条 pytest（检索跨字段/tag/ai 过滤/日期范围/导出），全量 114 passed
+
 ## [2026-09-09] v3.49.0 — 月度日历合一账单清单 · 支出必要性标记
 
 ### ✨ 新增
@@ -7,13 +13,13 @@
 ### ♻️ 重构
 
 - **账单清单迁入月度日历（月历页合一）**：原「现金盘点」页右上角的账单清单弹窗（+新增/编辑弹窗 + 相关 CRUD script）整体迁出为独立组件 `BillListView.vue`，常驻于月度日历页日历下方，**默认随月历导航的年月联动筛选**（用户手动改日期范围后脱离联动）；现金盘点页瘦身（移除账单清单按钮与两弹窗）
-- **移除「宏观热力图」入口链（经审计确认低价值）**：月度日历头部「月视图/宏观热力图」切换按钮为**无人接线的死控件**（emit 无监听、viewMode 无渲染分支、点击无效果），连同财富顶栏「宏观热力图」tab（61×52 周历 + 推演大页）一并移除——删除 `WealthView.vue`/`HeatmapGrid.vue`/`Legend.vue`/`ControlPanel.vue`/`WeekDetailModal.vue` 5 个组件、`/wealth/heatmap` 路由（默认重定向改月度日历）、WealthHub tab、cashflow/月度复盘页内的热力图跳转按钮；`wealthStore` 裁剪周历 state/methods（仅留月度日历区块），`wealthTypes` 清理周历系孤儿类型（后端周历 API 与 `wealth_bill_list` 数据保留，可随时恢复）
+- **清理月度日历头部死控件（宏观热力图 tab 完整保留）**：经审计确认，月度日历头部「月视图/宏观热力图」切换按钮为**无人接线的死控件**（emit 无监听、viewMode 无渲染分支、点击无效果）——仅移除该切换按钮并连坐精简其专用 `viewMode` prop / `switch-view` emit；**财富顶栏「宏观热力图」tab（61×52 周历推演大页）为高频高价值入口，予以完整保留**——此前误删的 `WealthView.vue`/`HeatmapGrid.vue`/`Legend.vue`/`ControlPanel.vue`/`WeekDetailModal.vue` 5 个组件、`/wealth/heatmap` 路由、WealthHub tab 与 cashflow/月度复盘页内热力图跳转按钮已全部恢复；`wealthStore` 仅移除死控件专用 state/methods（`viewMode`/`setViewMode`）与 `CalendarViewMode` 类型（唯一引用即死按钮，不服务周历页），周历推演区块及其数据字段完整保留（后端周历 API 与 `wealth_bill_list` 数据全程未动）
 
 ### 🐛 修复
 
 - 月度日历 `CalendarHeader` 移除视图切换控件后同步精简 `viewMode` prop 与 `switch-view` emit（连坐清理 `wealthStore.viewMode`/`setViewMode` 与 `CalendarViewMode` 类型）
 
-
+## [2026-09-09] v3.48.0 — 决策追踪器 · relation 测试 flaky 修复
 
 ### ✨ 新增
 

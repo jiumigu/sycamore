@@ -226,6 +226,34 @@ CREATE TABLE IF NOT EXISTS `toolkit_decision_record` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+# toolkit_ask_topic / toolkit_ask_answer（managed 新表，--no-migrations 下镜像）
+_CREATE_ASK_TOPIC_SQL = """
+CREATE TABLE IF NOT EXISTS `toolkit_ask_topic` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` integer NOT NULL,
+  `title` varchar(200) NOT NULL,
+  `question` longtext NOT NULL,
+  `background` longtext NOT NULL,
+  `tags` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_ASK_ANSWER_SQL = """
+CREATE TABLE IF NOT EXISTS `toolkit_ask_answer` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `ai` varchar(50) NOT NULL,
+  `session` varchar(100) NOT NULL,
+  `answer` longtext NOT NULL,
+  `asked_at` datetime(6) NOT NULL,
+  `verdict` varchar(10) NOT NULL,
+  `note` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `topic_id` integer NOT NULL,
+  KEY `ask_topic_asked_idx` (`topic_id`, `asked_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
 
 @pytest.fixture(scope='session')
 def django_db_setup(django_db_setup, django_db_blocker):
@@ -243,3 +271,5 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_TOOLKIT_DEF_TABLE_SQL)
             cursor.execute(_CREATE_TRACKER_TABLE_SQL)
             cursor.execute(_CREATE_RECORD_TABLE_SQL)
+            cursor.execute(_CREATE_ASK_TOPIC_SQL)
+            cursor.execute(_CREATE_ASK_ANSWER_SQL)

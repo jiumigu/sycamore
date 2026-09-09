@@ -1,3 +1,36 @@
+/** 周级别净收入等级 */
+export type NetLevel =
+  | 'surplus_high' | 'surplus_mid' | 'surplus_low'
+  | 'zero'
+  | 'deficit_low' | 'deficit_mid' | 'deficit_high'
+
+/** 周历条目 */
+export interface WeekCalendarEntry {
+  global_week_index: number
+  age_year: number
+  week_number: number
+  week_start_date: string
+  week_end_date: string
+  is_lived: boolean
+  income: number
+  expense: number
+  net: number
+  net_level: NetLevel
+}
+
+/** 当前推演状态 */
+export interface CurrentScenario {
+  id: number
+  snapshot_time: string
+  current_age: number
+  current_week: number
+  current_cash: string
+  daily_budget: string
+  support_weeks: number
+  end_age: number | null
+  end_week: number | null
+}
+
 /** 推演输入 */
 export interface CoverageInput {
   current_age: number
@@ -7,12 +40,59 @@ export interface CoverageInput {
   daily_interest_rate?: number
 }
 
+/** 推演结果 */
+export interface CoverageResult {
+  coverage_weeks: number[]
+  support_weeks: number
+  end_age: number | null
+  end_week: number | null
+  daily_interest_rate?: number
+}
+
+/** 人生总览 */
+export interface LifeSummary {
+  total_income: number
+  total_expense: number
+  total_net: number
+  surplus_rate: number
+  lived_weeks: number
+  surplus_weeks: number
+  deficit_weeks: number
+}
+
+/** 账单条目 */
+export interface BillItem {
+  id: number
+  transaction_type: string
+  category: string
+  subcategory: string | null
+  amount: number
+  date: string
+  note: string | null
+}
+
+/** 按周账单响应 */
+export interface BillsByWeekResponse {
+  week_index: number
+  week_start: string
+  week_end: string
+  bills: BillItem[]
+}
+
 /** 周历查询参数 */
 export interface CalendarQueryParams {
   user_id?: number
   age?: number
   lived_only?: boolean
 }
+
+/** 周历数据索引映射 */
+export interface WeekDataMap {
+  [globalWeekIndex: number]: WeekCalendarEntry
+}
+
+/** 覆盖周集合 */
+export type CoverageSet = Set<number>
 
 /** 月度日级别颜色等级 */
 export type MonthlyColorLevel =

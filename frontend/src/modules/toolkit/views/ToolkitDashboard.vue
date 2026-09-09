@@ -69,6 +69,7 @@ const toolCategoryMap: Record<string, string> = {
   'finance-calculators': '财务',
   'quote-tool': '文字',
   'health-self-check': '健康',
+  'ask-library': '其他',
 }
 
 function getToolCategory(tool: { tool_key: string }): string {
