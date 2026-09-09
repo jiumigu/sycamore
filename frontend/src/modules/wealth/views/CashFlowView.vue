@@ -19,16 +19,9 @@
           <el-icon><DataAnalysis /></el-icon>
           月度复盘
         </el-button>
-        <el-button @click="switchToHeatmap">
-          <el-icon><Grid /></el-icon>
-          热力图
-        </el-button>
         <el-button @click="handleRefresh">
           <el-icon><Refresh /></el-icon>
           刷新
-        </el-button>
-        <el-button type="primary" @click="billDialogVisible = true; loadBills()">
-          📋 账单清单
         </el-button>
       </div>
     </div>
@@ -165,115 +158,14 @@
       </template>
     </el-dialog>
   </div>
-
-  <!-- 账单清单弹窗 -->
-  <el-dialog v-model="billDialogVisible" title="📋 账单清单" width="960px" :close-on-click-modal="false">
-    <div style="margin-bottom:10px;display:flex;gap:10px;align-items:center">
-      <el-button size="small" type="primary" @click="openBillForm()">+ 新增账单</el-button>
-      <el-select v-model="billTypeFilter" size="small" style="width:110px" placeholder="类型" clearable @change="loadBills">
-        <el-option label="收入" value="收入" />
-        <el-option label="支出" value="支出" />
-      </el-select>
-      <el-date-picker v-model="billDateRange" size="small" type="daterange" value-format="YYYY-MM-DD"
-        start-placeholder="开始" end-placeholder="结束" style="width:240px" @change="loadBills" />
-      <el-input
-        v-model="billSearch"
-        placeholder="搜索备注 / 商户 / 分类"
-        clearable
-        size="small"
-        style="width:200px"
-        @keyup.enter="applyBillSearch"
-        @clear="applyBillSearch"
-      >
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
-      <el-button size="small" @click="billTypeFilter=''; billDateRange=null; billSearch=''; loadBills()">重置</el-button>
-      <span class="hint" style="margin-left:auto">共 {{ billTotal }} 条 · 备注可编辑完善</span>
-    </div>
-    <el-table :data="bills" v-loading="billsLoading" stripe size="small" max-height="420">
-      <el-table-column label="日期" width="150">
-        <template #default="{ row }">{{ (row.date || '').slice(0, 10) }}</template>
-      </el-table-column>
-      <el-table-column label="类型" width="70" prop="transaction_type" />
-      <el-table-column label="金额" width="90" align="right">
-        <template #default="{ row }">¥{{ Number(row.amount).toLocaleString() }}</template>
-      </el-table-column>
-      <el-table-column label="分类" width="80" prop="category" />
-      <el-table-column label="商户" width="110" prop="merchant" show-overflow-tooltip />
-      <el-table-column label="备注" min-width="180" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.notes || '-' }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="110" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" link @click="openBillForm(row)">编辑</el-button>
-          <el-button size="small" link type="danger" @click="handleDeleteBill(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    <el-pagination v-model:current-page="billPage" :page-size="20" :total="billTotal" layout="prev, pager, next" small
-      style="margin-top:12px;justify-content:center" @current-change="loadBills" />
-  </el-dialog>
-
-  <!-- 账单新增/编辑弹窗 -->
-  <el-dialog v-model="billFormVisible" :title="billEditingId ? '编辑账单' : '新增账单'" width="520px">
-    <el-form :model="billForm" label-width="80px" size="small">
-      <el-row :gutter="10">
-        <el-col :span="12">
-          <el-form-item label="类型" required>
-            <el-select v-model="billForm.transaction_type" style="width:100%">
-              <el-option label="收入" value="收入" />
-              <el-option label="支出" value="支出" />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="金额" required>
-            <el-input-number v-model="billForm.amount" :min="0" :precision="2" style="width:100%" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row :gutter="10">
-        <el-col :span="12">
-          <el-form-item label="日期">
-            <el-date-picker v-model="billForm.date" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" style="width:100%" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="分类">
-            <el-input v-model="billForm.category" placeholder="餐饮/交通…" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row :gutter="10">
-        <el-col :span="12">
-          <el-form-item label="商户">
-            <el-input v-model="billForm.merchant" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="子分类">
-            <el-input v-model="billForm.subcategory" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-form-item label="备注">
-        <el-input v-model="billForm.notes" type="textarea" :rows="2" placeholder="完善这笔账单的备注说明" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button size="small" @click="billFormVisible = false">取消</el-button>
-      <el-button size="small" type="primary" :loading="billSaving" @click="saveBill">保存</el-button>
-    </template>
-  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Calendar, DataAnalysis, Grid, Search } from '@element-plus/icons-vue'
+import { Plus, Refresh, Calendar, DataAnalysis } from '@element-plus/icons-vue'
 import { useCashflowStore } from '../stores/cashflowStore'
-import * as wealthApi from '../api/wealthApi'
 import AssetOverview from '../components/cashflow/AssetOverview.vue'
 import AssetTrend from '../components/cashflow/AssetTrend.vue'
 import HealthMetrics from '../components/cashflow/HealthMetrics.vue'
@@ -330,9 +222,6 @@ function switchToMonthly() {
 }
 function switchToReview() {
   router.push('/wealth/review')
-}
-function switchToHeatmap() {
-  router.push('/wealth/heatmap')
 }
 
 function handleRefresh() {
@@ -433,82 +322,6 @@ onMounted(() => {
   store.fetchTrend(12)
   store.fetchSnapshotList()
 })
-
-// ─── 账单清单 CRUD ───
-const billDialogVisible = ref(false)
-const billFormVisible = ref(false)
-const bills = ref<any[]>([])
-const billsLoading = ref(false)
-const billTotal = ref(0)
-const billPage = ref(1)
-const billSaving = ref(false)
-const billEditingId = ref<number | null>(null)
-const billTypeFilter = ref('')
-const billSearch = ref('')
-
-function applyBillSearch() {
-  billPage.value = 1
-  loadBills()
-}
-const billDateRange = ref<[string, string] | null>(null)
-const billForm = reactive({
-  transaction_type: '支出', amount: 0, date: '', category: '', subcategory: '',
-  merchant: '', notes: '',
-})
-
-async function loadBills() {
-  billsLoading.value = true
-  try {
-    const params: Record<string, unknown> = { page: billPage.value, page_size: 20 }
-    if (billTypeFilter.value) params.transaction_type = billTypeFilter.value
-    if (billDateRange.value?.length === 2) {
-      params.date_from = billDateRange.value[0]
-      params.date_to = billDateRange.value[1]
-    }
-    if (billSearch.value.trim()) params.search = billSearch.value.trim()
-    const res = await wealthApi.getBills(params)
-    const data = res.data
-    bills.value = (data.results || data) as any[]
-    billTotal.value = data.count ?? bills.value.length
-  } catch { bills.value = [] } finally { billsLoading.value = false }
-}
-
-function openBillForm(row?: any) {
-  billEditingId.value = row?.id ?? null
-  billForm.transaction_type = row?.transaction_type || '支出'
-  billForm.amount = row?.amount != null ? Number(row.amount) : 0
-  billForm.date = row?.date || ''
-  billForm.category = row?.category || ''
-  billForm.subcategory = row?.subcategory || ''
-  billForm.merchant = row?.merchant || ''
-  billForm.notes = row?.notes || ''
-  billFormVisible.value = true
-}
-
-async function saveBill() {
-  if (!billForm.amount) { ElMessage.warning('请输入金额'); return }
-  billSaving.value = true
-  try {
-    const payload = { ...billForm, date: billForm.date || new Date().toISOString().slice(0, 19).replace('T', ' ') }
-    if (billEditingId.value) {
-      await wealthApi.updateBill(billEditingId.value, payload)
-    } else {
-      await wealthApi.createBillRecord(payload)
-    }
-    ElMessage.success('保存成功')
-    billFormVisible.value = false
-    loadBills()
-  } catch { ElMessage.error('保存失败') } finally { billSaving.value = false }
-}
-
-async function handleDeleteBill(row: any) {
-  try {
-    await ElMessageBox.confirm(`确认删除这笔账单（${row.date?.slice(0, 10)} ¥${row.amount}）？`, '删除确认', { type: 'warning' })
-    await wealthApi.deleteBill(row.id)
-    ElMessage.success('已删除')
-    loadBills()
-  } catch { /* 取消 */ }
-}
 
 </script>
 

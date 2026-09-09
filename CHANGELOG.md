@@ -1,3 +1,28 @@
+## [2026-09-09] v3.49.0 — 月度日历合一账单清单 · 支出必要性标记
+
+### ✨ 新增
+
+- **账单「必要性」标记（必要/可选/冲动，仅支出）**：账单明细新增独立维度 `necessity`（非既有 `category` 文本分类），用于消费性质复盘——① 后端 `wealth_bill_list` 原生加列（`managed=False` 遗留表，生产库 + conftest 测试镜像 DDL 同步）；`BillSerializer` 加字段并兜底（收入行强制清空）；`BillViewSet` 支持 `?necessity=`（含 `unmarked`=NULL/空串视为未分类）、新增 `POST batch-necessity`（ids 批量置标，仅支出行生效）与 `GET necessity_stats`（支出按必要/可选/冲动/未标记分组笔数与金额，可叠加日期/分类筛选）；② 前端 `BillListView.vue`（自现金盘点弹窗抽取增强）：支出小结卡（各档笔数/金额 + 合计）、必要性筛选下拉、表格支出行**行内下拉快速改标**、**多选勾选（仅支出行可勾）→ 批量标记下拉**、新增/编辑弹窗内置必要性单选（仅支出显示、收入切走自动清空）；③ 新增 4 条 pytest（necessity 过滤与 unmarked / 批量仅支出生效 / 统计聚合 / 收入兜底），全量 109 passed
+
+### ♻️ 重构
+
+- **账单清单迁入月度日历（月历页合一）**：原「现金盘点」页右上角的账单清单弹窗（+新增/编辑弹窗 + 相关 CRUD script）整体迁出为独立组件 `BillListView.vue`，常驻于月度日历页日历下方，**默认随月历导航的年月联动筛选**（用户手动改日期范围后脱离联动）；现金盘点页瘦身（移除账单清单按钮与两弹窗）
+- **移除「宏观热力图」入口链（经审计确认低价值）**：月度日历头部「月视图/宏观热力图」切换按钮为**无人接线的死控件**（emit 无监听、viewMode 无渲染分支、点击无效果），连同财富顶栏「宏观热力图」tab（61×52 周历 + 推演大页）一并移除——删除 `WealthView.vue`/`HeatmapGrid.vue`/`Legend.vue`/`ControlPanel.vue`/`WeekDetailModal.vue` 5 个组件、`/wealth/heatmap` 路由（默认重定向改月度日历）、WealthHub tab、cashflow/月度复盘页内的热力图跳转按钮；`wealthStore` 裁剪周历 state/methods（仅留月度日历区块），`wealthTypes` 清理周历系孤儿类型（后端周历 API 与 `wealth_bill_list` 数据保留，可随时恢复）
+
+### 🐛 修复
+
+- 月度日历 `CalendarHeader` 移除视图切换控件后同步精简 `viewMode` prop 与 `switch-view` emit（连坐清理 `wealthStore.viewMode`/`setViewMode` 与 `CalendarViewMode` 类型）
+
+
+
+### ✨ 新增
+
+- **决策追踪器（工具箱 · 长期观察型决策）**：给需要长期观察的决策（如「这份工作还值得继续吗」）在决策前持续采样倾向与理由、到期自动汇总，与既有「决策日志」（决策后回顾）互补——① 后端 `DecisionTracker`/`DecisionRecord` 两表（`toolkit_decision_tracker`/`toolkit_decision_record`，迁移 0017）+ `DecisionTrackerViewSet`（CRUD / 记录读取 / `report` 本地汇总 / `decide` / `archive`，观察中且过 `end_date` 的追踪在查询时自动置「已到期」）+ `DecisionRecordViewSet`；报告为本地聚合：倾向计数与占比、月度趋势（月份升序）、正反理由按倾向分列明细；② 前端工具页 `DecisionTracker.vue`（`/toolkit/decision-tracker`，工具卡与「决策日志」同入「环境侦查」筛选分组，DB 注册 tool_key `decision-tracker`）：4 TAB（追踪中/已到期/已决策/归档，带计数徽标）+ 顶部提醒横幅（到期 ≤7 天 / 已到期待处理）+ 新建（默认观察期 3 个月）/ 10 秒记录弹窗（想继续·不想继续·不确定 + 理由关键词 + 情绪强度）/ 记录明细（可删除误记）/ 汇总报告弹窗（统计比例条 + echarts 月度堆叠趋势 + 理由三列）/ 做出决定 / 归档（事后回看 30 天可补）/ 延长观察（回「观察中」）全套交互；**观察期内的追踪不提供理由查看入口**（防止倾向分布提前影响后续记录）；③ 新增 8 条 pytest（到期自动流转 / 报告聚合 / decide-archive 流转 / 误记删除），全量 105 passed
+
+### 🐛 修复
+
+- **relation 月度统计测试 flaky 修复**：`test_overview_monthly_count_uses_range` 用「now − 40 天」模拟上月样本，每月 1~10 号会跨到上上月导致 last_month 计数断言失败——改为取上月中 15 号（本月首日 −1 天再 `replace(day=15)`），与运行日期解耦
+
 ## [2026-09-03] v3.47.0 — 阅读图形分析独立页
 
 ### ✨ 新增

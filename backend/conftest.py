@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS `wealth_bill_list` (
   `date` datetime NOT NULL,
   `category` varchar(50) DEFAULT NULL,
   `subcategory` varchar(50) DEFAULT NULL,
+  `necessity` varchar(10) DEFAULT NULL,
   `project` varchar(100) DEFAULT NULL,
   `account` varchar(50) DEFAULT NULL,
   `account_currency` varchar(10) DEFAULT NULL,
@@ -195,6 +196,37 @@ CREATE TABLE IF NOT EXISTS `toolkit_definition` (
 """
 
 
+# toolkit_decision_tracker / toolkit_decision_record（managed 新表，--no-migrations 下镜像）
+_CREATE_TRACKER_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS `toolkit_decision_tracker` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` integer NOT NULL,
+  `topic` varchar(200) NOT NULL,
+  `background` longtext NOT NULL,
+  `start_date` date NOT NULL,
+  `end_date` date NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `final_decision` varchar(50) NOT NULL,
+  `decision_date` date NULL,
+  `review_note` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_RECORD_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS `toolkit_decision_record` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `record_date` date NOT NULL,
+  `tendency` varchar(10) NOT NULL,
+  `reason` longtext NOT NULL,
+  `intensity` varchar(10) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `tracker_id` integer NOT NULL,
+  KEY `tracker_record_idx` (`tracker_id`, `record_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+
 @pytest.fixture(scope='session')
 def django_db_setup(django_db_setup, django_db_blocker):
     """在 Django 迁移建库之后，补齐原生 SQL 表"""
@@ -209,3 +241,5 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_BALANCE_TABLE_SQL)
             cursor.execute(_CREATE_TRAVEL_TABLE_SQL)
             cursor.execute(_CREATE_TOOLKIT_DEF_TABLE_SQL)
+            cursor.execute(_CREATE_TRACKER_TABLE_SQL)
+            cursor.execute(_CREATE_RECORD_TABLE_SQL)

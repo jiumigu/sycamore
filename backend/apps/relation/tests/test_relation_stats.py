@@ -18,10 +18,12 @@ class TestRelationStats:
         """回归：happened_at__year/month 在 CONVERT_TZ 下失效，改为区间后本月计数正确"""
         rel = self._rel()
         now = timezone.now()
+        # 上月样本取上月中 15 号（now - 固定天数会在月初跨到上上月，造成 flaky）
+        last_month_mid = (now.replace(day=1) - timedelta(days=1)).replace(day=15)
         Interaction.objects.create(relationship=rel, user_id=1, energy_score=5,
-                                   happened_at=now - timedelta(days=1))  # 本月
+                                   happened_at=now)  # 本月
         Interaction.objects.create(relationship=rel, user_id=1, energy_score=3,
-                                   happened_at=now - timedelta(days=40))  # 上月
+                                   happened_at=last_month_mid)  # 上月
         o = StatsService.get_overview()
         assert o['monthly_interactions'] == 1
         assert o['last_month_interactions'] == 1

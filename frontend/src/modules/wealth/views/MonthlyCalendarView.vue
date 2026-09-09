@@ -10,7 +10,6 @@
     <CalendarHeader
       :year="store.currentYear"
       :month="store.currentMonth"
-      :view-mode="store.viewMode"
       @navigate="store.navigateMonth"
       @today="store.goToToday"
       @update:year="store.goToYearMonth($event, store.currentMonth)"
@@ -32,6 +31,17 @@
     </template>
 
     <StatsFooter :summary="store.monthlySummary" />
+
+    <!-- 账单清单（原「月视图/宏观热力图」切换位：随日历年月联动） -->
+    <el-card shadow="never" class="bill-section">
+      <template #header>
+        <div class="bill-section__header">
+          <span>📋 账单清单</span>
+          <span class="bill-section__hint">支出可按 必要 / 可选 / 冲动 标记（行内或批量），便于消费复盘</span>
+        </div>
+      </template>
+      <BillListView :year="store.currentYear" :month="store.currentMonth" />
+    </el-card>
 
     <!-- 单日明细弹窗 -->
     <DayDetailModal
@@ -92,6 +102,7 @@ import CalendarHeader from '../components/monthly/CalendarHeader.vue'
 import CalendarGrid from '../components/monthly/CalendarGrid.vue'
 import StatsFooter from '../components/monthly/StatsFooter.vue'
 import DayDetailModal from '../components/monthly/DayDetailModal.vue'
+import BillListView from '../components/BillListView.vue'
 import { importCSV } from '../api/wealthApi'
 import type { BillCreateData } from '../types/wealthTypes'
 
@@ -178,6 +189,25 @@ onMounted(() => {
     padding: 24px;
     background: #fff;
     border-radius: 8px;
+  }
+}
+
+.bill-section {
+  margin-top: 16px;
+  :deep(.el-card__body) {
+    padding: 16px 20px 20px;
+  }
+
+  &__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  &__hint {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
   }
 }
 

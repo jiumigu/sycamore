@@ -138,15 +138,22 @@ class BillCreateSerializer(serializers.Serializer):
     date = serializers.DateTimeField()
 
 class BillSerializer(serializers.ModelSerializer):
-    """账单明细（清单 CRUD：备注 notes / 商户 merchant 可编辑）"""
+    """账单明细（清单 CRUD：备注 notes / 商户 merchant / 必要性 necessity 可编辑）"""
 
     class Meta:
         model = WealthBillList
         fields = [
             'id', 'transaction_type', 'date', 'category', 'subcategory',
-            'project', 'account', 'amount', 'merchant', 'notes', 'user_id',
+            'necessity', 'project', 'account', 'amount', 'merchant', 'notes', 'user_id',
         ]
         read_only_fields = ['id', 'user_id']
+
+    def validate(self, attrs: dict) -> dict:
+        # 必要性标签仅对支出有意义：收入行一律清空兜底
+        ttype = attrs.get('transaction_type') or getattr(self.instance, 'transaction_type', None)
+        if ttype == '收入':
+            attrs['necessity'] = ''
+        return attrs
 
     def _fill_derived(self, validated_data: dict) -> dict:
         from django.utils import timezone

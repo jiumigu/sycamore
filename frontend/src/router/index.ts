@@ -112,13 +112,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: '',
-        redirect: { name: 'wealth-heatmap' },
-      },
-      {
-        path: 'heatmap',
-        name: 'wealth-heatmap',
-        component: () => import('@/modules/wealth/views/WealthView.vue'),
-        meta: { title: '现金流热力图' },
+        redirect: { name: 'wealth-monthly' },
       },
       {
         path: 'monthly',
@@ -219,6 +213,16 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'decision-log-tool',
         redirect: '/toolkit/decision-log',
+      },
+      {
+        path: 'decision-tracker',
+        name: 'decision-tracker',
+        component: () => import('@/modules/toolkit/views/tools/DecisionTracker.vue'),
+        meta: { title: '决策追踪器' },
+      },
+      {
+        path: 'decision-tracker-tool',
+        redirect: '/toolkit/decision-tracker',
       },
       {
         path: 'free-spending',

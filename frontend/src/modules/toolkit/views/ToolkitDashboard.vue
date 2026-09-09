@@ -61,6 +61,7 @@ const toolCategoryMap: Record<string, string> = {
   'career-energy-audit': '环境侦查',
   'environment-audit': '环境侦查',
   'decision-log': '环境侦查',
+  'decision-tracker': '环境侦查',
   'trad2simp': '文字',
   'free-spending': '财务',
   'hourly-wage': '财务',

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
 from .services import _extra_income_monthly
 
 
@@ -86,6 +86,32 @@ class QuoteSerializer(serializers.ModelSerializer):
 class DecisionLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = DecisionLog
+        fields = '__all__'
+        read_only_fields = ['created_at']
+
+
+class DecisionTrackerSerializer(serializers.ModelSerializer):
+    """决策追踪器（列表带记录数 / 剩余天数）"""
+
+    record_count = serializers.SerializerMethodField()
+    days_left = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DecisionTracker
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+    def get_record_count(self, obj) -> int:
+        return getattr(obj, 'record_count', None) or obj.records.count()
+
+    def get_days_left(self, obj) -> int:
+        from django.utils import timezone
+        return (obj.end_date - timezone.localdate()).days
+
+
+class DecisionRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DecisionRecord
         fields = '__all__'
         read_only_fields = ['created_at']
 

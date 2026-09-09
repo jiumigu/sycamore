@@ -226,6 +226,16 @@ export function deleteBill(id: number) {
   return request({ url: `/wealth/bills/${id}/`, method: 'delete' })
 }
 
+/** 批量标记必要性（仅支出行生效） */
+export function batchSetNecessity(ids: number[], necessity: string) {
+  return request({ url: '/wealth/bills/batch-necessity/', method: 'post', data: { ids, necessity } })
+}
+
+/** 支出必要性小结（必要/可选/冲动/未标记 笔数与金额） */
+export function getNecessityStats(params?: Record<string, unknown>) {
+  return request({ url: '/wealth/bills/necessity_stats/', method: 'get', params })
+}
+
 export function getBillContrib() {
   return request({ url: '/wealth/bills/contrib/', method: 'get' })
 }

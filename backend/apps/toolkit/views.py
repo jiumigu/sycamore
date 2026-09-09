@@ -3,6 +3,8 @@ import os
 import time
 import uuid
 
+from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
 from django.db import models
@@ -15,7 +17,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 
 from apps.sugar.models import SugarRecord
 from apps.treasure.models import GoodThing
@@ -24,6 +26,8 @@ from .serializers import (
     CareerEnergyAuditSerializer,
     CityCoordinateSerializer,
     DecisionLogSerializer,
+    DecisionRecordSerializer,
+    DecisionTrackerSerializer,
     ElectricityRecordSerializer,
     EnvironmentAuditSerializer,
     ExecutionSerializer,
@@ -749,3 +753,136 @@ class LanguageTrainingViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user_id=1)
+
+
+TENDENCY_LABELS = {
+    'continue': '想继续',
+    'quit': '不想继续',
+    'uncertain': '不确定',
+}
+TENDENCY_ORDER = ['continue', 'quit', 'uncertain']
+
+
+class DecisionTrackerViewSet(viewsets.ModelViewSet):
+    """决策追踪器 CRUD + 到期状态流转 + 汇总报告"""
+
+    permission_classes = [AllowAny]
+    queryset = DecisionTracker.objects.all()
+    serializer_class = DecisionTrackerSerializer
+
+    def get_queryset(self):
+        # 到期自动流转：观察中且已过 end_date → 已到期（幂等）
+        DecisionTracker.objects.filter(
+            status='观察中', end_date__lt=date.today(),
+        ).update(status='已到期')
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
+
+    @action(detail=True, methods=['get'])
+    def records(self, request, pk=None):
+        """该决策的全部日常记录（日期倒序）"""
+        tracker = self.get_object()
+        records = tracker.records.all()
+        serializer = DecisionRecordSerializer(records, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def report(self, request, pk=None):
+        """到期汇总报告——倾向统计 / 月度趋势 / 正反理由明细（本地聚合）"""
+        tracker = self.get_object()
+        records = list(tracker.records.all())
+
+        total = len(records)
+        by_tendency: dict[str, list] = defaultdict(list)
+        monthly: dict[str, dict[str, int]] = defaultdict(lambda: {'continue': 0, 'quit': 0, 'uncertain': 0})
+        for rec in records:
+            by_tendency[rec.tendency].append(rec)
+            month_key = rec.record_date.strftime('%Y-%m')
+            monthly[month_key][rec.tendency] += 1
+
+        tendency_stats = []
+        for t in TENDENCY_ORDER:
+            items = by_tendency.get(t, [])
+            tendency_stats.append({
+                'tendency': t,
+                'label': TENDENCY_LABELS[t],
+                'count': len(items),
+                'percent': round(len(items) / total * 100, 1) if total else 0,
+            })
+
+        monthly_trend = [
+            {'month': k, **monthly[k]}
+            for k in sorted(monthly.keys())
+        ]
+
+        reasons = {
+            t: [
+                {
+                    'record_date': rec.record_date.strftime('%Y-%m-%d'),
+                    'intensity': rec.intensity,
+                    'reason': rec.reason,
+                }
+                for rec in sorted(by_tendency.get(t, []), key=lambda r: r.record_date, reverse=True)
+                if rec.reason
+            ]
+            for t in TENDENCY_ORDER
+        }
+
+        return Response({
+            'tracker': {
+                'id': tracker.id,
+                'topic': tracker.topic,
+                'background': tracker.background,
+                'start_date': tracker.start_date,
+                'end_date': tracker.end_date,
+                'status': tracker.status,
+            },
+            'total_records': total,
+            'record_days': len({r.record_date for r in records}),
+            'tendency_stats': tendency_stats,
+            'monthly_trend': monthly_trend,
+            'reasons': reasons,
+        })
+
+    @action(detail=True, methods=['post'])
+    def decide(self, request, pk=None):
+        """做出决定：填最终决定 + 决定日期 → 状态置为已决策"""
+        tracker = self.get_object()
+        final_decision = (request.data.get('final_decision') or '').strip()
+        if not final_decision:
+            return Response({'error': '请填写最终决定'}, status=status.HTTP_400_BAD_REQUEST)
+        decision_date = request.data.get('decision_date') or date.today().isoformat()
+        tracker.final_decision = final_decision
+        tracker.decision_date = decision_date
+        tracker.status = '已决策'
+        tracker.save(update_fields=['final_decision', 'decision_date', 'status', 'updated_at'])
+        return Response(DecisionTrackerSerializer(tracker).data)
+
+    @action(detail=True, methods=['post'])
+    def archive(self, request, pk=None):
+        """归档：附事后回看（可选，30 天后补填）→ 状态置为已归档"""
+        tracker = self.get_object()
+        review_note = request.data.get('review_note')
+        if review_note is not None:
+            tracker.review_note = str(review_note).strip()
+        tracker.status = '已归档'
+        tracker.save(update_fields=['review_note', 'status', 'updated_at'])
+        return Response(DecisionTrackerSerializer(tracker).data)
+
+
+class DecisionRecordViewSet(viewsets.ModelViewSet):
+    """决策日常记录 CRUD（创建/删除为主，列表可按 tracker 过滤）"""
+
+    permission_classes = [AllowAny]
+    queryset = DecisionRecord.objects.all()
+    serializer_class = DecisionRecordSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tracker_id = self.request.query_params.get('tracker')
+        if tracker_id:
+            qs = qs.filter(tracker_id=tracker_id)
+        return qs

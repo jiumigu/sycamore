@@ -10,7 +10,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from django.db.models import Case, DateField, DecimalField, F, Q, Sum, Value, When
+from django.db.models import Case, Count, DateField, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast
 
 from ..models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthBillList
@@ -898,7 +898,63 @@ class BillViewSet(viewsets.ModelViewSet):
         category = params.get('category')
         if category:
             qs = qs.filter(category=category)
+        necessity = params.get('necessity')
+        if necessity:
+            if necessity == 'unmarked':
+                # 未标记：NULL 或空串统一视为未分类
+                qs = qs.filter(Q(necessity__isnull=True) | Q(necessity=''))
+            else:
+                qs = qs.filter(necessity=necessity)
         return qs
+
+    @action(detail=False, methods=['post'], url_path='batch-necessity')
+    def batch_necessity(self, request):
+        """批量标记必要性：POST {ids:[...], necessity:'必要'|'可选'|'冲动'}（仅支出行生效）"""
+        ids = request.data.get('ids') or []
+        necessity = (request.data.get('necessity') or '').strip()
+        if not isinstance(ids, list) or not ids:
+            return Response({'error': 'ids 必填（数组）'}, status=status.HTTP_400_BAD_REQUEST)
+        if necessity not in {'必要', '可选', '冲动'}:
+            return Response({'error': 'necessity 仅支持 必要/可选/冲动'}, status=status.HTTP_400_BAD_REQUEST)
+        updated = WealthBillList.objects.filter(
+            user_id=1, id__in=ids, transaction_type='支出',
+        ).update(necessity=necessity)
+        return Response({'updated': updated})
+
+    @action(detail=False, methods=['get'], url_path='necessity_stats')
+    def necessity_stats(self, request):
+        """必要性小结：支出按 必要/可选/冲动/未标记 分组的笔数与金额（可叠加日期/分类筛选）"""
+        params = self.request.query_params
+        qs = WealthBillList.objects.filter(user_id=1, transaction_type='支出')
+        date_from = params.get('date_from')
+        if date_from:
+            qs = qs.filter(date__gte=datetime.combine(datetime.strptime(date_from, '%Y-%m-%d').date(), datetime.min.time()))
+        date_to = params.get('date_to')
+        if date_to:
+            qs = qs.filter(date__lte=datetime.combine(datetime.strptime(date_to, '%Y-%m-%d').date(), datetime.max.time()))
+        category = params.get('category')
+        if category:
+            qs = qs.filter(category=category)
+
+        rows = (
+            qs.values('necessity')
+            .annotate(cnt=Count('id'), total=Sum('amount'))
+        )
+        bucket = {n: {'count': 0, 'total': 0.0} for n in ('必要', '可选', '冲动', 'unmarked')}
+        for r in rows:
+            n = r['necessity'] or ''
+            key = n if n in bucket else 'unmarked'
+            bucket[key]['count'] = r['cnt']
+            bucket[key]['total'] = round(float(r['total'] or 0), 2)
+        # 金额按支出为正数口径返回
+        return Response({
+            'summary': [
+                {'necessity': k, 'count': v['count'], 'total': v['total']}
+                for k, v in bucket.items()
+            ],
+            'grand_count': sum(v['count'] for v in bucket.values()),
+            'grand_total': round(sum(v['total'] for v in bucket.values()), 2),
+        })
 
     @action(detail=False, methods=['get'])
     def daily_detail(self, request):

@@ -592,3 +592,69 @@ class ElectricityRecord(models.Model):
 
     def __str__(self):
         return f'{self.record_date} 读数 {self.meter_reading}度'
+
+
+class DecisionTracker(models.Model):
+    """决策追踪器——决策前的长期观察（倾向/理由持续采样，到期汇总）"""
+
+    STATUS_CHOICES = [
+        ('观察中', '观察中'),
+        ('已到期', '已到期'),
+        ('已决策', '已决策'),
+        ('已归档', '已归档'),
+    ]
+
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
+    topic = models.CharField(max_length=200, verbose_name='决策主题')
+    background = models.TextField(blank=True, default='', verbose_name='决策背景')
+    start_date = models.DateField(verbose_name='观察开始日期')
+    end_date = models.DateField(verbose_name='观察结束日期')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='观察中', verbose_name='状态')
+    final_decision = models.CharField(max_length=50, blank=True, default='', verbose_name='最终决定')
+    decision_date = models.DateField(null=True, blank=True, verbose_name='决定日期')
+    review_note = models.TextField(blank=True, default='', verbose_name='事后回看（决策后 30 天补填）')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'toolkit_decision_tracker'
+        ordering = ['-created_at']
+        verbose_name = '决策追踪'
+
+    def __str__(self):
+        return f'{self.topic}（{self.status}）'
+
+
+class DecisionRecord(models.Model):
+    """决策日常记录——单次倾向采样"""
+
+    TENDENCY_CHOICES = [
+        ('continue', '想继续'),
+        ('quit', '不想继续'),
+        ('uncertain', '不确定'),
+    ]
+    INTENSITY_CHOICES = [
+        ('低', '低'),
+        ('中', '中'),
+        ('高', '高'),
+    ]
+
+    tracker = models.ForeignKey(
+        DecisionTracker, on_delete=models.CASCADE, related_name='records', verbose_name='所属决策',
+    )
+    record_date = models.DateField(verbose_name='记录日期')
+    tendency = models.CharField(max_length=10, choices=TENDENCY_CHOICES, verbose_name='倾向')
+    reason = models.TextField(blank=True, default='', verbose_name='具体理由')
+    intensity = models.CharField(max_length=10, choices=INTENSITY_CHOICES, default='中', verbose_name='情绪强度')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'toolkit_decision_record'
+        ordering = ['-record_date', '-id']
+        verbose_name = '决策记录'
+        indexes = [
+            models.Index(fields=['tracker', 'record_date']),
+        ]
+
+    def __str__(self):
+        return f'{self.record_date} {self.get_tendency_display()}'

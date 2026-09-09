@@ -196,6 +196,7 @@ class WealthBillList(models.Model):
     date = models.DateTimeField(verbose_name='日期')
     category = models.CharField(max_length=50, blank=True, null=True, verbose_name='分类')
     subcategory = models.CharField(max_length=50, blank=True, null=True, verbose_name='子分类')
+    necessity = models.CharField(max_length=10, blank=True, null=True, verbose_name='消费必要性(必要/可选/冲动)')
     project = models.CharField(max_length=100, blank=True, null=True, verbose_name='项目')
     account = models.CharField(max_length=50, blank=True, null=True, verbose_name='账户')
     account_currency = models.CharField(max_length=10, blank=True, null=True, verbose_name='币种')

@@ -41,35 +41,16 @@
         今日
       </el-button>
     </div>
-
-    <div class="calendar-header__view-switch">
-      <el-button
-        :type="viewMode === 'monthly' ? 'primary' : 'default'"
-        size="small"
-        @click="$emit('switch-view', 'monthly')"
-      >
-        月视图
-      </el-button>
-      <el-button
-        :type="viewMode === 'heatmap' ? 'primary' : 'default'"
-        size="small"
-        @click="$emit('switch-view', 'heatmap')"
-      >
-        宏观热力图
-      </el-button>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
-import type { CalendarViewMode } from '../../types/wealthTypes'
 
 const props = defineProps<{
   year: number
   month: number
-  viewMode: CalendarViewMode
 }>()
 
 const emit = defineEmits<{
@@ -77,7 +58,6 @@ const emit = defineEmits<{
   today: []
   'update:year': [year: number]
   'update:month': [month: number]
-  'switch-view': [mode: CalendarViewMode]
 }>()
 
 const yearRange = computed(() => {
@@ -120,11 +100,6 @@ function onMonthChange() { /* auto-triggers via v-model */ }
 
   &__today {
     margin-left: 8px;
-  }
-
-  &__view-switch {
-    display: flex;
-    gap: 4px;
   }
 }
 </style>

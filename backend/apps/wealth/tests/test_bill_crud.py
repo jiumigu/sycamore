@@ -63,3 +63,56 @@ class TestBillCrud:
         r = c.get('/api/wealth/bills/?transaction_type=收入')
         rows = r.data['results'] or []
         assert len(rows) == 1 and rows[0]['transaction_type'] == '收入'
+
+    # ─── 必要性标签 ───
+
+    def test_necessity_filter_and_unmarked(self):
+        from rest_framework.test import APIClient
+        self._create_bill('2026-08-01 09:00:00', amount=30, necessity='必要')
+        self._create_bill('2026-08-02 09:00:00', amount=50, necessity='冲动')
+        self._create_bill('2026-08-03 09:00:00', amount=20)  # 未标记
+        c = APIClient()
+        r = c.get('/api/wealth/bills/?necessity=冲动')
+        assert r.data['count'] == 1 and r.data['results'][0]['necessity'] == '冲动'
+        r2 = c.get('/api/wealth/bills/?necessity=unmarked')
+        assert r2.data['count'] == 1
+
+    def test_batch_necessity_only_expense(self):
+        from rest_framework.test import APIClient
+        e1 = self._create_bill('2026-08-01 09:00:00', amount=30)
+        e2 = self._create_bill('2026-08-02 09:00:00', amount=50)
+        inc = self._create_bill('2026-08-03 09:00:00', transaction_type='收入', amount=500)
+        c = APIClient()
+        r = c.post('/api/wealth/bills/batch-necessity/', {
+            'ids': [e1.id, e2.id, inc.id], 'necessity': '必要',
+        }, format='json')
+        assert r.status_code == 200 and r.data['updated'] == 2
+        e1.refresh_from_db(); e2.refresh_from_db(); inc.refresh_from_db()
+        assert e1.necessity == '必要' and e2.necessity == '必要'
+        assert inc.necessity is None  # 收入不受批量标记影响
+
+    def test_necessity_stats(self):
+        from rest_framework.test import APIClient
+        self._create_bill('2026-08-01 09:00:00', amount=30, necessity='必要')
+        self._create_bill('2026-08-02 09:00:00', amount=70, necessity='必要')
+        self._create_bill('2026-08-03 09:00:00', amount=50, necessity='冲动')
+        self._create_bill('2026-08-04 09:00:00', amount=20)  # 未标记
+        self._create_bill('2026-08-05 09:00:00', transaction_type='收入', amount=500)
+        c = APIClient()
+        r = c.get('/api/wealth/bills/necessity_stats/?date_from=2026-08-01&date_to=2026-08-31')
+        assert r.status_code == 200
+        m = {x['necessity']: x for x in r.data['summary']}
+        assert m['必要']['count'] == 2 and m['必要']['total'] == 100.0
+        assert m['冲动']['count'] == 1
+        assert m['unmarked']['count'] == 1
+        assert r.data['grand_count'] == 4  # 收入不计入
+
+    def test_income_necessity_force_blank(self):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        r = c.post('/api/wealth/bills/', {
+            'transaction_type': '收入', 'date': '2026-08-10 10:00:00', 'amount': 500,
+            'category': '工资', 'necessity': '必要',
+        }, format='json')
+        assert r.status_code == 201
+        assert r.data['necessity'] in (None, '')

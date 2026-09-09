@@ -29,14 +29,13 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
-  Grid, Calendar, DataAnalysis, Money, Timer, Wallet, TrendCharts,
+  Calendar, DataAnalysis, Money, Timer, Wallet, TrendCharts,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
 
 const tabs = [
-  { name: 'wealth-heatmap', label: '宏观热力图', icon: Grid },
   { name: 'wealth-monthly', label: '月度日历', icon: Calendar },
   { name: 'wealth-review', label: '月度复盘', icon: DataAnalysis },
   { name: 'wealth-regular', label: '定期存款', icon: Timer },
@@ -46,7 +45,7 @@ const tabs = [
 ]
 
 const activeTab = computed(() => {
-  return route.name as string || 'wealth-heatmap'
+  return route.name as string || 'wealth-monthly'
 })
 
 function switchTab(name: string) {
