@@ -7,6 +7,18 @@
         <p class="page-desc">按业务场景容器归档 AI 问答：多 AI 对照 + 多轮追问对话流，支持检索 / 打标 / 导出 md</p>
       </div>
       <div class="header-actions">
+        <el-dropdown trigger="click" @command="exportAcceptedSummary">
+          <el-button type="primary" plain :icon="DocumentChecked">采纳汇总</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="">全部场景</el-dropdown-item>
+              <el-dropdown-item command="none">未分类</el-dropdown-item>
+              <el-dropdown-item v-for="s in scenes" :key="s.id" :command="String(s.id)" divided>
+                {{ s.name }}（{{ s.topic_count ?? 0 }}）
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button @click="loadAll">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -45,6 +57,7 @@
         <el-select v-model="query.tag" placeholder="标签" clearable style="width: 150px" @change="handleSearch">
           <el-option v-for="t in tagOptions" :key="t" :label="t" :value="t" />
         </el-select>
+        <el-checkbox v-model="query.hasAccepted" @change="handleSearch">仅含采纳</el-checkbox>
         <el-date-picker
           v-model="dateRange"
           type="daterange"
@@ -167,42 +180,92 @@
       </template>
     </el-dialog>
 
-    <!-- 新建 / 编辑主题 -->
-    <el-dialog v-model="topicDialogVisible" :title="topicForm.id ? '编辑主题' : '新建主题'" width="600px">
-      <el-form :model="topicForm" label-width="86px">
-        <el-form-item label="业务场景">
-          <el-select v-model="topicForm.scene" clearable placeholder="未分类（也可在场景管理里建好后选）" style="width: 100%">
+    <!-- 新建 / 编辑主题（新建 = 快记流：问题 + 首轮回答一次归档） -->
+    <el-dialog
+      v-model="topicDialogVisible"
+      :title="topicForm.id ? '编辑主题' : '新建主题 · 快记'"
+      width="660px"
+      top="4vh"
+      class="topic-dialog"
+    >
+      <el-form :model="topicForm" label-position="top" class="fast-form">
+        <el-form-item label="业务场景" class="form-col">
+          <el-select v-model="topicForm.scene" clearable placeholder="选填；建议归档到场景（备考 / 工作 / 写作…），留空 = 未分类" style="width: 100%">
             <el-option v-for="s in scenes" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="主题标题">
-          <el-input v-model="topicForm.title" placeholder="留空则自动取问题前 30 字" maxlength="200" />
-        </el-form-item>
-        <el-form-item label="完整提问" required>
+        <el-form-item label="完整提问" required class="form-col">
           <el-input
             v-model="topicForm.question"
             type="textarea"
-            :rows="5"
-            placeholder="粘贴你当时发给 AI 的完整提示词（问题原文会永久保留，方便日后重问）"
+            :rows="3"
+            placeholder="粘贴你当时发给 AI 的完整提问（问题原文永久保留，方便日后重问）"
           />
         </el-form-item>
-        <el-form-item label="提问背景">
-          <el-input
-            v-model="topicForm.background"
-            type="textarea"
-            :rows="2"
-            placeholder="选填：当时为什么问 / 正在做什么决策（区分同一 AI 不同对话背景时也写这里）"
-          />
-        </el-form-item>
-        <el-form-item label="标签">
-          <el-select v-model="topicForm.tags" multiple clearable placeholder="来自系统预设管理（ask_tags）" style="width: 100%">
-            <el-option v-for="t in tagOptions" :key="t" :label="t" :value="t" />
-          </el-select>
-        </el-form-item>
+
+        <el-collapse v-model="advOpen" class="adv-collapse">
+          <el-collapse-item name="adv" :title="advOpen ? '收起更多选项' : '更多选项：标题 / 背景 / 标签（可不填）'">
+            <el-form-item label="主题标题" class="form-col">
+              <el-input v-model="topicForm.title" placeholder="留空则自动取问题前 30 字" maxlength="200" />
+            </el-form-item>
+            <el-form-item label="提问背景" class="form-col">
+              <el-input
+                v-model="topicForm.background"
+                type="textarea"
+                :rows="2"
+                placeholder="主题级背景（选填）。区分同 AI 的多次具体对话请填下方「会话背景」"
+              />
+            </el-form-item>
+            <el-form-item label="标签（辅助分类）" class="form-col">
+              <el-select v-model="topicForm.tags" multiple clearable placeholder="选填：来自系统预设管理；领域归类请优先用上方的业务场景" style="width: 100%">
+                <el-option v-for="t in tagOptions" :key="t" :label="t" :value="t" />
+              </el-select>
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
+
+        <!-- 仅新建：内嵌首轮 AI 回答（一条问答一次归档） -->
+        <template v-if="!topicForm.id">
+          <el-divider content-position="left">
+            首轮 AI 回答
+            <span class="divider-hint">（填了即一并归档；留空则只建主题。同 AI 多次 / 追问，存完在详情里追加）</span>
+          </el-divider>
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item label="回答的 AI" class="form-col">
+                <el-select v-model="answerForm.ai" filterable allow-create default-first-option style="width: 100%">
+                  <el-option v-for="ai in AI_OPTIONS" :key="ai" :label="ai" :value="ai" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="提问时间" class="form-col">
+                <el-date-picker v-model="answerForm.asked_at" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item label="会话背景" class="form-col">
+            <el-input
+              v-model="answerForm.session"
+              placeholder="选填：这次在哪个对话里问的？如「6月职业规划深聊」——同 AI 不同对话靠它区分"
+              maxlength="100"
+            />
+          </el-form-item>
+          <el-form-item label="AI 的回答" class="form-col">
+            <el-input
+              v-model="answerForm.answer"
+              type="textarea"
+              :rows="6"
+              placeholder="粘贴该 AI 的回答全文（markdown 原样保存）"
+            />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button size="small" @click="topicDialogVisible = false">取消</el-button>
-        <el-button size="small" type="primary" :loading="topicSaving" @click="saveTopic">保存</el-button>
+        <el-button size="small" type="primary" :loading="topicSaving" @click="saveTopic">
+          {{ topicForm.id ? '保存' : '归档（主题 + 首轮回答）' }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -325,14 +388,15 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Search, Download, FolderOpened } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search, Download, FolderOpened, DocumentChecked } from '@element-plus/icons-vue'
 import AskAnswerNode from './AskAnswerNode.vue'
 import {
   getAskTopics, getAskTopic, createAskTopic, updateAskTopic, deleteAskTopic,
   createAskAnswer, updateAskAnswer, deleteAskAnswer, fetchAskTagPresets,
   getAskScenes, createAskScene, updateAskScene, deleteAskScene,
+  getAskAcceptedSummary,
 } from '../../api/askLibraryApi'
-import type { AskTopicItem, AskAnswerItem, AskSceneItem } from '../../api/askLibraryApi'
+import type { AskTopicItem, AskAnswerItem, AskSceneItem, AskSummaryTopic } from '../../api/askLibraryApi'
 
 const AI_OPTIONS = ['WorkBuddy', 'Claude Code', 'ChatGPT', 'Gemini', 'Kimi', '豆包', 'DeepSeek', '通义千问']
 const VERDICT_MARK: Record<string, string> = { 采纳: '✅ 采纳', 备用: '📎 备用', 不采用: '✖ 不采用' }
@@ -346,7 +410,9 @@ const selectedRows = ref<AskTopicItem[]>([])
 const tagOptions = ref<string[]>([])
 const scenes = ref<AskSceneItem[]>([])
 const dateRange = ref<[string, string] | null>(null)
-const query = reactive<{ search: string; ai: string; tag: string; scene: string }>({ search: '', ai: '', tag: '', scene: '' })
+const query = reactive<{ search: string; ai: string; tag: string; scene: string; hasAccepted: boolean }>({
+  search: '', ai: '', tag: '', scene: '', hasAccepted: false,
+})
 
 function truncate(s: string, n: number): string {
   return (s || '').length > n ? `${(s || '').slice(0, n)}…` : s || ''
@@ -388,6 +454,7 @@ async function fetchTopics() {
     if (query.ai) params.ai = query.ai
     if (query.tag) params.tag = query.tag
     if (query.scene) params.scene = query.scene
+    if (query.hasAccepted) params.has_accepted = '1'
     if (dateRange.value?.length === 2) {
       params.date_from = dateRange.value[0]
       params.date_to = dateRange.value[1]
@@ -420,6 +487,7 @@ function resetQuery() {
   query.ai = ''
   query.tag = ''
   query.scene = ''
+  query.hasAccepted = false
   dateRange.value = null
   handleSearch()
 }
@@ -486,9 +554,24 @@ async function handleDeleteScene(scene: AskSceneItem) {
 // ─── 新建 / 编辑主题 ───
 const topicDialogVisible = ref(false)
 const topicSaving = ref(false)
+/** 高级选项（标题/背景/标签）折叠态 */
+const advOpen = ref<string[]>([])
 const topicForm = reactive<{ id: number | null; scene: number | null; title: string; question: string; background: string; tags: string[] }>({
   id: null, scene: null, title: '', question: '', background: '', tags: [],
 })
+
+/** 重置快记流的「首轮回答」区（打开新建弹窗 / 保存完成后调用） */
+function resetQuickAnswer() {
+  answerForm.id = null
+  answerForm.parent = null
+  answerForm.question = ''
+  answerForm.ai = 'WorkBuddy'
+  answerForm.session = ''
+  answerForm.asked_at = nowLocal()
+  answerForm.answer = ''
+  answerForm.verdict = ''
+  answerForm.note = ''
+}
 
 function openTopicDialog(topic?: AskTopicItem) {
   topicForm.id = topic?.id ?? null
@@ -497,6 +580,8 @@ function openTopicDialog(topic?: AskTopicItem) {
   topicForm.question = topic?.question ?? ''
   topicForm.background = topic?.background ?? ''
   topicForm.tags = [...(topic?.tags || [])]
+  advOpen.value = []
+  if (!topic) resetQuickAnswer()
   topicDialogVisible.value = true
 }
 
@@ -505,6 +590,8 @@ async function saveTopic() {
     ElMessage.warning('请填写完整提问（问题原文是档案的根）')
     return
   }
+  const isNew = !topicForm.id
+  const hasAnswer = isNew && !!answerForm.answer.trim()
   topicSaving.value = true
   try {
     const payload = {
@@ -514,11 +601,27 @@ async function saveTopic() {
       background: topicForm.background,
       tags: topicForm.tags,
     }
-    if (topicForm.id) await updateAskTopic(topicForm.id, payload)
-    else await createAskTopic(payload)
-    ElMessage.success('保存成功')
+    const saved = topicForm.id
+      ? (await updateAskTopic(topicForm.id, payload)).data as AskTopicItem
+      : (await createAskTopic(payload)).data as AskTopicItem
+    // 快记：新建 + 填了首轮回答 → 一并归档
+    if (hasAnswer) {
+      await createAskAnswer({
+        topic: saved.id,
+        ai: answerForm.ai,
+        session: answerForm.session.trim(),
+        asked_at: answerForm.asked_at || nowLocal(),
+        answer: answerForm.answer.trim(),
+        verdict: '',
+        note: '',
+      })
+    }
+    ElMessage.success(isNew ? (hasAnswer ? '已归档主题 + 首轮回答' : '已保存主题（未录回答，可在详情里补充）') : '已保存')
     topicDialogVisible.value = false
+    if (isNew) resetQuickAnswer()
     await Promise.all([fetchTopics(), loadScenes()])
+    // 新建后直接打开详情，方便立即「↳ 追问」继续
+    if (isNew) void openDetail(saved)
   } catch {
     ElMessage.error('保存失败')
   } finally {
@@ -761,6 +864,55 @@ async function exportSelected() {
   ElMessage.success(`已导出 ${exporting.length} 个主题`)
 }
 
+/** 采纳结论汇总 md：某范围内所有 ✅采纳 回答（含被采纳的追问），用于快速回看已确认结论 */
+function buildSummaryMarkdown(topics: AskSummaryTopic[], scopeLabel: string): string {
+  const lines: string[] = []
+  lines.push('---')
+  lines.push(`title: AI 问答·采纳结论汇总（${scopeLabel}）`)
+  lines.push(`exported_at: ${todayLocal()}`)
+  lines.push('---')
+  lines.push('')
+  lines.push(`# ✅ AI 问答·采纳结论汇总（${scopeLabel}）`)
+  lines.push('')
+  lines.push(`> 共 ${topics.length} 个主题 · 只收录标记为「采纳」的回答（含被采纳的追问）——用于快速回看已确认的结论。`)
+  lines.push('')
+  topics.forEach((t, i) => {
+    lines.push(`## ${i + 1}. ${t.title || truncate(t.question, 40)}`)
+    lines.push('')
+    if (t.scene_name) lines.push(`> 🗂 场景：${t.scene_name}`)
+    lines.push(`> 完整提问：${t.question}`)
+    lines.push('')
+    t.accepted.forEach((a) => {
+      if (a.question.trim()) lines.push(`> **↳ 追问：** ${a.question.trim()}\n`)
+      lines.push(`### ✅ ${a.ai}${a.session ? `（会话：${a.session}）` : ''} · ${formatDateTime(a.asked_at)}`)
+      lines.push('')
+      if (a.note) lines.push(`> ${a.note}\n`)
+      lines.push(a.answer.trim())
+      lines.push('')
+    })
+  })
+  return lines.join('\n')
+}
+
+/** 顶栏「采纳汇总」：按所选范围拉取并导出（command: '' 全部 / 'none' 未分类 / 场景 id） */
+async function exportAcceptedSummary(command: string) {
+  const scopeLabel = command
+    ? (command === 'none' ? '未分类' : (scenes.value.find((s) => String(s.id) === command)?.name || '场景'))
+    : '全部场景'
+  try {
+    const res = await getAskAcceptedSummary(command || undefined)
+    const topics = (res.data?.topics || []) as AskSummaryTopic[]
+    if (!topics.length) {
+      ElMessage.warning(`${scopeLabel}范围内还没有标记为「采纳」的回答`)
+      return
+    }
+    downloadMd(buildSummaryMarkdown(topics, scopeLabel), `${safeFilename(`AI采纳结论汇总_${scopeLabel}`)}.md`)
+    ElMessage.success(`已导出 ${topics.length} 个主题的采纳结论`)
+  } catch {
+    ElMessage.error('汇总导出失败')
+  }
+}
+
 onMounted(() => {
   loadAll()
 })
@@ -831,5 +983,26 @@ onMounted(() => {
   .answers-area { display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
   .parent-hint { font-size: 12px; color: var(--el-color-primary); }
   .drawer-footer { margin-top: 16px; display: flex; justify-content: center; }
+
+  // 新建/编辑主题弹窗（快记流）
+  .topic-dialog {
+    :deep(.el-dialog__body) {
+      max-height: calc(92vh - 170px);
+      overflow-y: auto;
+    }
+  }
+  .fast-form :deep(.el-form-item__label) { font-size: 13px; color: var(--el-text-color-secondary); }
+  .adv-collapse {
+    margin-bottom: 4px;
+    :deep(.el-collapse-item__header) {
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      height: 36px;
+      line-height: 36px;
+    }
+    :deep(.el-collapse-item__content) { padding-bottom: 8px; }
+    :deep(.el-form-item) { margin-bottom: 12px; }
+  }
+  .divider-hint { font-size: 12px; color: var(--el-text-color-placeholder); font-weight: 400; }
 }
 </style>

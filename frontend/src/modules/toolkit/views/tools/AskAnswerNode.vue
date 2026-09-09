@@ -33,9 +33,7 @@
           <el-button size="small" link type="danger" @click="onDelete(answer)">删除</el-button>
         </div>
         <p v-if="answer.note" class="answer-note">{{ answer.note }}</p>
-        <div class="answer-body" :class="{ collapsed: !expanded }">
-          {{ answer.answer }}
-        </div>
+        <div class="answer-body markdown-body" :class="{ collapsed: !expanded }" v-html="rendered" />
         <div v-if="answer.answer.length > 220" class="expand-btn">
           <el-button size="small" link type="primary" @click="expanded = !expanded">
             {{ expanded ? '收起' : '展开全文' }}
@@ -61,7 +59,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { marked } from 'marked'
 import { ChatLineRound } from '@element-plus/icons-vue'
 import type { AskAnswerItem } from '../../api/askLibraryApi'
 
@@ -81,6 +80,12 @@ const props = defineProps<{
 }>()
 
 const expanded = ref(false)
+
+/** 回答正文 markdown 渲染（breaks: 单换行成段，AI 回答排版习惯） */
+const rendered = computed(() => {
+  if (!props.answer.answer) return ''
+  return marked.parse(props.answer.answer, { breaks: true, gfm: true })
+})
 
 function formatDateTime(iso?: string | null): string {
   if (!iso) return ''
@@ -150,12 +155,12 @@ function formatDateTime(iso?: string | null): string {
     .answer-body {
       font-size: 13px;
       line-height: 1.8;
-      white-space: pre-wrap;
       word-break: break-word;
+      overflow-wrap: break-word;
       color: var(--el-text-color-regular);
 
       &.collapsed {
-        max-height: 180px;
+        max-height: 200px;
         overflow: hidden;
         position: relative;
         &::after {
@@ -165,6 +170,67 @@ function formatDateTime(iso?: string | null): string {
           background: linear-gradient(transparent, var(--el-bg-color));
         }
       }
+
+      // markdown 渲染样式（内容为 marked 输出，须 :deep）
+      :deep(p) { margin: 6px 0; }
+      :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5) {
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+        margin: 10px 0 6px;
+        line-height: 1.5;
+      }
+      :deep(h1) { font-size: 16px; }
+      :deep(h2) { font-size: 15px; }
+      :deep(h3) { font-size: 14px; }
+      :deep(h4), :deep(h5) { font-size: 13px; }
+      :deep(ul), :deep(ol) { padding-left: 22px; margin: 6px 0; }
+      :deep(li) { margin: 3px 0; }
+      :deep(blockquote) {
+        border-left: 3px solid var(--el-color-primary-light-5);
+        padding: 6px 12px;
+        margin: 8px 0;
+        background: var(--el-fill-color-light);
+        color: var(--el-text-color-secondary);
+        border-radius: 0 4px 4px 0;
+      }
+      :deep(code) {
+        background: var(--el-fill-color);
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-family: Menlo, Consolas, monospace;
+        color: var(--el-color-primary-dark-2);
+      }
+      :deep(pre) {
+        background: var(--el-fill-color-light);
+        padding: 10px 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        margin: 8px 0;
+        code {
+          background: none;
+          padding: 0;
+          color: inherit;
+        }
+      }
+      :deep(a) { color: var(--el-color-primary); text-decoration: none; &:hover { text-decoration: underline; } }
+      :deep(table) {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 8px 0;
+        display: block;
+        overflow-x: auto;
+        th, td {
+          border: 1px solid var(--el-border-color);
+          padding: 5px 9px;
+          text-align: left;
+          font-size: 12px;
+        }
+        th { background: var(--el-fill-color-light); font-weight: 600; }
+      }
+      :deep(hr) { border: none; border-top: 1px solid var(--el-border-color-light); margin: 10px 0; }
+      :deep(img) { max-width: 100%; }
+      :deep(strong) { color: var(--el-text-color-primary); }
     }
 
     .expand-btn { margin-top: 2px; }

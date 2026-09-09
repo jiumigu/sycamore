@@ -51,10 +51,33 @@ export interface AskTopicQuery {
   ai?: string
   /** 场景 id；'none' = 未分类 */
   scene?: string
+  /** '1' = 只返回含 ✅采纳 回答的主题 */
+  has_accepted?: string
   date_from?: string
   date_to?: string
   page?: number
   page_size?: number
+}
+
+/** summary 汇总中的单条采纳回答 */
+export interface AskAcceptedItem {
+  ai: string
+  session: string
+  /** 追问节点：该轮追问文本；首轮为空串 */
+  question: string
+  asked_at: string
+  answer: string
+  note: string
+}
+
+/** summary 汇总中的主题（含其全部采纳回答） */
+export interface AskSummaryTopic {
+  id: number
+  title: string
+  question: string
+  scene_name: string
+  created_at: string
+  accepted: AskAcceptedItem[]
 }
 
 /** 系统预设中的 AI 问答库标签（ask_tags） */
@@ -70,6 +93,11 @@ export async function fetchAskTagPresets(): Promise<string[]> {
 
 export function getAskTopics(params?: AskTopicQuery) {
   return request({ url: '/toolkit/ask-topics/', method: 'get', params })
+}
+
+/** 采纳结论汇总：?scene=<id>|none|空=全部 → { topics: AskSummaryTopic[] } */
+export function getAskAcceptedSummary(scene?: string) {
+  return request({ url: '/toolkit/ask-topics/summary/', method: 'get', params: scene ? { scene } : {} })
 }
 
 export function getAskTopic(id: number) {

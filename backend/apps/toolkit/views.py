@@ -922,6 +922,9 @@ class AskTopicViewSet(viewsets.ModelViewSet):
         ai = (params.get('ai') or '').strip()
         if ai:
             qs = qs.filter(answers__ai__icontains=ai).distinct()
+        has_accepted = (params.get('has_accepted') or '').strip()
+        if has_accepted and has_accepted.lower() in ('1', 'true', 'yes'):
+            qs = qs.filter(answers__verdict='采纳').distinct()
         date_from = (params.get('date_from') or '').strip()
         if date_from:
             qs = qs.filter(created_at__date__gte=date_from)
@@ -930,6 +933,47 @@ class AskTopicViewSet(viewsets.ModelViewSet):
             qs = qs.filter(created_at__date__lte=date_to)
         # distinct()/filter 后会丢 Meta ordering，统一按创建时间倒序
         return qs.order_by('-created_at')
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """采纳结论汇总：某范围（?scene=<id>|none|空=全部）内所有 ✅采纳 回答清单，供导出回顾。
+
+        返回结构 { topics: [{id, title, question, scene_name, created_at,
+        accepted: [{ai, session, question, asked_at, answer, note}]}] } —— 仅含采纳节点；
+        追问节点若被采纳则 question 为该轮追问文本，便于还原上下文。
+        """
+        scene = (request.query_params.get('scene') or '').strip()
+        qs = AskTopic.objects.filter(answers__verdict='采纳').distinct()
+        if scene == 'none':
+            qs = qs.filter(scene__isnull=True)
+        elif scene:
+            qs = qs.filter(scene_id=scene)
+        topics = (
+            qs.select_related('scene')
+            .prefetch_related('answers')
+            .order_by('-created_at')
+        )
+        result = []
+        for t in topics:
+            accepted = [a for a in t.answers.all() if a.verdict == '采纳']
+            if not accepted:
+                continue
+            result.append({
+                'id': t.id,
+                'title': t.title,
+                'question': t.question,
+                'scene_name': t.scene.name if t.scene_id else '',
+                'created_at': t.created_at,
+                'accepted': [{
+                    'ai': a.ai,
+                    'session': a.session,
+                    'question': a.question,
+                    'asked_at': a.asked_at,
+                    'answer': a.answer,
+                    'note': a.note,
+                } for a in sorted(accepted, key=lambda x: x.asked_at)],
+            })
+        return Response({'topics': result})
 
 
 class AskSceneViewSet(viewsets.ModelViewSet):

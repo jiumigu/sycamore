@@ -191,3 +191,47 @@ def test_scene_delete_leaves_topic_but_followups_deleted_with_topic() -> None:
     assert AskTopic.objects.filter(id=t['id']).count() == 0
     assert AskAnswer.objects.filter(id=child['id']).count() == 0
     assert AskScene.objects.filter(id=scene['id']).count() == 1  # 场景本身保留
+
+
+# ─────────── 采纳回顾（只看采纳 + 结论汇总）───────────
+
+@pytest.mark.django_db
+def test_has_accepted_filter() -> None:
+    """?has_accepted=1 只返回含 ✅采纳 回答的主题，可与场景过滤叠加"""
+    sc = _create_scene(name='备考·网络')
+    t1 = _create_topic(question='CIDR 是什么', scene=sc['id'])
+    t2 = _create_topic(question='无采纳的问题', scene=sc['id'])
+    _add_answer(t1['id'], ai='WorkBuddy', answer='采纳版', verdict='采纳')
+    _add_answer(t1['id'], ai='DeepSeek', answer='备用版', verdict='备用')
+    _add_answer(t2['id'], ai='WorkBuddy', answer='未标记版')
+    c = APIClient()
+    assert c.get(TOPICS_URL, {'has_accepted': '1'}).data['count'] == 1
+    assert c.get(TOPICS_URL, {'has_accepted': '1', 'scene': sc['id']}).data['count'] == 1
+    assert c.get(TOPICS_URL, {'has_accepted': '0'}).data['count'] == 2  # 非 1 值不生效
+    assert c.get(TOPICS_URL).data['count'] == 2
+
+
+@pytest.mark.django_db
+def test_accepted_summary_aggregation() -> None:
+    """summary 汇总某场景全部 ✅采纳 回答（含追问采纳），不含备用/未标记；场景过滤生效"""
+    sc = _create_scene(name='备考·网络')
+    other = _create_scene(name='写作')
+    t1 = _create_topic(question='CIDR 怎么划', scene=sc['id'])
+    root = _add_answer(t1['id'], ai='WorkBuddy', answer='用前缀长度表达', verdict='采纳')
+    _add_answer(t1['id'], ai='DeepSeek', answer='另一家说法', verdict='备用')
+    # 追问节点被采纳 → question 带入上下文
+    _add_answer(t1['id'], ai='WorkBuddy', parent=root['id'], question='/26 几台主机？',
+                answer='62 台', verdict='采纳')
+    t_other = _create_topic(question='写作开题', scene=other['id'])
+    _add_answer(t_other['id'], ai='ChatGPT', answer='先列提纲', verdict='采纳')
+    c = APIClient()
+    s1 = c.get(f"{TOPICS_URL}summary/?scene={sc['id']}").data['topics']
+    assert len(s1) == 1
+    assert s1[0]['scene_name'] == '备考·网络'
+    assert [a['answer'] for a in s1[0]['accepted']] == ['用前缀长度表达', '62 台']  # 按时间升序且不含备用
+    assert s1[0]['accepted'][1]['question'] == '/26 几台主机？'
+    assert s1[0]['accepted'][0]['question'] == ''  # 首轮无 question
+    all_t = c.get(f"{TOPICS_URL}summary/").data['topics']
+    assert len(all_t) == 2
+    none_t = c.get(f"{TOPICS_URL}summary/?scene=none").data['topics']
+    assert none_t == []
