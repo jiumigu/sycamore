@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from ..models import (
-    WealthBillList, WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthCashFlow, WealthBalanceList, FundSchedule
+    WealthBillList, WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthCashFlow, WealthBalanceList
 )
 
 
@@ -443,46 +443,3 @@ class ExpiringItemSerializer(serializers.Serializer):
     days_left = serializers.IntegerField()
     status = serializers.CharField()  # expired / due_soon_7 / due_soon_30 / normal
 
-
-# ─── 资金排程序列化器 ───
-
-
-class FundScheduleSerializer(serializers.ModelSerializer):
-    """资金排程快照（合计由服务端权威计算；预留项：入参 JSON，读取从子表组装）"""
-
-    reserve_items = serializers.JSONField(write_only=True, required=False, default=list)
-
-    class Meta:
-        model = FundSchedule
-        fields = [
-            'id', 'plan_name', 'cash_on_hand', 'reserve_items',
-            'total_reserved', 'remaining', 'created_at',
-        ]
-        read_only_fields = ['id', 'total_reserved', 'remaining', 'created_at']
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        # 读取时从 wealth_fund_schedule_item 子表组装（保持响应结构不变，前端无感）
-        data['reserve_items'] = [
-            {
-                'name': item.name,
-                'amount': float(item.amount),
-                'type': item.item_type,
-                'linked_expense_id': item.linked_expense_id,
-            }
-            for item in instance.items.all()
-        ]
-        return data
-
-    def create(self, validated_data):
-        from django.core.exceptions import ValidationError as DjangoValidationError
-        from ..services.fund_schedule_service import FundScheduleService
-        try:
-            return FundScheduleService.create_schedule(
-                plan_name=validated_data['plan_name'],
-                cash_on_hand=validated_data.get('cash_on_hand', 0),
-                reserve_items=validated_data.get('reserve_items', []),
-                user_id=1,
-            )
-        except DjangoValidationError as e:
-            raise serializers.ValidationError(e.messages)

@@ -18,7 +18,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import AskAnswer, AskScene, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
+from .models import AskAnswer, AskScene, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionRecord, DecisionTracker, ElectricityRecord, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, Quote, ToolkitDefinition, ToolkitExecution, TravelRoutePreset
 
 from apps.sugar.models import SugarRecord
 from apps.treasure.models import GoodThing
@@ -29,20 +29,16 @@ from .serializers import (
     AskTopicSerializer,
     CareerEnergyAuditSerializer,
     CityCoordinateSerializer,
-    DecisionLogSerializer,
     DecisionRecordSerializer,
     DecisionTrackerSerializer,
     ElectricityRecordSerializer,
-    EnvironmentAuditSerializer,
     ExecutionSerializer,
     ExecuteToolSerializer,
     FixedExpenseSerializer,
     FreeSpendingCalculatorSerializer,
     HealthSelfCheckSerializer,
     HourlyWageRecordSerializer,
-    LanguageTrainingSerializer,
     QuoteSerializer,
-    ReviewRecordSerializer,
     ToolInfoSerializer,
     TravelRoutePresetSerializer,
 )
@@ -443,49 +439,6 @@ class TravelRoutePresetViewSet(viewsets.ModelViewSet):
     serializer_class = TravelRoutePresetSerializer
 
 
-def _calculate_verdict(total_score: int) -> tuple:
-    """根据总分返回 (判定文字, 建议)"""
-    if total_score >= 24:
-        return '增值环境', '这里让你变得更好，值得深耕。'
-    elif total_score >= 18:
-        return '可维持', '不差，但也别待太久。找找哪些特征拖后腿。'
-    elif total_score >= 12:
-        return '消耗环境', '待一天就少一天能量。开始准备离开。'
-    return '立即离开', '这里在透支你。身体已经告诉你了。'
-
-
-class EnvironmentAuditViewSet(viewsets.ModelViewSet):
-    """环境校准 CRUD"""
-
-    permission_classes = [AllowAny]
-    queryset = EnvironmentAudit.objects.all()
-    serializer_class = EnvironmentAuditSerializer
-
-    def perform_create(self, serializer):
-        total = sum([
-            serializer.validated_data.get('allow_learning', 0),
-            serializer.validated_data.get('system_valued', 0),
-            serializer.validated_data.get('signal_over_noise', 0),
-            serializer.validated_data.get('body_heard', 0),
-            serializer.validated_data.get('people_share', 0),
-            serializer.validated_data.get('output_echoes', 0),
-        ])
-        verdict, _ = _calculate_verdict(total)
-        serializer.save(user_id=1, total_score=total, verdict=verdict)
-
-    def perform_update(self, serializer):
-        total = sum([
-            serializer.validated_data.get('allow_learning', 0),
-            serializer.validated_data.get('system_valued', 0),
-            serializer.validated_data.get('signal_over_noise', 0),
-            serializer.validated_data.get('body_heard', 0),
-            serializer.validated_data.get('people_share', 0),
-            serializer.validated_data.get('output_echoes', 0),
-        ])
-        verdict, _ = _calculate_verdict(total)
-        serializer.save(total_score=total, verdict=verdict)
-
-
 class CareerEnergyAuditViewSet(viewsets.ModelViewSet):
     """职业能量审计 CRUD"""
 
@@ -556,24 +509,6 @@ class QuoteViewSet(viewsets.ModelViewSet):
         Quote.objects.filter(id=quote.id).update(review_count=models.F('review_count') + 1)
         quote.refresh_from_db()
         return Response(QuoteSerializer(quote).data)
-
-
-class DecisionLogViewSet(viewsets.ModelViewSet):
-    """决策日志 CRUD"""
-
-    permission_classes = [AllowAny]
-    queryset = DecisionLog.objects.all()
-    serializer_class = DecisionLogSerializer
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        year = self.request.query_params.get('year')
-        category = self.request.query_params.get('category')
-        if year:
-            qs = qs.filter(decision_date__year=int(year))
-        if category:
-            qs = qs.filter(category=category)
-        return qs
 
 
 class HealthSelfCheckViewSet(viewsets.ModelViewSet):
@@ -719,52 +654,142 @@ class ElectricityRecordViewSet(viewsets.ModelViewSet):
         ElectricityService.recalculate_all(user_id=1)
 
 
-class ReviewRecordViewSet(viewsets.ModelViewSet):
-    """复盘记录 CRUD"""
-
-    permission_classes = [AllowAny]
-    serializer_class = ReviewRecordSerializer
-
-    def get_queryset(self):
-        qs = ReviewRecord.objects.filter(user_id=1)
-        rtype = self.request.query_params.get('review_type', '').strip()
-        if rtype:
-            qs = qs.filter(review_type=rtype)
-        year = self.request.query_params.get('year')
-        if year:
-            qs = qs.filter(review_date__year=int(year))
-        return qs
-
-    def perform_create(self, serializer):
-        serializer.save(user_id=1)
-
-
-class LanguageTrainingViewSet(viewsets.ModelViewSet):
-    """语言训练记录 CRUD"""
-
-    permission_classes = [AllowAny]
-    queryset = LanguageTraining.objects.all()
-    serializer_class = LanguageTrainingSerializer
-    pagination_class = None
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        params = self.request.query_params
-        train_type = params.get('train_type')
-        if train_type:
-            qs = qs.filter(train_type=train_type)
-        return qs
-
-    def perform_create(self, serializer):
-        serializer.save(user_id=1)
-
-
 TENDENCY_LABELS = {
     'continue': '想继续',
     'quit': '不想继续',
     'uncertain': '不确定',
 }
 TENDENCY_ORDER = ['continue', 'quit', 'uncertain']
+LEAN_LABELS = {'continue': '倾向留下', 'quit': '倾向离开', 'uncertain': '暂不明朗'}
+INTENSITY_LABELS = {1: '很弱', 2: '弱', 3: '中', 4: '强', 5: '很强'}
+# 强度 ≥ 4（强/很强）计为「高强度」
+INTENSITY_HIGH_LEVEL = 4
+# 连续多少天没有新记录就提醒（观察期容易断记）
+STALE_REMINDER_DAYS = 3
+
+
+def _lean_option_pairs(tracker) -> list[tuple[str, str]]:
+    """追踪可用的倾向选项 [(key, label)]，key 即记录存的 tendency 值"""
+    return tracker.tendency_options()
+
+
+def _option_payload(tracker) -> list[dict]:
+    return [{'key': k, 'label': l} for k, l in _lean_option_pairs(tracker)]
+
+
+def _build_preview(tracker, today):
+    """单条决策的倾向预览——占比 + 强度加权分数 + 连续断记天数
+
+    强度即权重（1–5）：
+      weighted[t]      该倾向下所有记录的强度之和
+      默认三选项追踪   weighted_score = (quit 加权 − continue 加权) / 两者加权和 × 100，正=偏离开
+      自定义选项追踪   weighted_score = (主导加权 − 次主导加权) / 加权和 × 100，即主导优势
+    """
+    records = list(tracker.records.all())
+    total = len(records)
+
+    options = _lean_option_pairs(tracker)
+    labels = dict(options)
+    custom = bool(tracker.lean_options)
+
+    by_tendency: dict[str, list] = defaultdict(list)
+    for rec in records:
+        by_tendency[rec.tendency].append(rec)
+    # 统计口径 = 定义的选项 + 历史记录里出现过但已不在选项中的（兜底显示原文）
+    stat_keys = [k for k, _ in options] + [t for t in by_tendency if t not in labels]
+
+    weighted = {t: sum(r.intensity for r in by_tendency.get(t, [])) for t in stat_keys}
+    weighted_total = sum(weighted.values())
+
+    tendency_stats = []
+    for t in stat_keys:
+        items = by_tendency.get(t, [])
+        count = len(items)
+        high = sum(1 for r in items if r.intensity >= INTENSITY_HIGH_LEVEL)
+        tendency_stats.append({
+            'tendency': t,
+            'label': labels.get(t, t),
+            'count': count,
+            'percent': round(count / total * 100, 1) if total else 0.0,
+            'weighted': weighted[t],
+            'weighted_percent': round(weighted[t] / weighted_total * 100, 1) if weighted_total else 0.0,
+            'avg_intensity': round(weighted[t] / count, 1) if count else 0.0,
+            'high_count': high,
+            'high_ratio': round(high / count * 100, 1) if count else 0.0,
+        })
+
+    # 主导倾向：先比条数，再比加权分，最后按选项定义顺序收敛
+    lean_tendency = None
+    if total:
+        lean_tendency = min(
+            stat_keys,
+            key=lambda t: (-len(by_tendency.get(t, [])), -weighted[t], stat_keys.index(t)),
+        )
+    lean_stat = next((s for s in tendency_stats if s['tendency'] == lean_tendency), None)
+
+    # 加权分：默认三项沿用「离开−留下」双向分；自定义选项改用「主导 − 次主导」优势分（恒 ≥ 0）
+    ranked = sorted(stat_keys, key=lambda t: -weighted[t])
+    if custom:
+        weighted_score = (
+            round((weighted[ranked[0]] - weighted[ranked[1]]) / weighted_total * 100, 1)
+            if weighted_total and len(ranked) > 1 else 0.0
+        )
+        weighted_lean_percent = (
+            round(weighted[ranked[0]] / weighted_total * 100, 1) if weighted_total else 0.0
+        )
+    else:
+        quit_continue_weight = weighted['quit'] + weighted['continue']
+        weighted_score = (
+            round((weighted['quit'] - weighted['continue']) / quit_continue_weight * 100, 1)
+            if quit_continue_weight else 0.0
+        )
+        weighted_lean_percent = (
+            round(weighted['quit'] / quit_continue_weight * 100, 1) if quit_continue_weight else 0.0
+        )
+
+    last_record_date = max((r.record_date for r in records), default=None)
+    # 无记录时以观察开始日为准——建了追踪却一直没记，同样算断记
+    stale_days = max((today - (last_record_date or tracker.start_date)).days, 0)
+
+    if not total:
+        conclusion = '还没有任何记录，先记一条看看'
+    elif lean_stat:
+        if custom:
+            conclusion = (
+                f"目前 {lean_stat['percent']}% 倾向「{lean_stat['label']}」，"
+                f"其中高强度占 {lean_stat['high_count']}/{lean_stat['count']}"
+            )
+        else:
+            conclusion = (
+                f"目前 {lean_stat['percent']}% {LEAN_LABELS[lean_tendency]}，"
+                f"其中高强度占 {lean_stat['high_count']}/{lean_stat['count']}"
+            )
+    else:
+        conclusion = ''
+
+    return {
+        'tracker_id': tracker.id,
+        'topic': tracker.topic,
+        'status': tracker.status,
+        'total_records': total,
+        'record_days': len({r.record_date for r in records}),
+        'last_record_date': last_record_date.strftime('%Y-%m-%d') if last_record_date else None,
+        'stale_days': stale_days,
+        'needs_reminder': tracker.status == '观察中' and stale_days >= STALE_REMINDER_DAYS,
+        'options': _option_payload(tracker),
+        'lean_tendency': lean_tendency,
+        'lean_label': (
+            lean_stat['label'] if (custom and lean_stat)
+            else LEAN_LABELS.get(lean_tendency, '') if lean_tendency else ''
+        ),
+        'lean_percent': lean_stat['percent'] if lean_stat else 0.0,
+        'weighted_total': weighted_total,
+        'weighted_score': weighted_score,
+        'weighted_lean_percent': weighted_lean_percent,
+        'high_count': sum(1 for r in records if r.intensity >= INTENSITY_HIGH_LEVEL),
+        'conclusion': conclusion,
+        'tendency_stats': tendency_stats,
+    }
 
 
 class DecisionTrackerViewSet(viewsets.ModelViewSet):
@@ -795,30 +820,35 @@ class DecisionTrackerViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def report(self, request, pk=None):
-        """到期汇总报告——倾向统计 / 月度趋势 / 正反理由明细（本地聚合）"""
+        """到期汇总报告——倾向统计 / 月度趋势 / 理由明细（本地聚合，选项随追踪自定义）"""
         tracker = self.get_object()
         records = list(tracker.records.all())
 
+        options = _lean_option_pairs(tracker)
+        labels = dict(options)
         total = len(records)
         by_tendency: dict[str, list] = defaultdict(list)
-        monthly: dict[str, dict[str, int]] = defaultdict(lambda: {'continue': 0, 'quit': 0, 'uncertain': 0})
+        monthly: dict[str, dict[str, int]] = defaultdict(dict)
         for rec in records:
             by_tendency[rec.tendency].append(rec)
             month_key = rec.record_date.strftime('%Y-%m')
-            monthly[month_key][rec.tendency] += 1
+            monthly[month_key][rec.tendency] = monthly[month_key].get(rec.tendency, 0) + 1
+
+        # 统计口径 = 定义的选项 + 历史记录里出现过但已不在选项中的（兜底显示原文）
+        stat_keys = [k for k, _ in options] + [t for t in by_tendency if t not in labels]
 
         tendency_stats = []
-        for t in TENDENCY_ORDER:
+        for t in stat_keys:
             items = by_tendency.get(t, [])
             tendency_stats.append({
                 'tendency': t,
-                'label': TENDENCY_LABELS[t],
+                'label': labels.get(t, t),
                 'count': len(items),
                 'percent': round(len(items) / total * 100, 1) if total else 0,
             })
 
         monthly_trend = [
-            {'month': k, **monthly[k]}
+            {'month': k, **{t: monthly[k].get(t, 0) for t in stat_keys}}
             for k in sorted(monthly.keys())
         ]
 
@@ -827,12 +857,13 @@ class DecisionTrackerViewSet(viewsets.ModelViewSet):
                 {
                     'record_date': rec.record_date.strftime('%Y-%m-%d'),
                     'intensity': rec.intensity,
+                    'intensity_label': INTENSITY_LABELS.get(rec.intensity, str(rec.intensity)),
                     'reason': rec.reason,
                 }
                 for rec in sorted(by_tendency.get(t, []), key=lambda r: r.record_date, reverse=True)
                 if rec.reason
             ]
-            for t in TENDENCY_ORDER
+            for t in stat_keys
         }
 
         return Response({
@@ -844,11 +875,54 @@ class DecisionTrackerViewSet(viewsets.ModelViewSet):
                 'end_date': tracker.end_date,
                 'status': tracker.status,
             },
+            'options': _option_payload(tracker),
             'total_records': total,
             'record_days': len({r.record_date for r in records}),
             'tendency_stats': tendency_stats,
             'monthly_trend': monthly_trend,
             'reasons': reasons,
+        })
+
+    @action(detail=False, methods=['get'])
+    def preview(self, request):
+        """随时可看的倾向汇总——占比 + 强度加权分数 + 连续断记天数（不必等到期）
+
+        查询参数：?tracker=<id> 只看某条决策；?status=观察中 只看某状态（同列表口径）
+        """
+        today = timezone.localdate()
+        qs = self.get_queryset()  # 含到期自动流转 + ?status= 过滤
+        tracker_id = request.query_params.get('tracker')
+        if tracker_id:
+            qs = qs.filter(id=tracker_id)
+
+        items = [_build_preview(t, today) for t in qs]
+        stale_trackers = [
+            {
+                'tracker_id': i['tracker_id'],
+                'topic': i['topic'],
+                'stale_days': i['stale_days'],
+                'last_record_date': i['last_record_date'],
+            }
+            for i in items if i['needs_reminder']
+        ]
+        reminder_text = ''
+        if stale_trackers:
+            first = stale_trackers[0]
+            more = f"，另有 {len(stale_trackers) - 1} 个决策同样断记" if len(stale_trackers) > 1 else ''
+            reminder_text = (
+                f"「{first['topic']}」已连续 {first['stale_days']} 天没有记录{more}，"
+                f"观察期容易就此中断，记得补一条。"
+            )
+
+        return Response({
+            'generated_at': timezone.now().isoformat(),
+            'stale_threshold_days': STALE_REMINDER_DAYS,
+            'tracker_count': len(items),
+            'total_records': sum(i['total_records'] for i in items),
+            'has_reminder': bool(stale_trackers),
+            'reminder_text': reminder_text,
+            'stale_trackers': stale_trackers,
+            'items': items,
         })
 
     @action(detail=True, methods=['post'])

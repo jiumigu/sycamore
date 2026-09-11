@@ -50,17 +50,6 @@ export interface InboxProfile {
   by_category: { category: string; count: number }[]
 }
 
-export interface DecisionProfile {
-  total_decisions: number
-  right_count: number
-  wrong_count: number
-  right_rate: number | null
-  reviewed_count: number
-  by_category: { category: string; count: number }[]
-  top_bias: string
-  bias_distribution: { bias: string; count: number }[]
-}
-
 export interface PersonalProfile {
   health: HealthProfile
   energy: EnergyProfile
@@ -68,7 +57,6 @@ export interface PersonalProfile {
   relation: RelationProfile
   output: OutputProfile
   inbox: InboxProfile
-  decision: DecisionProfile
 }
 
 export function getPersonalProfile(params?: { year?: number }) {

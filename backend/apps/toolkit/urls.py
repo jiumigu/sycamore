@@ -7,9 +7,7 @@ from . import views
 router = DefaultRouter()
 router.register(r'cities', views.CityCoordinateViewSet, basename='city-coordinate')
 router.register(r'travel-routes', views.TravelRoutePresetViewSet, basename='travel-route')
-router.register(r'environment-audits', views.EnvironmentAuditViewSet, basename='environment-audit')
 router.register(r'career-energy-audits', views.CareerEnergyAuditViewSet, basename='career-energy-audit')
-router.register(r'decision-logs', views.DecisionLogViewSet, basename='decision-log')
 router.register(r'decision-trackers', views.DecisionTrackerViewSet, basename='decision-tracker')
 router.register(r'decision-records', views.DecisionRecordViewSet, basename='decision-record')
 router.register(r'ask-topics', views.AskTopicViewSet, basename='ask-topic')
@@ -20,8 +18,6 @@ router.register(r'free-spending', views.FreeSpendingCalculatorViewSet, basename=
 router.register(r'fixed-expenses', views.FixedExpenseViewSet, basename='fixed-expense')
 router.register(r'hourly-wage', views.HourlyWageViewSet, basename='hourly-wage')
 router.register(r'electricity-records', views.ElectricityRecordViewSet, basename='electricity-record')
-router.register(r'review-records', views.ReviewRecordViewSet, basename='review-record')
-router.register(r'language-training', views.LanguageTrainingViewSet, basename='language-training')
 router.register(r'quotes', views.QuoteViewSet, basename='quote')
 
 urlpatterns = [

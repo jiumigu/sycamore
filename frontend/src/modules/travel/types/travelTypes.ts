@@ -133,3 +133,37 @@ export interface TravelPlanStats {
   total_estimate: number
   completed_plans: number
 }
+
+// ===== 旅行心愿单 =====
+export type WishStatus = '想去' | '已列入计划' | '已打卡'
+
+export interface TravelWish {
+  id: number
+  name: string
+  category: string
+  province: string
+  city: string
+  district: string
+  lng: number | null
+  lat: number | null
+  status: WishStatus
+  visited_at: string | null
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WishStats {
+  total: number
+  located: number
+  by_status: Record<string, number>
+  by_category: Record<string, number>
+}
+
+export interface TravelPlanOption {
+  id: number
+  name: string
+  destination: string
+  status: string
+  start_date: string | null
+}

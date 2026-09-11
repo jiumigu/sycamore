@@ -132,14 +132,6 @@
       </div>
       <div class="result-decision">{{ result.decision }}</div>
       <div class="result-advice">{{ result.advice }}</div>
-
-      <!-- 环境分值连续低迷时提示环境校准 -->
-      <el-alert v-if="showEnvCalibrationHint" type="warning" :closable="false" style="margin-top:12px">
-        <template #title>
-          ⚠️ 环境分值已连续 {{ consecutiveLowEnvMonths }} 个月拖后腿。
-          要不要<a @click="goToEnvAudit" style="cursor:pointer;color:#409eff;text-decoration:underline">对当前环境做一次校准</a>？
-        </template>
-      </el-alert>
     </el-card>
 
     <!-- 历史记录 -->
@@ -182,7 +174,6 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as toolkitApi from '../../api/toolkitApi'
 
@@ -284,11 +275,6 @@ function defaultForm() {
 
 const form = reactive<Record<string, any>>(defaultForm())
 
-const consecutiveLowEnvMonths = ref(0)
-const router = useRouter()
-
-const showEnvCalibrationHint = computed(() => consecutiveLowEnvMonths.value >= 3)
-
 // ── 实时分数预览 ──
 
 const sliderFields = [
@@ -374,26 +360,10 @@ async function fetchHistory() {
   try {
     const resp = await toolkitApi.getCareerEnergyAudits({ page_size: 100 })
     history.value = (resp.data?.results ?? resp.data ?? []) as AuditRecord[]
-
-    // 计算连续环境低分月数
-    let count = 0
-    for (const record of history.value) {
-      if (record.env_score < 0) {
-        count++
-      } else {
-        break
-      }
-    }
-    consecutiveLowEnvMonths.value = count
   } catch {
     history.value = []
   }
 }
-
-function goToEnvAudit() {
-  router.push('/toolkit/environment-audit')
-}
-
 async function handleDelete(id: number) {
   try {
     await toolkitApi.deleteCareerEnergyAudit(id)

@@ -209,6 +209,7 @@ CREATE TABLE IF NOT EXISTS `toolkit_decision_tracker` (
   `final_decision` varchar(50) NOT NULL,
   `decision_date` date NULL,
   `review_note` longtext NOT NULL,
+  `lean_options` json NULL,
   `created_at` datetime(6) NOT NULL,
   `updated_at` datetime(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -217,9 +218,9 @@ _CREATE_RECORD_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS `toolkit_decision_record` (
   `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `record_date` date NOT NULL,
-  `tendency` varchar(10) NOT NULL,
+  `tendency` varchar(50) NOT NULL,
   `reason` longtext NOT NULL,
-  `intensity` varchar(10) NOT NULL,
+  `intensity` smallint unsigned NOT NULL,
   `created_at` datetime(6) NOT NULL,
   `tracker_id` integer NOT NULL,
   KEY `tracker_record_idx` (`tracker_id`, `record_date`)
@@ -271,6 +272,29 @@ CREATE TABLE IF NOT EXISTS `toolkit_ask_answer` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+# travel_wish（旅行心愿单，镜像迁移 0003 的建表，--reuse-db 下已手动补齐）
+_CREATE_WISH_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS `travel_wish` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` integer NOT NULL,
+  `name` varchar(200) NOT NULL,
+  `category` varchar(20) NOT NULL,
+  `province` varchar(50) NOT NULL,
+  `city` varchar(100) NOT NULL,
+  `district` varchar(100) NOT NULL DEFAULT '',
+  `lng` double NULL,
+  `lat` double NULL,
+  `status` varchar(20) NOT NULL,
+  `visited_at` date NULL,
+  `notes` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  KEY `travel_wish_name_c47f26_idx` (`name`),
+  KEY `travel_wish_provinc_b3c39f_idx` (`province`),
+  KEY `travel_wish_status_ce8a7b_idx` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
 
 @pytest.fixture(scope='session')
 def django_db_setup(django_db_setup, django_db_blocker):
@@ -291,3 +315,4 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_ASK_SCENE_SQL)
             cursor.execute(_CREATE_ASK_TOPIC_SQL)
             cursor.execute(_CREATE_ASK_ANSWER_SQL)
+            cursor.execute(_CREATE_WISH_TABLE_SQL)

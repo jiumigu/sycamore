@@ -17,15 +17,11 @@
 |------|------|
 | `FixedExpense.vue` | 固定开销计算器 |
 | `ElectricityRecord.vue` | 用电记录（统计卡 + 趋势图 + 历史表） |
-| `EnvironmentAudit.vue` | 环境校准 |
 | `CareerEnergyAudit.vue` | 职业能量审计 |
 | `TravelRoute.vue` | 旅行路线推演（地图 + 路线抽屉） |
 | `HourlyWage.vue` | 时薪计算器 |
 | `FreeSpending.vue` | 自由支配额度 |
 | `HealthSelfCheck.vue` | 身体健康自查 |
-| `ReviewToolbox.vue` | 复盘工具箱 |
-| `DecisionLog.vue` | 决策日志 |
-| `LanguageTrainer.vue` | 语言训练器 |
 
 ### 执行型工具（执行记录进入「执行历史」页）
 

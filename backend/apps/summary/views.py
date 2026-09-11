@@ -450,32 +450,3 @@ class PersonalProfileView(views.APIView):
             'total': total,
             'by_category': by_category,
         }
-
-    def _decision_profile(self, year: int) -> dict:
-        """决策画像"""
-        from apps.toolkit.models import DecisionLog
-
-        qs = DecisionLog.objects.filter(decision_date__year=year)
-        total = qs.count()
-        if total == 0:
-            return {'total_decisions': 0, 'right_rate': None, 'by_category': [], 'top_bias': ''}
-
-        right = qs.filter(was_right=True).count()
-        wrong = qs.filter(was_right=False).count()
-        reviewed = qs.exclude(actual_outcome='').count()
-
-        by_cat = list(qs.values('category').annotate(count=Count('id')))
-        biases = list(qs.exclude(bias_found='').values('bias_found').annotate(
-            count=Count('id'),
-        ).order_by('-count'))
-
-        return {
-            'total_decisions': total,
-            'right_count': right,
-            'wrong_count': wrong,
-            'right_rate': round(right / (right + wrong) * 100, 1) if (right + wrong) > 0 else None,
-            'reviewed_count': reviewed,
-            'by_category': by_cat,
-            'top_bias': biases[0]['bias_found'] if biases else '',
-            'bias_distribution': [{'bias': b['bias_found'], 'count': b['count']} for b in biases],
-        }

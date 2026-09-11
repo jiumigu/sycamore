@@ -145,12 +145,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '现金盘点' },
       },
       {
-        path: 'fund',
-        name: 'wealth-fund',
-        component: () => import('@/modules/wealth/views/FundScheduleBoard.vue'),
-        meta: { title: '资金排程' },
-      },
-      {
         path: 'contrib',
         name: 'wealth-contrib',
         component: () => import('@/modules/wealth/views/contrib/WealthContribView.vue'),
@@ -211,16 +205,6 @@ const routes: RouteRecordRaw[] = [
         redirect: '/toolkit/health-self-check',
       },
       {
-        path: 'decision-log',
-        name: 'decision-log',
-        component: () => import('@/modules/toolkit/views/tools/DecisionLog.vue'),
-        meta: { title: '决策日志' },
-      },
-      {
-        path: 'decision-log-tool',
-        redirect: '/toolkit/decision-log',
-      },
-      {
         path: 'decision-tracker',
         name: 'decision-tracker',
         component: () => import('@/modules/toolkit/views/tools/DecisionTracker.vue'),
@@ -261,26 +245,6 @@ const routes: RouteRecordRaw[] = [
         redirect: '/toolkit/hourly-wage',
       },
       {
-        path: 'review-toolbox',
-        name: 'review-toolbox',
-        component: () => import('@/modules/toolkit/views/tools/ReviewToolbox.vue'),
-        meta: { title: '复盘工具箱' },
-      },
-      {
-        path: 'review-toolbox-tool',
-        redirect: '/toolkit/review-toolbox',
-      },
-      {
-        path: 'language-trainer',
-        name: 'language-trainer',
-        component: () => import('@/modules/toolkit/views/tools/LanguageTrainer.vue'),
-        meta: { title: '语言训练器' },
-      },
-      {
-        path: 'language-trainer-tool',
-        redirect: '/toolkit/language-trainer',
-      },
-      {
         path: ':toolKey',
         name: 'toolkit-detail',
         component: () => import('@/modules/toolkit/views/ToolDetail.vue'),
@@ -312,6 +276,7 @@ const routes: RouteRecordRaw[] = [
   // 连接与足迹
   { path: '/food', name: 'food', component: () => import('@/modules/food/views/FoodMapView.vue'), meta: { title: '美食地图' } },
   { path: '/travel', name: 'travel', component: () => import('@/modules/travel/views/TravelDashboard.vue'), meta: { title: '旅行记录' } },
+  { path: '/travel/wishes', name: 'travel-wishes', component: () => import('@/modules/travel/views/TravelWishView.vue'), meta: { title: '旅行心愿单' } },
   { path: '/travel/plans', name: 'travel-plans', component: () => import('@/modules/travel/views/TravelPlanView.vue'), meta: { title: '旅行计划' } },
   {
     path: '/relation',
@@ -344,6 +309,23 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+// ============================================
+// 懒加载 chunk 失败自愈（点菜单白屏的第二种根因）
+// 场景：页面开着不动，前端重新构建后旧 hash 的 chunk 被清掉，
+// 此时点菜单动态导入模块失败 → 页面空白；整页刷新拿到新 manifest 即恢复。
+// 这里捕获该类错误后自动做一次整页跳转，免手动刷新。
+// ============================================
+router.onError((error, to) => {
+  const msg = error?.message || ''
+  const isChunkError =
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Importing a module script failed') ||
+    /Loading( CSS)? chunk .+ failed/i.test(msg)
+  if (isChunkError && to?.fullPath && !window.location.pathname.includes(to.path)) {
+    window.location.href = to.fullPath
+  }
 })
 
 export default router

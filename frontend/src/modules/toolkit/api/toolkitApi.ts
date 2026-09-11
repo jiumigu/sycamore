@@ -66,20 +66,6 @@ export function deleteTravelRoute(id: number) {
   return request({ url: `/toolkit/travel-routes/${id}/`, method: 'delete' })
 }
 
-// ────────── 环境校准 ──────────
-
-export function getEnvironmentAudits(params?: Record<string, unknown>) {
-  return request({ url: '/toolkit/environment-audits/', method: 'get', params })
-}
-
-export function createEnvironmentAudit(data: Record<string, unknown>) {
-  return request({ url: '/toolkit/environment-audits/', method: 'post', data })
-}
-
-export function deleteEnvironmentAudit(id: number) {
-  return request({ url: `/toolkit/environment-audits/${id}/`, method: 'delete' })
-}
-
 // ────────── 职业能量审计 ──────────
 
 export function getCareerEnergyAudits(params?: Record<string, unknown>) {
@@ -106,24 +92,6 @@ export function createHealthSelfCheck(data: Record<string, unknown>) {
 
 export function deleteHealthSelfCheck(id: number) {
   return request({ url: `/toolkit/health-self-checks/${id}/`, method: 'delete' })
-}
-
-// ────────── 复盘记录 ──────────
-
-export function getReviewRecords(params?: Record<string, unknown>) {
-  return request({ url: '/toolkit/review-records/', method: 'get', params })
-}
-
-export function createReviewRecord(data: Record<string, unknown>) {
-  return request({ url: '/toolkit/review-records/', method: 'post', data })
-}
-
-export function updateReviewRecord(id: number, data: Record<string, unknown>) {
-  return request({ url: `/toolkit/review-records/${id}/`, method: 'patch', data })
-}
-
-export function deleteReviewRecord(id: number) {
-  return request({ url: `/toolkit/review-records/${id}/`, method: 'delete' })
 }
 
 // ────────── 时薪计算 ──────────
@@ -191,21 +159,3 @@ export function deleteElectricityRecord(id: number) {
 }
 
 // ────────── 标签管理器 ──────────
-
-// ────────── 语言训练 ──────────
-
-export function getLanguageTrainingList(params?: Record<string, unknown>) {
-  return request({ url: '/toolkit/language-training/', method: 'get', params })
-}
-
-export function createLanguageTraining(data: Record<string, unknown>) {
-  return request({ url: '/toolkit/language-training/', method: 'post', data })
-}
-
-export function updateLanguageTraining(id: number, data: Record<string, unknown>) {
-  return request({ url: `/toolkit/language-training/${id}/`, method: 'patch', data })
-}
-
-export function deleteLanguageTraining(id: number) {
-  return request({ url: `/toolkit/language-training/${id}/`, method: 'delete' })
-}

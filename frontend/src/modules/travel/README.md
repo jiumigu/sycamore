@@ -1,10 +1,11 @@
-# Travel — 旅行记录 + 旅行计划前端
+# Travel — 旅行记录 + 旅行心愿单 + 旅行计划前端
 
 ## Views
 
 | 文件 | 路由 | 职责 |
 |------|------|------|
 | `TravelDashboard.vue` | /travel | 旅行足迹主页（统计卡 + 年份筛选 + 中国地图热力/气泡 + 趋势/省份图表 + 记录 CRUD） |
+| `TravelWishView.vue` | /travel/wishes | 旅行心愿单（统计 chips + 中国地图心愿点亮 + 分类/状态/省份/搜索筛选 + 按省份分组卡片 + 打卡 + 一键加入计划） |
 | `TravelPlanView.vue` | /travel/plans | 旅行计划（4 统计卡 + 新建弹窗明细编辑器 + 可展开计划列表逐项勾选） |
 
 ## Components

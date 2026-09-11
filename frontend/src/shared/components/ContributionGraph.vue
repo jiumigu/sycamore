@@ -46,8 +46,8 @@
       <span class="legend-cell" :style="{ backgroundColor: legendColor(0.85) }"></span>
       <span class="legend-label">多</span>
       <span v-if="positiveNegative" class="legend-hint">
-        <span class="legend-chip" style="background:#F87171"></span> 收入 &nbsp;
-        <span class="legend-chip" style="background:#40C463"></span> 支出
+        <span class="legend-chip" style="background:#40C463"></span> 收入 &nbsp;
+        <span class="legend-chip" style="background:#F87171"></span> 支出
       </span>
     </div>
   </div>
@@ -147,10 +147,11 @@ function legendColor(ratio: number) { return colorFor(ratio, 1) }
 
 function colorFor(ratio: number, sign: 1 | -1): string {
   if (props.positiveNegative) {
+    // 正负模式（收支净值）：绿=收入多（正）、红=支出多（负）
     if (sign > 0) {
-      return ratio > 0.75 ? '#B91C1C' : ratio > 0.5 ? '#DC2626' : ratio > 0.25 ? '#F87171' : '#FCA5A5'
+      return ratio > 0.75 ? '#216E39' : ratio > 0.5 ? '#30A14E' : ratio > 0.25 ? '#40C463' : '#9BE9A8'
     }
-    return ratio > 0.75 ? '#216E39' : ratio > 0.5 ? '#30A14E' : ratio > 0.25 ? '#40C463' : '#9BE9A8'
+    return ratio > 0.75 ? '#B91C1C' : ratio > 0.5 ? '#DC2626' : ratio > 0.25 ? '#F87171' : '#FCA5A5'
   }
   return ratio > 0.75 ? '#216E39' : ratio > 0.5 ? '#30A14E' : ratio > 0.25 ? '#40C463' : '#9BE9A8'
 }

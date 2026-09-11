@@ -54,6 +54,7 @@ export const allMenuItems: MenuItem[] = [
 
   // ── 连接与足迹 ──
   { key: 'travel', path: '/travel', label: '旅行记录', icon: 'Location', group: 'connection' },
+  { key: 'travel_wishes', path: '/travel/wishes', label: '旅行心愿单', icon: 'Star', group: 'connection' },
   { key: 'relation', path: '/relation', label: '关系管理', icon: 'User', group: 'connection' },
 
   // ── 工具箱 ──

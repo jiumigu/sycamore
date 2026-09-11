@@ -81,7 +81,6 @@ const handleResultClick = (item: any) => {
     diary: '/temporal/daily',
     sugar: '/sugar',
     treasure: '/treasure',
-    review: '/toolkit/review-toolbox',
   }
   if (routeMap[item.module]) {
     router.push(routeMap[item.module])

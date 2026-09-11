@@ -19,11 +19,10 @@
       <main class="layout-main">
         <div class="main-content">
           <router-view v-slot="{ Component, route }">
-            <transition name="page-fade" mode="out-in">
-              <keep-alive :include="keepAliveRoutes">
-                <component :is="Component" :key="route.path" />
-              </keep-alive>
-            </transition>
+            <!-- 不包 transition：out-in 切换动画在快速点击菜单时会产生过渡竞争，导致新页面 enter 不触发而整块空白 -->
+            <keep-alive :include="keepAliveRoutes">
+              <component :is="Component" :key="route.path" />
+            </keep-alive>
           </router-view>
         </div>
       </main>
@@ -124,23 +123,5 @@ const keepAliveRoutes = computed(() => {
     min-height: 100%;
     padding: 24px;
   }
-}
-
-// ============================================
-// 页面切换动画
-// ============================================
-.page-fade-enter-active,
-.page-fade-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
-}
-
-.page-fade-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
-.page-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
 }
 </style>

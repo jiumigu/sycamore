@@ -63,6 +63,7 @@ const PRESET_TYPE_LABELS: Record<string, string> = {
   sugar_tags: '小确幸预设标签',
   diary_tags: '日记流预设标签',
   ask_tags: 'AI 问答库标签',
+  book_tags: '图书预设标签',
 }
 
 const DEFAULT_PRESETS: Record<string, string[]> = {

@@ -10,6 +10,7 @@ class SystemPreset(models.Model):
         ('sugar_tags', '小确幸预设标签'),
         ('diary_tags', '日记流预设标签'),
         ('ask_tags', 'AI 问答库标签'),
+        ('book_tags', '图书预设标签'),
     ]
 
     preset_type = models.CharField('预设类型', max_length=50, choices=PRESET_TYPE_CHOICES, unique=True)

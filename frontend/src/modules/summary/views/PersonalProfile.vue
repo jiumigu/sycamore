@@ -170,37 +170,6 @@
           </div>
         </el-card>
       </el-col>
-
-      <!-- 决策 -->
-      <el-col :span="12">
-        <el-card shadow="hover" class="profile-card">
-          <template #header><span class="card-title">📋 决策质量</span></template>
-          <div class="profile-body">
-            <div class="metric-row">
-              <span class="metric-label">总决策数</span>
-              <span class="metric-value">{{ profile?.decision.total_decisions ?? 0 }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">正确率</span>
-              <span class="metric-value" :style="{ color: profile?.decision.right_rate && profile.decision.right_rate >= 60 ? '#52c41a' : '#faad14' }">
-                {{ profile?.decision.right_rate ?? '--' }}%
-              </span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">正确 / 错误</span>
-              <span class="metric-value">{{ profile?.decision.right_count ?? 0 }} / {{ profile?.decision.wrong_count ?? 0 }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">已回顾</span>
-              <span class="metric-value">{{ profile?.decision.reviewed_count ?? 0 }}</span>
-            </div>
-            <div v-if="profile?.decision.top_bias" class="metric-row">
-              <span class="metric-label">常见偏误</span>
-              <el-tag type="warning" size="small">{{ profile.decision.top_bias }}</el-tag>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
     </el-row>
   </div>
 </template>
@@ -266,7 +235,6 @@ function checkData() {
   if (p.energy.audit_count === 0) insufficient.push('职业能量审计')
   if (p.mood.total_records === 0) insufficient.push('情绪记录')
   if (p.output.total_records === 0) insufficient.push('良品率记录')
-  if (p.decision.total_decisions === 0) insufficient.push('决策日志')
 
   if (insufficient.length > 0) {
     dataInsufficient.value = `以下模块数据不足：${insufficient.join('、')}。积累更多数据后将生成更完整的画像。`

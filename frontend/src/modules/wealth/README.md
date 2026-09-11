@@ -8,8 +8,7 @@
 | `MonthlyReviewView.vue` | 月度复盘 |
 | `RegularDeposit.vue` | 定期存款管理 |
 | `CashFlowView.vue` | 现金盘点 |
-| `FundScheduleBoard.vue` | 资金排程看板（手里现金/预留硬性·弹性/剩余可分配 + 历史快照列表 + 导入固定开销，路由 `/wealth/fund`） |
-| `WealthHub.vue` | 财务管理入口（子路由容器，含「资金排程」tab） |
+| `WealthHub.vue` | 财务管理入口（子路由容器，承载 6 个子页 tab：宏观热力图/月度日历/月度复盘/定期存款/现金盘点/贡献图） |
 
 ## Components
 | 文件 | 职责 |
@@ -30,16 +29,3 @@
 | `cashflow/AssetTrend.vue` | 资产趋势折线图（ECharts） |
 | `cashflow/HealthMetrics.vue` | 健康指标卡片（负债率/自由资金等） |
 | `cashflow/SnapshotHistory.vue` | 盘点历史列表（15列全字段 + 隐私脱敏 + 分页） |
-
-## 资金排程（FundScheduleBoard）
-
-核心逻辑：**预留是打算留作某用途的钱**。流程：手里现金 → 预留（硬性/弹性）→ 剩余可分配。每次保存生成一条历史快照。
-
-- 顶部：手里现金（可编辑）+ 计划名称
-- 预留项：硬性承诺（hard，红标）/ 弹性预留（soft，橙标）可增删，逐项设置名称与金额
-- 汇总：手里现金 / 预留合计 / 剩余可分配（负数红色警示）；恒等式 `现金 = 预留 + 剩余` 由单一派生链保证（结构性消除二次扣减 bug），另留 `balanceMismatch` 警示兜底
-- 保存计划 → 新增一条历史快照并清空表单
-- 历史列表：计划名称/手里现金/预留合计/剩余可分配/日期 + 查看/删除
-- 导入固定开销：弹出固定开销历史记录选择弹窗（名称/月开销/日开销/项目数/创建日期 + 选中预览部分项目），可选任意一条导入，按 365 天口径（年周期 ÷12.17）折算月金额导入为硬性承诺，带 `linked_expense_id`
-
-后端：`backend/apps/wealth/models/fund_schedule.py` + `services/fund_schedule_service.py` + `views/fund_schedule_views.py`，API 前缀 `/api/wealth/fund-schedule/`（list/create/detail/delete，无 update）。

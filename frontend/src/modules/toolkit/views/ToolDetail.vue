@@ -11,11 +11,9 @@
     <div v-loading="loading">
       <!-- 独立组件（页面标题由各自组件提供） -->
       <TravelRoute v-if="toolKey === 'travel-route'" />
-      <EnvironmentAudit v-else-if="toolKey === 'environment-audit'" />
       <CareerEnergyAudit v-else-if="toolKey === 'career-energy-audit'" />
       <HealthSelfCheck v-else-if="toolKey === 'health-self-check'" />
       <FinanceCalculators v-else-if="toolKey === 'finance-calculators'" />
-      <ReviewToolbox v-else-if="toolKey === 'review-toolbox'" />
       <GifCompressor v-else-if="toolKey === 'gif-compressor'" />
       <ElectricityRecord v-else-if="toolKey === 'electricity-record'" />
 
@@ -172,11 +170,9 @@ import { ArrowLeft, CaretRight, Download, CopyDocument, Refresh, Timer, UploadFi
 import { useToolkitStore } from '../stores/toolkitStore'
 import type { ToolDefinition, SchemaProperty } from '../types/toolkitTypes'
 import TravelRoute from './tools/TravelRoute.vue'
-import EnvironmentAudit from './tools/EnvironmentAudit.vue'
 import CareerEnergyAudit from './tools/CareerEnergyAudit.vue'
 import HealthSelfCheck from './tools/HealthSelfCheck.vue'
 import FinanceCalculators from './FinanceCalculators.vue'
-import ReviewToolbox from './tools/ReviewToolbox.vue'
 import GifCompressor from './tools/GifCompressor.vue'
 import ElectricityRecord from './tools/ElectricityRecord.vue'
 
@@ -206,8 +202,8 @@ const isTrad2Simp = computed(() => tool.value?.tool_key === 'trad2simp')
 // 数据型工具：历史在各页自身数据表、页面底部有自己的历史列表，不走"执行历史"页；
 // 其余（gif-compressor / trad2simp 及通用表单工具）为执行型，执行记录进"执行历史"页
 const DATA_TOOL_KEYS = new Set([
-  'travel-route', 'environment-audit', 'career-energy-audit', 'health-self-check',
-  'free-spending', 'review-toolbox', 'fixed-expense', 'electricity-record',
+  'travel-route', 'career-energy-audit', 'health-self-check',
+  'free-spending', 'fixed-expense', 'electricity-record',
   'finance-calculators',
 ])
 const isExecutionTool = computed(() => !DATA_TOOL_KEYS.has(toolKey.value))

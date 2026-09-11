@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import AskAnswer, AskScene, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionLog, DecisionRecord, DecisionTracker, ElectricityRecord, EnvironmentAudit, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, LanguageTraining, Quote, ReviewRecord, TravelRoutePreset
+from .models import AskAnswer, AskScene, AskTopic, CareerEnergyAudit, CityCoordinate, DecisionRecord, DecisionTracker, ElectricityRecord, FixedExpense, FreeSpendingCalculator, HealthSelfCheck, HourlyWageRecord, Quote, TravelRoutePreset
 from .services import _extra_income_monthly
 
 
@@ -53,13 +53,6 @@ class TravelRoutePresetSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'origin', 'destinations', 'description', 'created_at', 'updated_at']
 
 
-class EnvironmentAuditSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = EnvironmentAudit
-        fields = '__all__'
-        read_only_fields = ['total_score', 'verdict', 'created_at']
-
-
 class CareerEnergyAuditSerializer(serializers.ModelSerializer):
     def to_internal_value(self, data):
         # 将空字符串日期转为 None，避免 DRF DateField 校验失败
@@ -83,13 +76,6 @@ class QuoteSerializer(serializers.ModelSerializer):
         read_only_fields = ['review_count', 'created_at']
 
 
-class DecisionLogSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DecisionLog
-        fields = '__all__'
-        read_only_fields = ['created_at']
-
-
 class DecisionTrackerSerializer(serializers.ModelSerializer):
     """决策追踪器（列表带记录数 / 剩余天数）"""
 
@@ -100,6 +86,27 @@ class DecisionTrackerSerializer(serializers.ModelSerializer):
         model = DecisionTracker
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
+
+    def validate_lean_options(self, value):
+        """自定义倾向选项：留空/null/空数组用默认；给了则要求 2–6 项非空去重文本"""
+        if value is None or value == '' or value == []:
+            return None
+        if not isinstance(value, list):
+            raise serializers.ValidationError('lean_options 需为字符串数组')
+        cleaned: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if not text:
+                raise serializers.ValidationError('倾向选项不能为空字符串')
+            if len(text) > 20:
+                raise serializers.ValidationError('单个倾向选项不超过 20 个字')
+            if text not in cleaned:
+                cleaned.append(text)
+        if len(cleaned) < 2:
+            raise serializers.ValidationError('自定义倾向选项至少 2 项')
+        if len(cleaned) > 6:
+            raise serializers.ValidationError('自定义倾向选项最多 6 项')
+        return cleaned
 
     def get_record_count(self, obj) -> int:
         return getattr(obj, 'record_count', None) or obj.records.count()
@@ -114,6 +121,19 @@ class DecisionRecordSerializer(serializers.ModelSerializer):
         model = DecisionRecord
         fields = '__all__'
         read_only_fields = ['created_at']
+
+    def validate(self, attrs):
+        """tendency 必须属于所属追踪的倾向选项（默认三项或自定义文字）"""
+        tracker = attrs.get('tracker') or getattr(self.instance, 'tracker', None)
+        if tracker is None:
+            raise serializers.ValidationError({'tracker': '必须指定所属决策追踪'})
+        allowed_keys = [k for k, _ in tracker.tendency_options()]
+        tendency = attrs.get('tendency') or getattr(self.instance, 'tendency', None)
+        if tendency not in allowed_keys:
+            raise serializers.ValidationError(
+                {'tendency': f'倾向须是以下之一：{ "、".join(allowed_keys) }'}
+            )
+        return attrs
 
 
 class HealthSelfCheckSerializer(serializers.ModelSerializer):
@@ -159,30 +179,6 @@ class HourlyWageRecordSerializer(serializers.ModelSerializer):
 
     def get_total_daily(self, obj):
         return round((float(obj.monthly_salary) + float(_extra_income_monthly(obj.extra_incomes))) / 30, 2)
-
-
-class ReviewRecordSerializer(serializers.ModelSerializer):
-    review_type_display = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ReviewRecord
-        fields = '__all__'
-        read_only_fields = ['id', 'created_at']
-
-    def get_review_type_display(self, obj):
-        return obj.get_review_type_display()
-
-
-class LanguageTrainingSerializer(serializers.ModelSerializer):
-    train_type_display = serializers.SerializerMethodField()
-
-    class Meta:
-        model = LanguageTraining
-        fields = '__all__'
-        read_only_fields = ['id', 'created_at']
-
-    def get_train_type_display(self, obj):
-        return obj.get_train_type_display()
 
 
 class ElectricityRecordSerializer(serializers.ModelSerializer):

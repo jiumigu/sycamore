@@ -259,8 +259,15 @@ function removePresetDest(i: number) {
   presetForm.value.destinations.splice(i, 1)
 }
 
+// 精确匹配 -> 兜底模糊匹配（兼容历史数据中不带行政后缀的短名，如"北京"匹配"北京市"）
+function findCity(name: string): CityCoordinate | undefined {
+  if (cityMap.value[name]) return cityMap.value[name]
+  if (!name.trim()) return undefined
+  return cityList.value.find(c => c.name.includes(name) || name.includes(c.name))
+}
+
 function hasCity(name: string): boolean {
-  return !!cityMap.value[name]
+  return !!findCity(name)
 }
 
 function queryCities(query: string, cb: (results: any[]) => void) {
@@ -277,7 +284,7 @@ function queryCities(query: string, cb: (results: any[]) => void) {
 }
 
 function getCoords(name: string): [number, number] {
-  const c = cityMap.value[name]
+  const c = findCity(name)
   return c ? [c.lng, c.lat] : [118.3, 25.5]
 }
 
@@ -285,7 +292,7 @@ function calcCenter(): [number, number] {
   const coords: [number, number][] = []
   for (const s of stops.value) {
     const c = getCoords(s)
-    if (c[0] !== 118.3 || c[1] !== 25.5 || cityMap.value[s]) {
+    if (c[0] !== 118.3 || c[1] !== 25.5 || findCity(s)) {
       coords.push(c)
     }
   }
@@ -299,7 +306,7 @@ function calcZoom(): number {
   const coords: [number, number][] = []
   for (const s of stops.value) {
     const c = getCoords(s)
-    if (c[0] !== 118.3 || c[1] !== 25.5 || cityMap.value[s]) {
+    if (c[0] !== 118.3 || c[1] !== 25.5 || findCity(s)) {
       coords.push(c)
     }
   }

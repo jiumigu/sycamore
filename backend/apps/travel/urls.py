@@ -5,6 +5,8 @@ from . import views
 
 plan_router = DefaultRouter()
 plan_router.register(r'plans', views.TravelPlanViewSet, basename='travel-plan')
+wish_router = DefaultRouter()
+wish_router.register(r'wishes', views.TravelWishViewSet, basename='travel-wish')
 
 urlpatterns = [
     path('records/', views.TravelRecordListCreateView.as_view(), name='travel-records'),
@@ -14,4 +16,5 @@ urlpatterns = [
     path('provinces/', views.ProvinceListView.as_view(), name='travel-provinces'),
     path('years/', views.YearListView.as_view(), name='travel-years'),
     path('', include(plan_router.urls)),
+    path('', include(wish_router.urls)),
 ]

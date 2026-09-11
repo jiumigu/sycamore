@@ -7,7 +7,6 @@ from .wealth_models import (
     WealthRegularList,
     WealthBillList,
 )
-from .fund_schedule import FundSchedule, FundScheduleItem
 
 __all__ = [
     'WealthLifeWeekCalendar',
@@ -17,6 +16,4 @@ __all__ = [
     'WealthBalanceList',
     'WealthRegularList',
     'WealthBillList',
-    'FundSchedule',
-    'FundScheduleItem',
 ]

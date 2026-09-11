@@ -1,5 +1,5 @@
 import request from '@/shared/utils/request'
-import type { TravelFormData, TravelPlanInput } from '../types/travelTypes'
+import type { TravelFormData, TravelPlanInput, TravelWish } from '../types/travelTypes'
 
 export function getTravelRecords(params?: Record<string, unknown>) {
   return request({ url: '/travel/records/', method: 'get', params })
@@ -67,4 +67,33 @@ export function getTravelPlanStats() {
 
 export function toggleTravelPlanItem(id: number, itemId: number) {
   return request({ url: `/travel/plans/${id}/toggle-item/`, method: 'post', data: { item_id: itemId } })
+}
+
+// ===== 旅行心愿单 =====
+export function getWishes(params?: Record<string, unknown>) {
+  return request({ url: '/travel/wishes/', method: 'get', params })
+}
+
+export function createWish(data: Partial<TravelWish>) {
+  return request({ url: '/travel/wishes/', method: 'post', data })
+}
+
+export function updateWish(id: number, data: Partial<TravelWish>) {
+  return request({ url: `/travel/wishes/${id}/`, method: 'patch', data })
+}
+
+export function deleteWish(id: number) {
+  return request({ url: `/travel/wishes/${id}/`, method: 'delete' })
+}
+
+export function getWishStats() {
+  return request({ url: '/travel/wishes/stats/', method: 'get' })
+}
+
+export function markWishVisited(id: number) {
+  return request({ url: `/travel/wishes/${id}/mark_visited/`, method: 'post' })
+}
+
+export function addWishToPlan(id: number, data: { plan_id?: number; start_date?: string }) {
+  return request({ url: `/travel/wishes/${id}/add_to_plan/`, method: 'post', data })
 }

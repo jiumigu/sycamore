@@ -6,11 +6,9 @@
 |-------|-------|------|
 | ToolkitDefinition | toolkit_definition | 工具定义 |
 | ToolkitExecution | toolkit_execution | 执行记录 |
-| CityCoordinate | toolkit_city_coordinate | 全国城市坐标（718+ 条，含省市三级） |
+| CityCoordinate | toolkit_city_coordinate | 全国行政区划坐标（3693 条，省/市/区县三级全覆盖：直辖市·地级市·自治州·盟·地区 + 区/县/县级市/旗/乡等，GCJ-02 坐标） |
 | TravelRoutePreset | toolkit_travel_route_preset | 旅行路线预设 |
-| EnvironmentAudit | toolkit_environment_audit | 环境校准记录（6维度评分 + 总分/判定/备注） |
 | CareerEnergyAudit | toolkit_career_energy_audit | 职业能量审计（26项指标 + 自动判定 + 建议 + 下次审计提醒） |
-| LanguageTraining | toolkit_language_training | 语言训练记录（4种训练类型：词汇颗粒度/场景描述/语言素材/逼近修订） |
 | FixedExpense | toolkit_fixed_expense | 固定开销计算记录（自定义项目 + 按日/月/年周期统一换算日/月/年开销） |
 | HourlyWageRecord | toolkit_hourly_wage_record | 时薪计算记录（正式/自由职业双模式 + `extra_incomes` 附加收入（名称/金额/日·月·年周期）） |
 | ElectricityRecord | toolkit_electricity_record | 用电记录（电表读数 + 自动计算间隔用电量/间隔天数/日均用电量/本月累计，删除后自动重算后续记录） |
@@ -52,16 +50,9 @@ ToolkitExecution（任务记录层）
 | POST | /travel-routes/ | 创建路线预设 |
 | PUT | /travel-routes/&lt;id&gt;/ | 更新路线预设 |
 | DELETE | /travel-routes/&lt;id&gt;/ | 删除路线预设 |
-| GET | /environment-audits/ | 环境校准历史列表（?page_size= 分页） |
-| POST | /environment-audits/ | 创建校准记录（自动计算总分/判定） |
-| DELETE | /environment-audits/&lt;id&gt;/ | 删除校准记录 |
 | GET | /career-energy-audits/ | 职业能量审计列表（DRF 分页） |
 | POST | /career-energy-audits/ | 创建审计记录（自动计算总分/判定） |
 | DELETE | /career-energy-audits/&lt;id&gt;/ | 删除审计记录 |
-| GET | /language-training/ | 语言训练列表（?train_type= 筛选） |
-| POST | /language-training/ | 创建训练记录 |
-| PATCH | /language-training/&lt;id&gt;/ | 更新训练记录 |
-| DELETE | /language-training/&lt;id&gt;/ | 删除训练记录 |
 | GET | /fixed-expenses/ | 固定开销计算历史列表 |
 | POST | /fixed-expenses/ | 创建固定开销记录（按周期统一换算日/月/年开销） |
 | DELETE | /fixed-expenses/&lt;id&gt;/ | 删除固定开销记录 |
@@ -79,8 +70,6 @@ ToolkitExecution（任务记录层）
 | trad2simp | 繁简转换 | 繁体/简体文本互转 |
 | gif-compressor | GIF压缩 | 抽帧/缩放/减色/质量压缩 GIF |
 | travel_route | 旅行路线推演 | 地图可视化路线推演 |
-| environment_audit | 环境校准 | 六维度环境健康评分 + 判定
 | career_energy_audit | 职业能量审计 | 26项指标职业能量评估 + 自动判定 |
-| language_trainer | 语言训练器 | 4种训练类型（词汇颗粒度/场景描述/语言素材/逼近修订），CRUD 历史记录 |
 | fixed-expense | 固定开销计算器 | 自定义开销项目，按日/月/年周期统一换算每天/每月/每年开销 |
 | electricity-record | 用电记录 | 记录电表读数，自动计算间隔/日均/本月累计用电，删除自动重算 |

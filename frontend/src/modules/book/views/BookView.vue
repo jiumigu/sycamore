@@ -114,7 +114,9 @@
       <el-table v-loading="loading" :data="bookList" style="width: 100%" @selection-change="handleSelectionChange" @row-dblclick="openEditDialog">
         <el-table-column type="selection" width="55" />
         <el-table-column prop="bid" label="ID" width="70" sortable />
-        <el-table-column prop="btitle" label="书名" min-width="180" show-overflow-tooltip />
+        <el-table-column label="书名" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatBookTitle(row.btitle) }}</template>
+        </el-table-column>
         <el-table-column prop="author" label="作者" width="120" show-overflow-tooltip />
         <el-table-column label="类型" width="100">
           <template #default="{ row }">{{ row.btype_display || row.btype }}</template>
@@ -178,6 +180,7 @@
             <el-col :span="12">
               <el-form-item label="书名" prop="btitle">
                 <el-input v-model="formData.btitle" placeholder="请输入书名" />
+                <div class="field-hint">书名号《》会自动补全，无需手动输入</div>
               </el-form-item>
             </el-col>
             <el-col :span="12">
@@ -256,20 +259,44 @@
             <el-input v-model="formData.abandon_reason" type="textarea" rows="3" placeholder="请记录弃读原因..." maxlength="500" show-word-limit />
           </el-form-item>
           <el-form-item label="标签" prop="tags">
-            <el-select
-              v-model="formData.tags"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              placeholder="选择或输入标签"
-              style="width: 100%"
-            >
-              <el-option label="经典必读" value="经典必读" />
-              <el-option label="强烈推荐" value="强烈推荐" />
-              <el-option label="值得重读" value="值得重读" />
-              <el-option label="思维启发" value="思维启发" />
-            </el-select>
+            <div class="tags-wrapper">
+              <span class="preset-label">常用：</span>
+              <el-tag
+                v-for="tag in presetTags"
+                :key="tag"
+                size="small"
+                :class="{ selected: formData.tags.includes(tag) }"
+                class="preset-tag"
+                @click="togglePresetTag(tag)"
+              >
+                {{ tag }}
+              </el-tag>
+
+              <div class="custom-tags">
+                <el-tag
+                  v-for="tag in customTags"
+                  :key="tag"
+                  closable
+                  size="small"
+                  type="warning"
+                  @close="removeTag(tag)"
+                >
+                  {{ tag }}
+                </el-tag>
+                <el-input
+                  v-if="showTagInput"
+                  ref="tagInputRef"
+                  v-model="newTag"
+                  size="small"
+                  style="width: 90px"
+                  placeholder="回车添加"
+                  @keyup.enter="addTag"
+                  @blur="addTag"
+                />
+                <el-button v-else size="small" @click="openTagInput">+ 自定义</el-button>
+              </div>
+            </div>
+            <div class="tags-hint">常用标签可在「系统预设管理 → 图书预设标签」中维护</div>
           </el-form-item>
         </div>
       </el-form>
@@ -285,13 +312,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
   Search, Refresh, Plus, Delete, Edit, Document, Check, Star, Calendar, RefreshRight, DataAnalysis,
 } from '@element-plus/icons-vue'
 import { useBookStore } from '../stores/bookStore'
+import { getPresetByType } from '@/shared/api/coreApi'
 import {
   BTYPE_OPTIONS, STATUS_OPTIONS, READING_DEPTH_OPTIONS, RECOMMEND_TEXTS,
 } from '../types/bookTypes'
@@ -361,6 +389,17 @@ function onReadDateChange(val: string) {
   formData.years = val ? new Date(val).getFullYear().toString() : ''
 }
 
+/** 剥离书名号——存量导入数据可能带《》，统一在展示层归一化，不入库 */
+function stripBookMarks(title?: string | null) {
+  return (title || '').trim().replace(/^《+/, '').replace(/》+$/, '').trim()
+}
+
+/** 书名统一展示为《书名》，避免“有的带有的不带” */
+function formatBookTitle(title?: string | null) {
+  const t = stripBookMarks(title)
+  return t ? `《${t}》` : ''
+}
+
 function onStatusChange(status: string) {
   if (status !== '弃读') formData.abandon_reason = ''
 }
@@ -382,7 +421,7 @@ async function fetchData() {
   if (searchForm.btype) params.btype = searchForm.btype
   if (searchForm.status) params.status = searchForm.status
   if (searchForm.reading_depth !== undefined) params.reading_depth = searchForm.reading_depth
-  if (searchForm.search) params.search = searchForm.search
+  if (searchForm.search) params.search = stripBookMarks(searchForm.search)
   try {
     await bookStore.fetchBookList(params)
   } catch { ElMessage.error('获取数据失败') }
@@ -423,7 +462,7 @@ async function openEditDialog(row: Book) {
     if (!detail) return
     formData.bid = detail.bid
     formData.years = detail.years || ''
-    formData.btitle = detail.btitle || ''
+    formData.btitle = stripBookMarks(detail.btitle)
     formData.author = detail.author || ''
     formData.original_title = detail.original_title || ''
     formData.btype = detail.btype || ''
@@ -455,7 +494,7 @@ async function handleSubmit() {
     try {
       const data: Record<string, unknown> = {
         years: formData.years,
-        btitle: formData.btitle?.trim(),
+        btitle: stripBookMarks(formData.btitle),
         btype: formData.btype,
         status: formData.status,
         recommend: formData.recommend,
@@ -486,7 +525,7 @@ async function handleSubmit() {
 
 async function handleDelete(row: Book) {
   try {
-    await ElMessageBox.confirm(`确定要删除"${row.btitle}"吗？`, '提示', { type: 'warning' })
+    await ElMessageBox.confirm(`确定要删除${formatBookTitle(row.btitle)}吗？`, '提示', { type: 'warning' })
     await bookStore.deleteExistingBook(row.bid)
     ElMessage.success('删除成功')
     await fetchData(); await fetchStats()
@@ -499,7 +538,49 @@ function handleSizeChange(val: number) { pageSize.value = val; currentPage.value
 function handleCurrentChange(page: number) { currentPage.value = page; fetchData() }
 function refreshData() { fetchData(); fetchStats(); ElMessage.success('数据已刷新') }
 
-onMounted(() => { fetchData(); fetchStats() })
+// ── 标签（预设 + 自定义，预设来自「系统预设管理 → 图书预设标签」，交互同日记流） ──
+const presetTags = ref<string[]>([])
+const showTagInput = ref(false)
+const newTag = ref('')
+const tagInputRef = ref()
+
+const customTags = computed(() => formData.tags.filter(t => !presetTags.value.includes(t)))
+
+async function loadPresetTags() {
+  try {
+    const res = await getPresetByType('book_tags')
+    presetTags.value = res.data.values || []
+  } catch {
+    presetTags.value = []
+  }
+}
+
+function togglePresetTag(tag: string) {
+  const idx = formData.tags.indexOf(tag)
+  if (idx > -1) {
+    formData.tags.splice(idx, 1)
+  } else {
+    formData.tags.push(tag)
+  }
+}
+
+function addTag() {
+  const tag = newTag.value.trim()
+  if (tag && !formData.tags.includes(tag)) formData.tags.push(tag)
+  newTag.value = ''
+  showTagInput.value = false
+}
+
+function removeTag(tag: string) {
+  formData.tags = formData.tags.filter(t => t !== tag)
+}
+
+function openTagInput() {
+  showTagInput.value = true
+  nextTick(() => tagInputRef.value?.focus())
+}
+
+onMounted(() => { fetchData(); fetchStats(); loadPresetTags() })
 </script>
 
 <style scoped lang="scss">
@@ -561,9 +642,60 @@ onMounted(() => { fetchData(); fetchStats() })
 
 .dialog-footer { display: flex; justify-content: flex-end; gap: 12px; }
 
+.field-hint {
+  width: 100%;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  line-height: 1.4;
+}
+
 @media (max-width: 768px) {
   .page-header { flex-direction: column; align-items: stretch; gap: 16px; }
   .stats-section .el-row { flex-direction: column; .el-col { width: 100%; margin-bottom: 16px; } }
   .filter-card .filter-header { flex-direction: column; align-items: stretch; }
+}
+
+/* 标签点选（样式同日记流） */
+.tags-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.preset-label {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.preset-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover { opacity: 0.8; }
+
+  &.selected {
+    background: #ecf5ff;
+    border-color: #409eff;
+    color: #409eff;
+  }
+}
+
+.custom-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tags-hint {
+  width: 100%;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  line-height: 1.4;
 }
 </style>

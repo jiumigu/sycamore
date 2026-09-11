@@ -1,3 +1,4 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
@@ -157,34 +158,6 @@ class TravelRoutePreset(models.Model):
         return self.name
 
 
-class EnvironmentAudit(models.Model):
-    """环境校准记录"""
-    user_id = models.IntegerField(default=1, verbose_name='用户ID（预留）')
-    environment_name = models.CharField(max_length=200, verbose_name='环境名称')
-    audit_date = models.DateField(verbose_name='校准日期')
-
-    # 六条特征评分（1-5分）
-    allow_learning = models.IntegerField(default=0, verbose_name='允许说不知道')
-    system_valued = models.IntegerField(default=0, verbose_name='系统能力被珍视')
-    signal_over_noise = models.IntegerField(default=0, verbose_name='信号大于噪音')
-    body_heard = models.IntegerField(default=0, verbose_name='身体能被听见')
-    people_share = models.IntegerField(default=0, verbose_name='高手愿意分享')
-    output_echoes = models.IntegerField(default=0, verbose_name='输出有回路')
-
-    total_score = models.IntegerField(default=0, verbose_name='总分')
-    verdict = models.CharField(max_length=20, verbose_name='判定')
-    notes = models.TextField(blank=True, default='', verbose_name='备注')
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-
-    class Meta:
-        db_table = 'toolkit_environment_audit'
-        ordering = ['-audit_date']
-        verbose_name = '环境校准记录'
-
-    def __str__(self):
-        return f'{self.environment_name} ({self.total_score}/30)'
-
-
 class CareerEnergyAudit(models.Model):
     """职业能量审计"""
     user_id = models.IntegerField(default=1, verbose_name='用户ID（预留）')
@@ -243,41 +216,6 @@ class CareerEnergyAudit(models.Model):
 
     def __str__(self):
         return f'职业能量 {self.audit_date} ({self.total_score}分)'
-
-
-class DecisionLog(models.Model):
-    """决策日志"""
-
-    CATEGORY_CHOICES = [
-        ('职业', '职业'), ('关系', '关系'), ('财务', '财务'),
-        ('健康', '健康'), ('居住', '居住'), ('学习', '学习'),
-        ('其他', '其他'),
-    ]
-
-    user_id = models.IntegerField(default=1, verbose_name='用户ID')
-    title = models.CharField(max_length=200, verbose_name='决策标题')
-    decision_date = models.DateField(verbose_name='决策日期')
-    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='其他', verbose_name='分类')
-    background = models.TextField(verbose_name='背景/情境')
-    options = models.JSONField(default=list, verbose_name='选项列表', help_text='[{name, pros, cons}]')
-    chosen = models.CharField(max_length=200, verbose_name='最终选择')
-    reason = models.TextField(verbose_name='选择理由')
-    expected_outcome = models.TextField(verbose_name='预期结果')
-    fear_factor = models.IntegerField(default=5, verbose_name='恐惧指数', help_text='1-10')
-    actual_outcome = models.TextField(blank=True, default='', verbose_name='实际结果（半年后回顾）')
-    was_right = models.BooleanField(null=True, blank=True, verbose_name='决策是否正确')
-    learned = models.TextField(blank=True, default='', verbose_name='学到的经验')
-    bias_found = models.CharField(max_length=100, blank=True, default='', verbose_name='发现的偏误')
-    review_date = models.DateField(null=True, blank=True, verbose_name='回顾日期')
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-
-    class Meta:
-        db_table = 'toolkit_decision_log'
-        ordering = ['-decision_date']
-        verbose_name = '决策日志'
-
-    def __str__(self):
-        return f'{self.title} ({self.decision_date})'
 
 
 class HealthSelfCheck(models.Model):
@@ -460,115 +398,6 @@ class HourlyWageRecord(models.Model):
         return f'{self.name or "时薪计算"} ¥{self.hourly_wage}/h'
 
 
-class ReviewRecord(models.Model):
-    """复盘记录"""
-
-    REVIEW_TYPES = [
-        ('daily', '每日复盘'),
-        ('weekly', '周复盘'),
-        ('monthly', '月复盘'),
-        ('quarterly', '季度复盘'),
-        ('life', '人生编舟'),
-    ]
-
-    user_id = models.IntegerField(default=1, verbose_name='用户ID')
-    review_type = models.CharField(max_length=20, choices=REVIEW_TYPES, verbose_name='复盘类型')
-    review_date = models.DateField(verbose_name='复盘日期')
-
-    # 每日复盘
-    daily_status = models.CharField(max_length=50, blank=True, default='', verbose_name='状态')
-    daily_people = models.TextField(blank=True, default='', verbose_name='那些人那些事')
-    johari_window = models.JSONField(default=dict, blank=True, verbose_name='约哈里窗')
-    emotions = models.JSONField(default=dict, blank=True, verbose_name='情绪清单')
-
-    # 周/月复盘
-    completed = models.TextField(blank=True, default='', verbose_name='本周/月完成')
-    plan_next = models.TextField(blank=True, default='', verbose_name='下周/月计划')
-    reflection = models.TextField(blank=True, default='', verbose_name='反思总结')
-
-    # 月复盘专属
-    grai = models.JSONField(default=dict, blank=True, verbose_name='GRAI复盘')
-    orid = models.JSONField(default=dict, blank=True, verbose_name='ORID复盘')
-
-    # 季度复盘
-    nourishing = models.TextField(blank=True, default='', verbose_name='滋养小事')
-    draining = models.TextField(blank=True, default='', verbose_name='消耗黑洞')
-    fears = models.TextField(blank=True, default='', verbose_name='害怕的事')
-    worries = models.TextField(blank=True, default='', verbose_name='烦恼的事')
-    envy_target = models.TextField(blank=True, default='', verbose_name='羡慕的对象')
-    regret_at_80 = models.TextField(blank=True, default='', verbose_name='80岁遗憾')
-    life_paths = models.TextField(blank=True, default='', verbose_name='5年路径推演')
-
-    # 人生编舟
-    life_line = models.TextField(blank=True, default='', verbose_name='生命线回顾')
-    personal_goals = models.TextField(blank=True, default='', verbose_name='个人目标')
-    time_plan = models.TextField(blank=True, default='', verbose_name='四象限规划')
-    deep_reflection = models.TextField(blank=True, default='', verbose_name='深度复盘')
-
-    notes = models.TextField(blank=True, default='', verbose_name='备注')
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-
-    class Meta:
-        db_table = 'toolkit_review_record'
-        ordering = ['-review_date', '-created_at']
-        verbose_name = '复盘记录'
-        indexes = [
-            models.Index(fields=['review_type']),
-            models.Index(fields=['review_date']),
-        ]
-
-    def __str__(self):
-        return f'{self.get_review_type_display()} {self.review_date}'
-
-
-class LanguageTraining(models.Model):
-    """语言训练记录"""
-
-    TRAIN_TYPE_CHOICES = [
-        ('granularity', '词汇颗粒度'),
-        ('describe', '场景描述'),
-        ('material', '语言素材'),
-        ('revision', '逼近修订'),
-    ]
-
-    user_id = models.IntegerField(default=1, verbose_name='用户ID')
-    train_type = models.CharField(max_length=20, choices=TRAIN_TYPE_CHOICES, verbose_name='训练类型')
-    train_date = models.DateField(verbose_name='训练日期')
-
-    # 词汇颗粒度
-    rough_word = models.CharField(max_length=50, blank=True, default='', verbose_name='粗糙词汇')
-    refined_words = models.TextField(blank=True, default='', verbose_name='拆分后的词汇')
-
-    # 场景描述
-    summary = models.CharField(max_length=200, blank=True, default='', verbose_name='总结性描述')
-    scene = models.TextField(blank=True, default='', verbose_name='场景还原')
-
-    # 语言素材
-    source = models.CharField(max_length=200, blank=True, default='', verbose_name='来源')
-    quote_text = models.TextField(blank=True, default='', verbose_name='原句')
-    why_good = models.TextField(blank=True, default='', verbose_name='为什么觉得好')
-
-    # 逼近修订
-    first_draft = models.TextField(blank=True, default='', verbose_name='第一版')
-    revisions = models.JSONField(default=list, blank=True, verbose_name='修订过程')
-    final_version = models.TextField(blank=True, default='', verbose_name='最终版')
-
-    notes = models.TextField(blank=True, default='', verbose_name='备注')
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-
-    class Meta:
-        db_table = 'toolkit_language_training'
-        ordering = ['-train_date']
-        verbose_name = '语言训练记录'
-        indexes = [
-            models.Index(fields=['train_type']),
-            models.Index(fields=['train_date']),
-        ]
-
-    def __str__(self):
-        return f'{self.get_train_type_display()} {self.train_date}'
-
-
 class ElectricityRecord(models.Model):
     """用电记录"""
 
@@ -613,6 +442,11 @@ class DecisionTracker(models.Model):
     final_decision = models.CharField(max_length=50, blank=True, default='', verbose_name='最终决定')
     decision_date = models.DateField(null=True, blank=True, verbose_name='决定日期')
     review_note = models.TextField(blank=True, default='', verbose_name='事后回看（决策后 30 天补填）')
+    lean_options = models.JSONField(
+        null=True, blank=True,
+        verbose_name='自定义倾向选项',
+        help_text='字符串数组（2–6 项），如 ["想现在买","再等等","不买"]；留空用默认三项（想继续/不想继续/不确定）',
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -624,28 +458,45 @@ class DecisionTracker(models.Model):
     def __str__(self):
         return f'{self.topic}（{self.status}）'
 
+    @property
+    def is_custom_lean(self) -> bool:
+        return bool(self.lean_options)
+
+    def tendency_options(self) -> list[tuple[str, str]]:
+        """本追踪可用的倾向选项 [(key, label)]——自定义选项 key=label（记录直接存文字）"""
+        if self.lean_options:
+            return [(str(s), str(s)) for s in self.lean_options]
+        return [('continue', '想继续'), ('quit', '不想继续'), ('uncertain', '不确定')]
+
 
 class DecisionRecord(models.Model):
-    """决策日常记录——单次倾向采样"""
+    """决策日常记录——单次倾向采样（倾向选项由所属追踪的 lean_options 决定）"""
 
-    TENDENCY_CHOICES = [
-        ('continue', '想继续'),
-        ('quit', '不想继续'),
-        ('uncertain', '不确定'),
-    ]
     INTENSITY_CHOICES = [
-        ('低', '低'),
-        ('中', '中'),
-        ('高', '高'),
+        (1, '很弱'),
+        (2, '弱'),
+        (3, '中'),
+        (4, '强'),
+        (5, '很强'),
     ]
 
     tracker = models.ForeignKey(
         DecisionTracker, on_delete=models.CASCADE, related_name='records', verbose_name='所属决策',
     )
     record_date = models.DateField(verbose_name='记录日期')
-    tendency = models.CharField(max_length=10, choices=TENDENCY_CHOICES, verbose_name='倾向')
+    tendency = models.CharField(
+        max_length=50,
+        verbose_name='倾向',
+        help_text='默认追踪存 continue/quit/uncertain；自定义倾向选项的追踪直接存选项文字',
+    )
     reason = models.TextField(blank=True, default='', verbose_name='具体理由')
-    intensity = models.CharField(max_length=10, choices=INTENSITY_CHOICES, default='中', verbose_name='情绪强度')
+    intensity = models.PositiveSmallIntegerField(
+        default=3,
+        choices=INTENSITY_CHOICES,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name='情绪强度',
+        help_text='1–5，数值越大越强烈（旧版「低/中/高」已分别映射为 2/3/4）',
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
 
     class Meta:

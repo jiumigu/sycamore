@@ -7,7 +7,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 env = environ.Env()
 env.read_env(BASE_DIR / '.env')
 
-SECRET_KEY = env('SECRET_KEY', default='django-insecure-hrj%a)ep$b_nvl^h0c(hsksm6wls5k!3x0y9_4-(oni82g(o)k')
+# SECRET_KEY 必须由 .env 提供（backend/.env，已被 gitignore）；
+# 此默认值仅为占位，泄露无实际意义，请勿在未配置 .env 的环境下运行
+SECRET_KEY = env('SECRET_KEY', default='django-insecure-placeholder-set-SECRET_KEY-in-dotenv')
 
 DEBUG = env.bool('DEBUG', default=False)
 

@@ -2,14 +2,12 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from . import views
-from .views.fund_schedule_views import FundScheduleViewSet
 
-fund_schedule_router = DefaultRouter()
-fund_schedule_router.register(r'fund-schedule', FundScheduleViewSet, basename='fund-schedule')
-fund_schedule_router.register(r'bills', views.BillViewSet, basename='bills')
+router = DefaultRouter()
+router.register(r'bills', views.BillViewSet, basename='bills')
 
 urlpatterns = [
-    path('', include(fund_schedule_router.urls)),
+    path('', include(router.urls)),
     path('age-week/', views.CurrentAgeWeekView.as_view(), name='current-age-week'),
     path('calendar/', views.WeekCalendarView.as_view(), name='week-calendar'),
     path('weekly_summary/<int:global_week_index>/', views.WeeklySummaryView.as_view(), name='weekly-summary'),

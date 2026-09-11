@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import TravelPlan, TravelPlanItem, TravelRecord
+from .models import TravelPlan, TravelPlanItem, TravelRecord, TravelWish
 
 
 class TravelRecordSerializer(serializers.Serializer):
@@ -31,7 +31,25 @@ class TravelPlanItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TravelPlanItem
-        fields = ['id', 'item_type', 'name', 'estimate_cost', 'is_completed', 'completed_at', 'notes', 'sort_order']
+        fields = ['id', 'item_type', 'name', 'estimate_cost', 'is_completed', 'completed_at', 'notes', 'sort_order', 'wish']
+        read_only_fields = ['id']
+
+
+class TravelWishSerializer(serializers.ModelSerializer):
+    """旅行心愿序列化器"""
+
+    class Meta:
+        model = TravelWish
+        fields = ['id', 'name', 'category', 'province', 'city', 'district', 'lng', 'lat', 'status', 'visited_at', 'notes', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def update(self, instance, validated_data):
+        new_status = validated_data.get('status', instance.status)
+        if new_status != '已打卡':
+            validated_data['visited_at'] = None
+        elif validated_data.get('visited_at') is None and instance.visited_at is None:
+            validated_data['visited_at'] = timezone.localdate()
+        return super().update(instance, validated_data)
 
 
 class TravelPlanSerializer(serializers.ModelSerializer):

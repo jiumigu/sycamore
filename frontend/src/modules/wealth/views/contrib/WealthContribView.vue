@@ -6,7 +6,7 @@
           <el-icon><ArrowLeft /></el-icon> 返回
         </el-button>
         <h2 class="page-title">{{ title }}</h2>
-        <el-tag size="small" type="info">单日收支净值（红=收入多 / 绿=支出多）</el-tag>
+        <el-tag size="small" type="info">单日收支净值（绿=收入多 / 红=支出多）</el-tag>
       </div>
       <el-button size="small" @click="load(true)">
         <el-icon><Refresh /></el-icon> 刷新

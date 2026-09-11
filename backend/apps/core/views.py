@@ -345,29 +345,6 @@ class GlobalSearchView(APIView):
         except Exception as e:
             logger.warning('全局搜索模块「好东西」失败: %s', e)
 
-        # 5. 复盘记录
-        try:
-            from apps.toolkit.models import ReviewRecord
-            for r in ReviewRecord.objects.filter(
-                Q(notes__icontains=query) |
-                Q(completed__icontains=query) |
-                Q(reflection__icontains=query) |
-                Q(nourishing__icontains=query) |
-                Q(draining__icontains=query) |
-                Q(fears__icontains=query) |
-                Q(life_line__icontains=query) |
-                Q(deep_reflection__icontains=query)
-            )[:5]:
-                results.append({
-                    'module': 'review', 'module_name': '🧭 复盘',
-                    'id': r.id,
-                    'title': f'{r.get_review_type_display()} - {r.review_date}',
-                    'content': (r.notes or r.reflection or '')[:100],
-                    'date': r.review_date.isoformat(),
-                })
-        except Exception as e:
-            logger.warning('全局搜索模块「复盘」失败: %s', e)
-
         # 按模块分组
         grouped = {}
         for r in results:
