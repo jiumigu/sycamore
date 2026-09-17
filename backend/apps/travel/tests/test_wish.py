@@ -144,3 +144,65 @@ def test_wish_filter_by_status_and_category(client, db):
     assert len(resp.data) == 1 and resp.data[0]['name'] == '蛋烘糕'
     resp = client.get(WISHES_URL, {'search': '中山'})
     assert len(resp.data) == 1 and resp.data[0]['name'] == '中山陵'
+
+
+def test_record_visit_with_details(client, db):
+    """打卡记录：日期 / 星级评分 / 评价 / 是否值得反复"""
+    wish = _create_wish(client)
+    resp = client.post(f"{WISHES_URL}{wish['id']}/record_visit/", {
+        'visited_at': '2026-05-01',
+        'visit_rating': 5,
+        'visit_notes': '秋天最好，早上人少',
+        'worth_revisit': True,
+    }, format='json')
+    assert resp.status_code == 200, resp.data
+    body = resp.data
+    assert body['status'] == '已打卡'
+    assert body['visited_at'] == '2026-05-01'
+    assert body['visit_rating'] == 5
+    assert body['visit_notes'] == '秋天最好，早上人少'
+    assert body['worth_revisit'] is True
+
+
+def test_record_visit_defaults_date_and_edits(client, db):
+    """不传日期默认今天；已打卡再次调用＝修改记录，状态仍为已打卡"""
+    wish = _create_wish(client)
+    first = client.post(f"{WISHES_URL}{wish['id']}/record_visit/", {'visit_rating': 4}, format='json')
+    assert first.status_code == 200
+    assert first.data['visited_at'] is not None
+
+    second = client.post(f"{WISHES_URL}{wish['id']}/record_visit/", {
+        'visit_rating': 2, 'worth_revisit': False,
+    }, format='json')
+    assert second.status_code == 200
+    assert second.data['status'] == '已打卡'
+    assert second.data['visit_rating'] == 2
+    # 未传 visited_at 不应清空首次已记录的日期
+    assert second.data['visited_at'] == first.data['visited_at']
+
+
+def test_record_visit_validation(client, db):
+    """评分越界 / 日期格式错误 → 400"""
+    wish = _create_wish(client)
+    bad_rating = client.post(f"{WISHES_URL}{wish['id']}/record_visit/", {'visit_rating': 9}, format='json')
+    assert bad_rating.status_code == 400
+    assert '评分' in bad_rating.data['error']
+
+    bad_date = client.post(f"{WISHES_URL}{wish['id']}/record_visit/", {'visited_at': '2026/05/01'}, format='json')
+    assert bad_date.status_code == 400
+    assert '日期' in bad_date.data['error']
+
+
+def test_cancel_visit_keeps_record(client, db):
+    """取消打卡：状态回退、打卡日期清空，评价与「值得反复」保留以便重新打卡"""
+    wish = _create_wish(client)
+    client.post(f"{WISHES_URL}{wish['id']}/record_visit/", {
+        'visit_rating': 3, 'visit_notes': '一般', 'worth_revisit': True,
+    }, format='json')
+
+    resp = client.post(f"{WISHES_URL}{wish['id']}/mark_visited/", {}, format='json')
+    assert resp.status_code == 200
+    assert resp.data['status'] == '想去'
+    assert resp.data['visited_at'] is None
+    assert resp.data['visit_notes'] == '一般'
+    assert resp.data['worth_revisit'] is True

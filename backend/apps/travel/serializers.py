@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import TravelPlan, TravelPlanItem, TravelRecord, TravelWish
@@ -40,8 +41,8 @@ class TravelWishSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TravelWish
-        fields = ['id', 'name', 'category', 'province', 'city', 'district', 'lng', 'lat', 'status', 'visited_at', 'notes', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'category', 'province', 'city', 'district', 'lng', 'lat', 'status', 'visited_at', 'visit_rating', 'visit_notes', 'worth_revisit', 'visit_plan', 'visit_record_id', 'notes', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'visit_record_id', 'created_at', 'updated_at']
 
     def update(self, instance, validated_data):
         new_status = validated_data.get('status', instance.status)

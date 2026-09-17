@@ -7,7 +7,7 @@ from typing import Any
 
 from django.db.models import Avg, Count, Q, Sum
 
-from .models import TravelPlan, TravelRecord
+from .models import TravelPlan, TravelRecord, TravelWish
 
 # ── 中国城市坐标库（省份→城市→经纬度）────────────────────────────
 # 覆盖主要城市 + 数据中已有的具体地点
@@ -167,30 +167,182 @@ def get_province(city_name: str) -> str | None:
         return short_to_full[city_name]
 
     # 城市名当省份名（如 "宁德市" → "福建省"）
-    # 反向查找 CITY_COORDS：找包含此城市的省份
+    # 反向查找硬编码表：找包含此城市的省份
     for prov, cities in CITY_COORDS.items():
         if city_name in cities:
             return prov
 
+    # 权威坐标表兜底（城市名 → 所属省份）
+    for row in _coord_index().get(city_name, []) or _coord_index().get(strip_city_suffix(city_name), []):
+        if row[1]:
+            return get_province(row[1]) or row[1]
+
     return None
 
 
-def get_coordinates(city_name: str) -> tuple[float, float] | None:
-    """获取城市/地点坐标"""
-    # 直接匹配
-    for prov, cities in CITY_COORDS.items():
-        if city_name in cities:
-            return cities[city_name]
-    # 区县 → 地级市
-    if city_name in DISTRICT_TO_CITY:
-        parent = DISTRICT_TO_CITY[city_name]
-        for prov, cities in CITY_COORDS.items():
+# 名称后缀（长的优先，避免「地区」只剥掉「区」）
+_NAME_SUFFIXES = ('自治州', '自治县', '地区', '市', '州', '盟', '县', '区')
+
+
+def strip_city_suffix(name: str) -> str:
+    """剥掉行政区划后缀：温州市→温州、大理州→大理、福鼎市→福鼎"""
+    for suffix in _NAME_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+# 「名称写法 → [(全称, 省份, lat, lng)]」索引，进程内缓存
+_coord_index_cache: dict[str, list[tuple[str, str, float, float]]] | None = None
+
+
+def _coord_index() -> dict[str, list[tuple[str, str, float, float]]]:
+    """构建坐标索引（全称 + 去后缀简称）
+
+    同一写法可能跨省同名（「连江」「三门」），所以值是列表，解析时按省份过滤。
+    行政区 / 景区 行排在「其他」类 POI 之前，与 `resolve_wish_coords` 口径一致。
+    """
+    global _coord_index_cache
+    if _coord_index_cache is not None:
+        return _coord_index_cache
+
+    from apps.toolkit.models import CityCoordinate
+
+    idx: dict[str, list[tuple[str, str, float, float]]] = defaultdict(list)
+    ordered = [
+        CityCoordinate.objects.exclude(city_type='其他'),
+        CityCoordinate.objects.filter(city_type='其他'),
+    ]
+    for qs in ordered:
+        rows = qs.values_list('name', 'province', 'lat', 'lng').iterator()
+        for name, province, lat, lng in rows:
+            if not name:
+                continue
+            for key in {name, strip_city_suffix(name)}:
+                idx[key].append((name, province or '', float(lat), float(lng)))
+    _coord_index_cache = idx
+    return idx
+
+
+def reset_coord_index() -> None:
+    """清空坐标索引缓存（坐标表变更后 / 测试建库后调用）"""
+    global _coord_index_cache
+    _coord_index_cache = None
+
+
+def resolve_place(city_name: str, province: str = '') -> tuple[str, float, float] | None:
+    """名称 → (规范名, lat, lng)
+
+    规范名取自权威坐标表的 `name`，用于把「温州」/「温州市」这类同一地点的不同写法
+    归并成一个气泡（否则地图上会出现两个重叠气泡）。
+
+    ① 权威坐标表 `toolkit_city_coordinate`：全称 / 简称精确匹配，带省份时本省优先
+       （避免跨省同名撞车，也让县级市落到自己的真实位置而非上级市中心）
+    ② 硬编码 `CITY_COORDS` / `DISTRICT_TO_CITY` 兜底（坐标表缺行时的保险）
+    """
+    name = (city_name or '').strip()
+    if name:
+        idx = _coord_index()
+        cands = idx.get(name) or idx.get(strip_city_suffix(name)) or []
+        if cands:
+            # 索引条目为 (全称, 省份, lat, lng)
+            if province:
+                same = [c for c in cands if c[1] == province]
+                if len(same) == 1:
+                    return (same[0][0], same[0][2], same[0][3])
+            return (cands[0][0], cands[0][2], cands[0][3])
+
+    for _prov, cities in CITY_COORDS.items():
+        if name in cities:
+            lat, lng = cities[name]
+            return (name, lat, lng)
+    if name in DISTRICT_TO_CITY:
+        parent = DISTRICT_TO_CITY[name]
+        for _prov, cities in CITY_COORDS.items():
             if parent in cities:
-                # 返回地级市坐标 + 小偏移避免重叠
                 lat, lng = cities[parent]
-                import random
-                return (lat + random.uniform(-0.05, 0.05), lng + random.uniform(-0.05, 0.05))
+                return (name, lat, lng)
     return None
+
+
+def get_coordinates(city_name: str, province: str = '') -> tuple[float, float] | None:
+    """获取城市/地点坐标，返回 (lat, lng)"""
+    hit = resolve_place(city_name, province)
+    return (hit[1], hit[2]) if hit else None
+
+
+# ── 地级市归属解析（地市级热力图用）──────────────────────────────
+# 旅行记录里的 tname 粒度混杂（地级市「温州市」、县级市「福鼎市」、区县「泰顺县」），
+# parentnode 有时是省、有时是地级市。要按地级市着色，必须先把每条记录归到地级市。
+
+_PREFECTURE_TYPES = ('地级市', '自治州', '地区', '盟')
+_MUNICIPALITIES = ('北京市', '天津市', '上海市', '重庆市')
+_pref_index_cache: dict[str, str] | None = None
+
+
+def _prefecture_index() -> dict[str, str]:
+    """构建「名称 → 地级市名」索引：全称（温州市）+ 去后缀简称（温州/大理/喀什）。
+
+    只含地级市 / 自治州 / 地区 / 盟。首次调用时查库，进程内缓存。
+    """
+    global _pref_index_cache
+    if _pref_index_cache is not None:
+        return _pref_index_cache
+
+    from apps.toolkit.models import CityCoordinate
+
+    idx: dict[str, str] = {}
+    rows = CityCoordinate.objects.filter(city_type__in=_PREFECTURE_TYPES).values_list('name', flat=True)
+    for name in rows:
+        if not name:
+            continue
+        idx.setdefault(name, name)
+        for suffix in ('市', '州', '地区', '盟'):
+            if name.endswith(suffix):
+                idx.setdefault(name[: -len(suffix)], name)
+                break
+    _pref_index_cache = idx
+    return idx
+
+
+def reset_prefecture_index() -> None:
+    """清空地级市索引缓存（测试建库后或坐标表变更后调用）
+
+    坐标索引同样依赖坐标表，一起清掉，避免测试间互相污染。
+    """
+    global _pref_index_cache
+    _pref_index_cache = None
+    reset_coord_index()
+
+
+def resolve_prefecture(city: str, parent: str = '') -> str:
+    """把一条记录的「城市 + 上级」归到地级市，返回地级市名（无法判定返回 ''）
+
+    ① `city` 本身是地级市（「温州市」/「温州」）→ 直接用它
+    ② `parent` 是地级市（city 为县级市/区县，如「福鼎市 ← 宁德市」）→ 用 parent
+    ③ `parent` 是直辖市（「北京市」）→ 返回 `city`（地图上直辖市按区渲染）
+    """
+    idx = _prefecture_index()
+    c = (city or '').strip()
+    p = (parent or '').strip()
+    if c in idx:
+        return idx[c]
+    if p in idx:
+        return idx[p]
+    if p in _MUNICIPALITIES:
+        return c
+    return ''
+
+
+def heat_level(count: int) -> str:
+    """到访次数 → 热力档位（与前端图例一致：偶尔 / 多次 / 频繁 / 深度游）"""
+    if count >= 5:
+        return '深度游'
+    if count >= 3:
+        return '频繁'
+    if count >= 2:
+        return '多次'
+    return '偶尔'
 
 
 # ── 地图数据聚合 ──────────────────────────────────────────────
@@ -201,7 +353,7 @@ class MapDataService:
 
     @staticmethod
     def get_map_data(year_from: int | None = None, year_to: int | None = None) -> dict[str, Any]:
-        """获取省份热力图 + 城市气泡图数据"""
+        """获取地级市热力图 + 城市气泡图数据"""
         qs = TravelRecord.objects.all()
         if year_from:
             qs = qs.filter(tyear__gte=year_from)
@@ -210,46 +362,61 @@ class MapDataService:
 
         records = list(qs)
 
-        # 省份热力聚合
-        province_count: dict[str, int] = defaultdict(int)
+        # 地级市热力聚合（粒度下沉：整省一个色块 → 每个地级市各自着色）
+        # 同时记录「来源城市」明细：县级市/区县的到访会并入所属地级市，
+        # 明细让前端 tooltip 能解释「这 6 次里含福鼎市 1 次」。
+        pref_count: dict[str, int] = defaultdict(int)
+        pref_src: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         for r in records:
-            prov = get_province(r.parentnode or '')
-            if prov:
-                province_count[prov] += 1
+            pref = resolve_prefecture(r.tname or '', r.parentnode or '')
+            if pref:
+                pref_count[pref] += 1
+                pref_src[pref][(r.tname or '').strip()] += 1
 
         heatmap = [
-            {'province': prov, 'count': count, 'intensity': round(min(count / 10, 1), 2)}
-            for prov, count in sorted(province_count.items(), key=lambda x: -x[1])
+            {
+                'name': name,
+                'count': count,
+                'level': heat_level(count),
+                'sources': [
+                    {'city': city, 'count': n}
+                    for city, n in sorted(pref_src[name].items(), key=lambda kv: (-kv[1], kv[0]))
+                ],
+            }
+            for name, count in sorted(pref_count.items(), key=lambda kv: (-kv[1], kv[0]))
         ]
 
-        # 城市气泡聚合（按 tname 去重聚合）
+        # 城市气泡聚合（原始写法 → 坐标表规范名，同地点只留一个气泡）
         city_agg: dict[str, dict[str, Any]] = {}
+        alias: dict[str, str] = {}
         # 排除非真实地名的关键词
         _skip_names = {'市本级', '本级', '市区', '城区'}
         for r in records:
             city = r.tname or ''
             if not city or city in _skip_names:
                 continue
-            if city not in city_agg:
-                coord = get_coordinates(city)
-                prov = get_province(r.parentnode or '')
-                if not coord:
-                    # 尝试用 parentnode 的坐标
-                    coord = get_coordinates(r.parentnode or '')
-                if not coord:
+            canon = alias.get(city)
+            if canon is None:
+                prov = get_province(r.parentnode or '') or ''
+                # 先查城市自身的真实坐标（县级市/区县也有独立点位），再退回上级坐标
+                hit = resolve_place(city, prov) or resolve_place(r.parentnode or '', prov)
+                if not hit:
                     continue
-                city_agg[city] = {
-                    'city': city,
-                    'province': prov or '',
-                    'latitude': round(coord[0], 6),
-                    'longitude': round(coord[1], 6),
-                    'total_cost': 0,
-                    'count': 0,
-                    'ratings': [],
-                    'years': [],
-                    'has_cost': False,
-                }
-            entry = city_agg[city]
+                canon = hit[0] or city
+                alias[city] = canon
+                if canon not in city_agg:
+                    city_agg[canon] = {
+                        'city': canon,
+                        'province': prov,
+                        'latitude': round(hit[1], 6),
+                        'longitude': round(hit[2], 6),
+                        'total_cost': 0,
+                        'count': 0,
+                        'ratings': [],
+                        'years': [],
+                        'has_cost': False,
+                    }
+            entry = city_agg[canon]
             entry['count'] += 1
             if r.tcost:
                 entry['total_cost'] += r.tcost
@@ -285,6 +452,7 @@ class MapDataService:
 
         return {
             'heatmap': heatmap,
+            'heat_max': max(pref_count.values(), default=0),
             'bubbles': bubbles,
             'total': {
                 'cities': len(all_cities),
@@ -381,4 +549,139 @@ class TravelPlanService:
             'total_plans': plans.count(),
             'total_estimate': float(total_estimate),
             'completed_plans': completed_plans,
+        }
+
+
+# ── 行程日志（打卡 → 记录 的中间层）────────────────────────────
+
+# 归类为「吃」的心愿分类（与 views.WISH_FOOD_CATEGORIES 同口径）
+FOOD_CATEGORIES = {'美食', '夜市', '路线'}
+
+_PLACE_SUFFIXES = ('市', '地区', '自治州', '盟', '特别行政区')
+
+
+def norm_place(city: str | None, province: str | None) -> str:
+    """地点名：优先城市，缺省回落到省份"""
+    place = (city or '').strip()
+    if not place:
+        place = (province or '').strip()
+    return place
+
+
+def place_key(city: str | None, province: str | None) -> str:
+    """分组键：剥离行政后缀，兼容「南京」与「南京市」写成两组
+
+    注意不剥离单字「州」，避免「杭州」被截断。
+    """
+    place = norm_place(city, province)
+    for suffix in _PLACE_SUFFIXES:
+        if place.endswith(suffix) and len(place) > len(suffix):
+            return place[: -len(suffix)]
+    return place
+
+
+class TripLogService:
+    """行程日志 — 把已打卡心愿按「日期 + 地点」聚合为一天一张卡
+
+    设计意图：打卡不直接写 travel_list_info（历史表 managed=False，且一次行程
+    会散成十几条足迹、污染地图热力与年份趋势），而是先聚合为可读日志，
+    需要沉淀时再显式生成一条旅行记录。
+    """
+
+    @staticmethod
+    def build(
+        user_id: int = 1,
+        date_from=None,
+        date_to=None,
+        plan_id: int | None = None,
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        qs = TravelWish.objects.filter(
+            user_id=user_id, status='已打卡', visited_at__isnull=False,
+        )
+        if date_from:
+            qs = qs.filter(visited_at__gte=date_from)
+        if date_to:
+            qs = qs.filter(visited_at__lte=date_to)
+        if plan_id:
+            qs = qs.filter(visit_plan_id=plan_id)
+        if city:
+            qs = qs.filter(city__icontains=city)
+
+        wishes = list(qs.order_by('-visited_at', 'category', 'name'))
+
+        groups: dict[tuple, dict[str, Any]] = {}
+        for w in wishes:
+            key = (w.visited_at, place_key(w.city, w.province))
+            g = groups.get(key)
+            if g is None:
+                g = groups[key] = {
+                    'date': w.visited_at,
+                    'city': norm_place(w.city, w.province),
+                    'province': w.province or '',
+                    'district': w.district or '',
+                    'items': [],
+                    'record_tid': None,
+                    'plan_ids': [],
+                }
+            g['items'].append({
+                'id': w.id,
+                'name': w.name,
+                'category': w.category,
+                'is_food': w.category in FOOD_CATEGORIES,
+                'rating': w.visit_rating,
+                'notes': w.visit_notes or '',
+                'worth_revisit': bool(w.worth_revisit),
+                'consolidated': w.visit_record_id is not None,
+                'plan_id': w.visit_plan_id,
+                'lng': w.lng,
+                'lat': w.lat,
+            })
+            if w.visit_record_id and g['record_tid'] is None:
+                g['record_tid'] = w.visit_record_id
+            if w.visit_plan_id and w.visit_plan_id not in g['plan_ids']:
+                g['plan_ids'].append(w.visit_plan_id)
+
+        # 批量补足迹与行程名称，避免逐条查询
+        record_ids = {g['record_tid'] for g in groups.values() if g['record_tid']}
+        records = {r.tid: r for r in TravelRecord.objects.filter(tid__in=record_ids)} if record_ids else {}
+        plan_ids = {pid for g in groups.values() for pid in g['plan_ids']}
+        plans = {p.id: p for p in TravelPlan.objects.filter(id__in=plan_ids)} if plan_ids else {}
+
+        days = []
+        for g in groups.values():
+            items = g['items']
+            rec = records.get(g['record_tid']) if g['record_tid'] else None
+            ratings = [i['rating'] for i in items if i['rating']]
+            days.append({
+                'date': g['date'].isoformat(),
+                'city': g['city'],
+                'province': g['province'],
+                'district': g['district'],
+                'items': items,
+                'item_count': len(items),
+                'summary': '、'.join(i['name'] for i in items),
+                'avg_rating': round(sum(ratings) / len(ratings), 1) if ratings else None,
+                'worth_count': sum(1 for i in items if i['worth_revisit']),
+                'consolidated': rec is not None,
+                'record': None if rec is None else {
+                    'tid': rec.tid,
+                    'tcost': rec.tcost,
+                    'rating': rec.rating,
+                    'companions': rec.companions or '',
+                    'duration_days': rec.duration_days,
+                    'tremark': rec.tremark or '',
+                },
+                'plans': [
+                    {'id': pid, 'name': plans[pid].name}
+                    for pid in g['plan_ids'] if pid in plans
+                ],
+            })
+
+        days.sort(key=lambda d: d['date'], reverse=True)
+        return {
+            'days': days,
+            'total_days': len(days),
+            'total_items': sum(d['item_count'] for d in days),
+            'pending_days': sum(1 for d in days if not d['consolidated']),
         }

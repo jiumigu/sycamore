@@ -14,10 +14,14 @@ export interface TravelRecord {
   longitude: number | null
 }
 
+/** 地级市热力项（name 为地级市名，如「温州市」「大理州」「喀什地区」） */
 export interface HeatmapItem {
-  province: string
+  name: string
   count: number
-  intensity: number
+  /** 热力档位：偶尔 / 多次 / 频繁 / 深度游 */
+  level: string
+  /** 计数来源明细：县级市/区县的到访会并入所属地级市（如福鼎市 → 宁德市） */
+  sources?: Array<{ city: string; count: number }>
 }
 
 export interface BubbleItem {
@@ -34,6 +38,8 @@ export interface BubbleItem {
 
 export interface MapData {
   heatmap: HeatmapItem[]
+  /** 地级市到访次数最大值（用于图例提示） */
+  heat_max: number
   bubbles: BubbleItem[]
   total: {
     cities: number
@@ -98,6 +104,7 @@ export interface TravelPlanItem {
   completed_at: string | null
   notes: string
   sort_order: number
+  wish: number | null
 }
 
 export interface TravelPlan {
@@ -148,6 +155,11 @@ export interface TravelWish {
   lat: number | null
   status: WishStatus
   visited_at: string | null
+  visit_rating: number | null
+  visit_notes: string
+  worth_revisit: boolean
+  visit_plan: number | null
+  visit_record_id: number | null
   notes: string
   created_at: string
   updated_at: string
@@ -166,4 +178,82 @@ export interface TravelPlanOption {
   destination: string
   status: string
   start_date: string | null
+}
+
+// ===== 行程日志（打卡聚合视图） =====
+export interface TripLogItem {
+  id: number
+  name: string
+  category: string
+  is_food: boolean
+  rating: number | null
+  notes: string
+  worth_revisit: boolean
+  consolidated: boolean
+  plan_id: number | null
+  lng: number | null
+  lat: number | null
+}
+
+export interface TripLogRecord {
+  tid: number
+  tcost: number | null
+  rating: number | null
+  companions: string
+  duration_days: number | null
+  tremark: string
+}
+
+export interface TripLogDay {
+  date: string
+  city: string
+  province: string
+  district: string
+  items: TripLogItem[]
+  item_count: number
+  summary: string
+  avg_rating: number | null
+  worth_count: number
+  consolidated: boolean
+  record: TripLogRecord | null
+  plans: { id: number; name: string }[]
+}
+
+export interface TripLog {
+  days: TripLogDay[]
+  total_days: number
+  total_items: number
+  pending_days: number
+}
+
+export interface ConsolidatePayload {
+  date: string
+  city?: string
+  tcost?: number | null
+  rating?: number | null
+  duration_days?: number | null
+  companions?: string
+  tremark?: string
+}
+
+// ===== 路线 → 计划 =====
+export interface RouteWishOption {
+  id: number
+  name: string
+  category: string
+  is_food: boolean
+}
+
+export interface RouteStation {
+  city: string
+  wish_count: number
+  wishes: RouteWishOption[]
+}
+
+export interface PlanFromRouteInput {
+  name?: string
+  origin?: string
+  destinations: string[]
+  start_date?: string | null
+  wish_ids?: number[]
 }

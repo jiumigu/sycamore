@@ -905,6 +905,12 @@ class BillViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(Q(necessity__isnull=True) | Q(necessity=''))
             else:
                 qs = qs.filter(necessity=necessity)
+        period_tag = params.get('period_tag')
+        if period_tag:
+            if period_tag == 'unmarked':
+                qs = qs.filter(Q(period_tag__isnull=True) | Q(period_tag=''))
+            else:
+                qs = qs.filter(period_tag=period_tag)
         return qs
 
     @action(detail=False, methods=['post'], url_path='batch-necessity')
@@ -950,6 +956,55 @@ class BillViewSet(viewsets.ModelViewSet):
         return Response({
             'summary': [
                 {'necessity': k, 'count': v['count'], 'total': v['total']}
+                for k, v in bucket.items()
+            ],
+            'grand_count': sum(v['count'] for v in bucket.values()),
+            'grand_total': round(sum(v['total'] for v in bucket.values()), 2),
+        })
+
+    @action(detail=False, methods=['post'], url_path='batch-period-tag')
+    def batch_period_tag(self, request):
+        """批量标记赎回归属：POST {ids:[...], period_tag:'为自己'|'过渡'|'外部'|'不计入'}（收入/支出均生效）"""
+        ids = request.data.get('ids') or []
+        period_tag = (request.data.get('period_tag') or '').strip()
+        if not isinstance(ids, list) or not ids:
+            return Response({'error': 'ids 必填（数组）'}, status=status.HTTP_400_BAD_REQUEST)
+        if period_tag not in {'为自己', '过渡', '外部', '不计入'}:
+            return Response({'error': 'period_tag 仅支持 为自己/过渡/外部/不计入'}, status=status.HTTP_400_BAD_REQUEST)
+        # 与 batch-necessity 不同：此处不做 transaction_type='支出' 限制，收入也要标
+        updated = WealthBillList.objects.filter(
+            user_id=1, id__in=ids,
+        ).update(period_tag=period_tag)
+        return Response({'updated': updated})
+
+    @action(detail=False, methods=['get'], url_path='period_tag_stats')
+    def period_tag_stats(self, request):
+        """赎回归属小结：按 为自己/过渡/外部/不计入/未标记 分组的笔数与金额（收入支出合计）"""
+        params = self.request.query_params
+        qs = WealthBillList.objects.filter(user_id=1)
+        date_from = params.get('date_from')
+        if date_from:
+            qs = qs.filter(date__gte=datetime.combine(datetime.strptime(date_from, '%Y-%m-%d').date(), datetime.min.time()))
+        date_to = params.get('date_to')
+        if date_to:
+            qs = qs.filter(date__lte=datetime.combine(datetime.strptime(date_to, '%Y-%m-%d').date(), datetime.max.time()))
+        category = params.get('category')
+        if category:
+            qs = qs.filter(category=category)
+
+        rows = (
+            qs.values('period_tag')
+            .annotate(cnt=Count('id'), total=Sum('amount'))
+        )
+        bucket = {n: {'count': 0, 'total': 0.0} for n in ('为自己', '过渡', '外部', '不计入', 'unmarked')}
+        for r in rows:
+            n = r['period_tag'] or ''
+            key = n if n in bucket else 'unmarked'
+            bucket[key]['count'] = r['cnt']
+            bucket[key]['total'] = round(float(r['total'] or 0), 2)
+        return Response({
+            'summary': [
+                {'period_tag': k, 'count': v['count'], 'total': v['total']}
                 for k, v in bucket.items()
             ],
             'grand_count': sum(v['count'] for v in bucket.values()),

@@ -33,6 +33,18 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/modules/temporal/views/ScheduleView.vue'),
     meta: { title: '日程视图' },
   },
+  {
+    path: '/temporal/mapping',
+    name: 'temporal-mapping',
+    component: () => import('@/modules/temporal/components/MappingEditor.vue'),
+    meta: { title: '映射编辑器' },
+  },
+  {
+    path: '/temporal/tasks',
+    name: 'temporal-tasks',
+    component: () => import('@/modules/temporal/views/TaskListView.vue'),
+    meta: { title: '时间任务清单' },
+  },
 
   // 目标与项目
   { path: '/temporal/contrib', name: 'temporal-contrib', component: () => import('@/modules/temporal/views/contrib/TemporalContribView.vue'), meta: { title: '时间贡献图' } },
@@ -151,6 +163,14 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '贡献图' },
       },
     ],
+  },
+
+  // 三年赎回期
+  {
+    path: '/redemption',
+    name: 'redemption',
+    component: () => import('@/modules/redemption/views/RedemptionHub.vue'),
+    meta: { title: '三年赎回期' },
   },
   {
     path: '/dams',
@@ -278,6 +298,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/travel', name: 'travel', component: () => import('@/modules/travel/views/TravelDashboard.vue'), meta: { title: '旅行记录' } },
   { path: '/travel/wishes', name: 'travel-wishes', component: () => import('@/modules/travel/views/TravelWishView.vue'), meta: { title: '旅行心愿单' } },
   { path: '/travel/plans', name: 'travel-plans', component: () => import('@/modules/travel/views/TravelPlanView.vue'), meta: { title: '旅行计划' } },
+  { path: '/travel/route', name: 'travel-route', component: () => import('@/modules/travel/views/TravelRouteView.vue'), meta: { title: '旅行路线推演' } },
   {
     path: '/relation',
     name: 'relation',

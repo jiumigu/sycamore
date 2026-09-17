@@ -144,7 +144,7 @@ class BillSerializer(serializers.ModelSerializer):
         model = WealthBillList
         fields = [
             'id', 'transaction_type', 'date', 'category', 'subcategory',
-            'necessity', 'project', 'account', 'amount', 'merchant', 'notes', 'user_id',
+            'necessity', 'period_tag', 'project', 'account', 'amount', 'merchant', 'notes', 'user_id',
         ]
         read_only_fields = ['id', 'user_id']
 
@@ -153,6 +153,8 @@ class BillSerializer(serializers.ModelSerializer):
         ttype = attrs.get('transaction_type') or getattr(self.instance, 'transaction_type', None)
         if ttype == '收入':
             attrs['necessity'] = ''
+        # ⚠️ period_tag 不照搬 necessity 的清空逻辑：收入侧同样需要标记（离职尾款 / 稿费等性质不同）
+        # 自动推导（窗口外）与人工修正在视图层/前端处理，序列化器仅透传
         return attrs
 
     def _fill_derived(self, validated_data: dict) -> dict:

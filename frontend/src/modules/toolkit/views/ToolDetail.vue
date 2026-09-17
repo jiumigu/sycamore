@@ -10,7 +10,13 @@
     </div>
     <div v-loading="loading">
       <!-- 独立组件（页面标题由各自组件提供） -->
-      <TravelRoute v-if="toolKey === 'travel-route'" />
+      <!-- 旅行路线推演已迁入「旅行」模块，这里保留快捷入口 -->
+      <div v-if="toolKey === 'travel-route'" class="tool-moved">
+        <div class="moved-icon">🚂</div>
+        <h3 class="moved-title">旅行路线推演已迁入「旅行」模块</h3>
+        <p class="moved-desc">它本质是旅行计划的编排器，现在与心愿单、计划、足迹放在一起；本页仅保留快捷入口。</p>
+        <el-button type="primary" @click="$router.push('/travel/route')">前往路线推演</el-button>
+      </div>
       <CareerEnergyAudit v-else-if="toolKey === 'career-energy-audit'" />
       <HealthSelfCheck v-else-if="toolKey === 'health-self-check'" />
       <FinanceCalculators v-else-if="toolKey === 'finance-calculators'" />
@@ -169,7 +175,6 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft, CaretRight, Download, CopyDocument, Refresh, Timer, UploadFilled, Document } from '@element-plus/icons-vue'
 import { useToolkitStore } from '../stores/toolkitStore'
 import type { ToolDefinition, SchemaProperty } from '../types/toolkitTypes'
-import TravelRoute from './tools/TravelRoute.vue'
 import CareerEnergyAudit from './tools/CareerEnergyAudit.vue'
 import HealthSelfCheck from './tools/HealthSelfCheck.vue'
 import FinanceCalculators from './FinanceCalculators.vue'
@@ -430,5 +435,19 @@ onMounted(async () => {
   }
 
   .error-alert { margin-bottom: 16px; }
+}
+
+.tool-moved {
+  max-width: 520px;
+  margin: 64px auto 0;
+  text-align: center;
+  background: #fff;
+  border: 1px solid #EEF0F3;
+  border-radius: 12px;
+  padding: 32px 28px;
+
+  .moved-icon { font-size: 40px; margin-bottom: 12px; }
+  .moved-title { margin: 0 0 8px; font-size: 16px; font-weight: 500; color: #1F2937; }
+  .moved-desc { margin: 0 0 20px; font-size: 13px; line-height: 1.6; color: #6B7280; }
 }
 </style>

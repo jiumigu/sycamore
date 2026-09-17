@@ -7,8 +7,85 @@ from django.db import models, transaction
 from django.db.models import Avg, Count, Sum
 from django.utils import timezone
 
-from .constants import CATEGORY_COLORS, TASK_CATEGORY_MAPPING
-from .models import OneDayPage, TemporalTask
+from .constants import (
+    ACTIVITY_TYPE_COLORS,
+    ATTRIBUTION_COLORS,
+    ATTRIBUTION_ORDER,
+    DEFAULT_FALLBACK_ATTR,
+    LEGACY_FOUR_TO_L2,
+    TASK_CATEGORY_MAPPING,
+    TASK_TO_L2,
+)
+from .models import OneDayPage, TaskMeta, TemporalTask
+
+
+def resolve_task_meta(task_names: list[str]) -> dict:
+    """task_name(L3) → {activity_type(L2), is_unclassified}
+
+    注：v0.3 语义订正后，L1 = 归因（见 resolve_attribution），不再有「自建聚合分组」层。
+    """
+    if not task_names:
+        return {}
+    rows = TaskMeta.objects.filter(task_name__in=task_names)
+    out = {}
+    for r in rows:
+        out[r.task_name] = {
+            'activity_type': r.activity_type,
+            'is_unclassified': r.activity_type == '未归类',
+        }
+    return out
+
+
+def resolve_attribution(task_names: list[str]) -> dict:
+    """task_name(L3) → 价值归因（L1：投向/维持/外部/流失）
+
+    优先级：redemption_attr_rule(override) > temporal_task_meta.default_attribution > 兜底'投向'
+    """
+    if not task_names:
+        return {}
+    from apps.redemption.models import RedemptionAttrRule
+
+    rules = list(RedemptionAttrRule.objects.filter(is_active=True))
+    meta_map = {m.task_name: m for m in TaskMeta.objects.filter(task_name__in=task_names)}
+
+    def best(task_name: str, activity_type: str | None):
+        cand = [r for r in rules if
+                (r.match_field == 'task_name' and r.match_value == task_name) or
+                (r.match_field == 'activity_type' and r.match_value == (activity_type or ''))]
+        if not cand:
+            return None
+        cand.sort(key=lambda r: r.priority, reverse=True)
+        return cand[0].attribution
+
+    out = {}
+    for tn in task_names:
+        m = meta_map.get(tn)
+        if not m:
+            out[tn] = DEFAULT_FALLBACK_ATTR
+            continue
+        override = best(tn, m.activity_type)
+        out[tn] = override or m.default_attribution or DEFAULT_FALLBACK_ATTR
+    return out
+
+
+def _ensure_task_meta(task_names: list[str]) -> int:
+    """为新出现的 task_name 建 TaskMeta；命中 TASK_TO_L2 则带活动类型+归因，否则进未归类桶。幂等。
+
+    返回本次新建的「未归类」task_name 数（提示用户前往映射编辑器完善）。
+    """
+    created_unclassified = 0
+    for tn in task_names:
+        if TaskMeta.objects.filter(task_name=tn).exists():
+            continue
+        if tn in TASK_TO_L2:
+            at, attr = TASK_TO_L2[tn]
+        elif tn in TASK_CATEGORY_MAPPING:
+            at, attr = LEGACY_FOUR_TO_L2[TASK_CATEGORY_MAPPING[tn]]
+        else:
+            at, attr = '未归类', None
+            created_unclassified += 1
+        TaskMeta.objects.create(task_name=tn, activity_type=at, default_attribution=attr, is_system=False)
+    return created_unclassified
 
 
 class CSVImportService:
@@ -135,11 +212,10 @@ class CSVImportService:
         print(f'[CSV 导入] 去重合并后: {len(merged)} 组')
 
         # ── 覆盖模式写入（用 year/mon/day 查找，避免 CONVERT_TZ 问题） ──
+        # 注意：v0.3 起不再写入 category_level1/category_color（旧四大类字段停用），
+        # 分类改走独立 managed 表 temporal_task_meta（由 migrate_temporal_categories 或下方自动建）。
         stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
         for (name, d), g in merged.items():
-            category = TASK_CATEGORY_MAPPING.get(name, '生活')
-            color = CATEGORY_COLORS.get(category, '#9CA3AF')
-
             task_defaults = {
                 'task_name': name,
                 'task_description': g['description'],
@@ -154,8 +230,6 @@ class CSVImportService:
                 'day': d.day,
                 'week': d.isocalendar()[1],
                 'quarter': (d.month - 1) // 3 + 1,
-                'category_level1': category,
-                'category_color': color,
                 'import_batch': batch_id,
             }
 
@@ -177,8 +251,6 @@ class CSVImportService:
                 TemporalTask.objects.filter(id=existing.id).update(
                     duration_hours=g['duration'],
                     end_time=g['end_dt'] or existing.end_time,
-                    category_level1=category,
-                    category_color=color,
                     notes=g['notes'] or existing.notes,
                     import_batch=batch_id,
                     updated_at=timezone.now(),
@@ -187,6 +259,9 @@ class CSVImportService:
             else:
                 TemporalTask.objects.create(**task_defaults)
                 stats['inserted'] += 1
+
+        # ── 自动为新出现的 task_name 建 L2 映射（命中 TASK_TO_L2 才建，否则进未归类桶）──
+        stats['unclassified'] = _ensure_task_meta([name for name, _ in merged.keys()])
 
         # ── 自动刷新周度缓存 ──
         from apps.temporal.management.commands.refresh_weekly_cache import Command
@@ -200,7 +275,7 @@ class CSVImportService:
 
 
 class TemporalStatsService:
-    """时间统计服务"""
+    """时间统计服务（v0.3：聚合维度从 category_level1 改为 L1/L2）"""
 
     @staticmethod
     def get_overview(year: int | None = None) -> dict:
@@ -210,114 +285,266 @@ class TemporalStatsService:
 
         total_hours = qs.aggregate(s=models.Sum('duration_hours'))['s'] or 0
         total_records = qs.count()
-        active_days = qs.values('year', 'mon', 'day').distinct().count()
+        # order_by() 清序：避免 Django 把 start_time 注入 DISTINCT 列致去重失效
+        active_days = qs.order_by().values('year', 'mon', 'day').distinct().count()
 
-        cat_totals = qs.values('category_level1').annotate(
-            hours=models.Sum('duration_hours'),
-        ).order_by('-hours')
+        rows = qs.values('task_name').annotate(h=models.Sum('duration_hours'))
+        names = [r['task_name'] for r in rows]
+        meta = resolve_task_meta(names)
+        attr = resolve_attribution(names)
 
-        production_pct = 0
-        cat_breakdown = {}
-        for c in cat_totals:
-            cat_name = c['category_level1'] or '未分类'
-            h = float(c['hours'] or 0)
-            cat_breakdown[cat_name] = h
-
-        if total_hours > 0 and '学习' in cat_breakdown:
-            production_pct = round((cat_breakdown['学习'] / total_hours) * 100, 1)
+        attribution_breakdown = defaultdict(float)   # L1 归因
+        activity_breakdown = defaultdict(float)      # L2 活动类型
+        for r in rows:
+            tn = r['task_name']
+            h = float(r['h'] or 0)
+            m = meta.get(tn)
+            at = m['activity_type'] if m else '未归类'
+            a = attr.get(tn, DEFAULT_FALLBACK_ATTR)
+            activity_breakdown[at] += h
+            attribution_breakdown[a] += h
 
         return {
             'total_hours': round(float(total_hours), 2),
             'total_records': total_records,
             'active_days': active_days,
-            'production_percentage': production_pct,
-            'category_breakdown': cat_breakdown,
+            'attribution_breakdown': {k: round(v, 2) for k, v in attribution_breakdown.items()},
+            'activity_breakdown': {k: round(v, 2) for k, v in activity_breakdown.items()},
+            'completeness': TemporalStatsService.get_completeness(year),
         }
 
     @staticmethod
-    def get_trend(year: int | None = None, group: str = 'month') -> list:
+    def get_trend(year: int | None = None, group: str = 'month', level: str = 'l1') -> list:
+        """趋势数据：level=l1(归因) / l2(活动类型) / l3(task_name)"""
         qs = TemporalTask.objects.all()
         if year:
             qs = qs.filter(year=year)
 
-        tasks = qs.values('start_time', 'duration_hours', 'category_level1')
+        tasks = qs.values('task_name', 'start_time', 'duration_hours')
+        names = [t['task_name'] for t in tasks]
+        meta = resolve_task_meta(names)
+        attr = resolve_attribution(names)
 
         period_data = defaultdict(lambda: defaultdict(float))
         for t in tasks:
             st = t['start_time']
             if not st:
                 continue
-            cat = t['category_level1'] or '未分类'
+            tn = t['task_name']
+            m = meta.get(tn)
+            if level == 'l3':
+                key2 = tn
+            elif level == 'l2':
+                key2 = (m['activity_type'] if m else '未归类')
+            else:  # l1 = 价值归因
+                key2 = attr.get(tn, DEFAULT_FALLBACK_ATTR)
             hours = float(t['duration_hours'] or 0)
             if group == 'month':
-                key = st.strftime('%Y-%m')
+                p = st.strftime('%Y-%m')
             elif group == 'week':
-                key = f"{st.year}-W{st.isocalendar()[1]:02d}"
+                p = f"{st.year}-W{st.isocalendar()[1]:02d}"
             else:
-                key = st.strftime('%Y-%m-%d')
+                p = st.strftime('%Y-%m-%d')
+            period_data[p][key2] += hours
 
-            period_data[key][cat] += hours
-
-        categories_order = ['工作', '学习', '生活', '兴趣记录']
+        all_keys = set()
+        for d in period_data.values():
+            all_keys.update(d.keys())
         result = []
-        for period in sorted(period_data.keys()):
-            item = {'period': period}
-            for cat in categories_order:
-                item[cat] = round(period_data[period][cat], 2)
-            other = round(sum(v for k, v in period_data[period].items() if k not in categories_order), 2)
-            if other:
-                item['其他'] = other
+        for p in sorted(period_data.keys()):
+            item = {'period': p}
+            for k in sorted(all_keys):
+                item[k] = round(period_data[p].get(k, 0.0), 2)
             result.append(item)
-
         return result
 
     @staticmethod
     def get_balance(year: int | None = None) -> dict:
+        """平衡轮数据：按 L2 活动类型聚合（v0.3 改自 category_level1）"""
         qs = TemporalTask.objects.all()
         if year:
             qs = qs.filter(year=year)
 
         total_hours = float(qs.aggregate(s=models.Sum('duration_hours'))['s'] or 0)
-        cat_totals = qs.values('category_level1').annotate(
-            hours=models.Sum('duration_hours'),
-        )
+        rows = qs.values('task_name').annotate(h=models.Sum('duration_hours'))
+        meta = resolve_task_meta([r['task_name'] for r in rows])
+
+        at_map = defaultdict(float)
+        for r in rows:
+            m = meta.get(r['task_name'])
+            at = m['activity_type'] if m else '未归类'
+            at_map[at] += float(r['h'] or 0)
 
         categories = []
-        cat_map = {c['category_level1']: float(c['hours'] or 0) for c in cat_totals}
-
-        for cat_name in ['工作', '学习', '生活', '兴趣记录']:
-            hours = cat_map.get(cat_name, 0)
-            pct = round((hours / total_hours) * 100, 1) if total_hours > 0 else 0
+        for at in sorted(at_map.keys()):
+            h = round(at_map[at], 2)
+            pct = round(h / total_hours * 100, 1) if total_hours > 0 else 0
             categories.append({
-                'name': cat_name,
-                'hours': round(hours, 2),
+                'name': at,
+                'hours': h,
                 'percentage': pct,
-                'color': CATEGORY_COLORS.get(cat_name, '#9CA3AF'),
+                'color': ACTIVITY_TYPE_COLORS.get(at, '#9CA3AF'),
             })
-
         return {'total_hours': round(total_hours, 2), 'categories': categories}
 
     @staticmethod
-    def get_ranking(year: int | None = None, limit: int = 10) -> list:
+    def get_sunburst(year: int | None = None) -> dict:
+        """旭日/嵌套饼图数据（3 环）：L1 归因 → L2 活动类型 → L3 task_name"""
         qs = TemporalTask.objects.all()
         if year:
             qs = qs.filter(year=year)
 
-        rankings = qs.values('task_name', 'category_level1', 'category_color').annotate(
-            total_hours=models.Sum('duration_hours'),
-            record_count=models.Count('id'),
-        ).order_by('-total_hours')[:limit]
+        rows = qs.values('task_name').annotate(h=models.Sum('duration_hours'))
+        names = [r['task_name'] for r in rows]
+        meta = resolve_task_meta(names)
+        attr = resolve_attribution(names)
 
-        return [
-            {
-                'task_name': r['task_name'],
-                'category': r['category_level1'] or '未分类',
-                'color': r['category_color'] or '#9CA3AF',
+        tree: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        for r in rows:
+            tn = r['task_name']
+            h = float(r['h'] or 0)
+            m = meta.get(tn)
+            at = m['activity_type'] if m else '未归类'
+            a = attr.get(tn, DEFAULT_FALLBACK_ATTR)
+            tree[a][at][tn] += h
+
+        def _ordered(keys, order):
+            return sorted(keys, key=lambda n: (order.index(n) if n in order else 99, str(n)))
+
+        groups = []
+        for a in _ordered(tree.keys(), ATTRIBUTION_ORDER):
+            l2_map = tree[a]
+            l1_hours = sum(sum(l3.values()) for l3 in l2_map.values())
+            children = []
+            for at in _ordered(l2_map.keys(), []):
+                l3_map = l2_map[at]
+                children.append({
+                    'name': at,
+                    'hours': round(sum(l3_map.values()), 2),
+                    'color': ACTIVITY_TYPE_COLORS.get(at, '#CBD5E1'),
+                    'children': [
+                        {'name': tn, 'hours': round(hv, 2)}
+                        for tn, hv in sorted(l3_map.items(), key=lambda x: -x[1])
+                    ],
+                })
+            groups.append({
+                'name': a,
+                'hours': round(l1_hours, 2),
+                'color': ATTRIBUTION_COLORS.get(a, '#94A3B8'),
+                'children': children,
+            })
+        return {'groups': groups}
+
+    @staticmethod
+    def get_168h_structure(year: int | None = None, weeks: int = 12) -> dict:
+        """近 N 周 168h 结构：by_l1=归因 / by_l2=类型 / by_l3=task_name + 完整度"""
+        qs = TemporalTask.objects.all()
+        if year:
+            qs = qs.filter(year=year)
+
+        rows = qs.values('task_name', 'year', 'week').annotate(h=models.Sum('duration_hours'))
+        names = [r['task_name'] for r in rows]
+        meta = resolve_task_meta(names)
+        attr = resolve_attribution(names)
+
+        day_map = defaultdict(set)
+        for d in qs.order_by().values('year', 'week', 'mon', 'day').distinct():
+            day_map[(d['year'], d['week'])].add((d['mon'], d['day']))
+
+        by_week = defaultdict(lambda: {
+            'by_l1': defaultdict(float), 'by_l2': defaultdict(float), 'by_l3': defaultdict(float),
+            'classified': 0.0,
+        })
+        for r in rows:
+            tn = r['task_name']
+            h = float(r['h'] or 0)
+            yw = (r['year'], r['week'])
+            m = meta.get(tn)
+            at = (m['activity_type'] if m else '未归类')
+            a = attr.get(tn, DEFAULT_FALLBACK_ATTR)
+            by_week[yw]['by_l1'][a] += h
+            by_week[yw]['by_l2'][at] += h
+            by_week[yw]['by_l3'][tn] += h
+            if m and m['activity_type'] != '未归类':
+                by_week[yw]['classified'] += h
+
+        result = []
+        for yw in sorted(by_week.keys()):
+            d = by_week[yw]
+            days = len(day_map.get(yw, set()))
+            denom = days * 16
+            by_l1 = {k: round(v, 2) for k, v in d['by_l1'].items()}
+            result.append({
+                'year': yw[0],
+                'week': yw[1],
+                'by_l1': by_l1,
+                'by_l2': {k: round(v, 2) for k, v in d['by_l2'].items()},
+                'by_l3': {k: round(v, 2) for k, v in d['by_l3'].items()},
+                # 兼容旧前端：赎回四色 == L1 归因
+                'redemption_4color': by_l1,
+                'completeness': round(d['classified'] / denom, 4) if denom else 0,
+            })
+        if weeks:
+            result = result[-weeks:]
+        return {'weeks': result}
+
+    @staticmethod
+    def get_completeness(year: int | None = None) -> dict:
+        """记录完整度：已归类小时 / (16h/天 × 有记录天数)
+
+        v0.2 决策 3：未归类参与总时长（灰显）但不参与完整度分母/分子。
+        """
+        qs = TemporalTask.objects.all()
+        if year:
+            qs = qs.filter(year=year)
+
+        total = qs.aggregate(s=models.Sum('duration_hours'))['s'] or 0
+        classified_names = list(
+            TaskMeta.objects.exclude(activity_type='未归类').values_list('task_name', flat=True)
+        )
+        covered = qs.filter(task_name__in=classified_names).aggregate(s=models.Sum('duration_hours'))['s'] or 0
+        days = qs.order_by().values('year', 'mon', 'day').distinct().count()
+        denom = days * 16
+        return {
+            'total_hours': round(float(total), 2),
+            'classified_hours': round(float(covered), 2),
+            'completeness': round(covered / denom, 4) if denom else 0,
+            'days_recorded': days,
+            'denominator_hours_per_day': 16,
+        }
+
+    @staticmethod
+    def get_ranking(year: int | None = None, limit: int = 10) -> list:
+        """任务排行（L3 task_name），附 L2 活动类型与 L1 归因"""
+        qs = TemporalTask.objects.all()
+        if year:
+            qs = qs.filter(year=year)
+
+        rankings = list(
+            qs.values('task_name').annotate(
+                total_hours=models.Sum('duration_hours'),
+                record_count=models.Count('id'),
+            ).order_by('-total_hours')[:limit]
+        )
+        names = [r['task_name'] for r in rankings]
+        meta = resolve_task_meta(names)
+        attr = resolve_attribution(names)
+
+        out = []
+        for r in rankings:
+            tn = r['task_name']
+            at = (meta.get(tn) or {}).get('activity_type', '未归类')
+            out.append({
+                'task_name': tn,
+                'activity_type': at,
+                'attribution': attr.get(tn, DEFAULT_FALLBACK_ATTR),
+                # 兼容旧键名
+                'category': at,
+                'color': ACTIVITY_TYPE_COLORS.get(at, '#9CA3AF'),
                 'total_hours': round(float(r['total_hours'] or 0), 2),
                 'record_count': r['record_count'],
-            }
-            for r in rankings
-        ]
+            })
+        return out
 
     @staticmethod
     def get_distribution(year: int | None = None) -> dict:

@@ -31,11 +31,14 @@ export const allMenuItems: MenuItem[] = [
   { key: 'temporal_daily', path: '/temporal/daily', label: '日记流', icon: 'Calendar', group: 'temporal' },
   { key: 'temporal_stats', path: '/temporal', label: '时间统计', icon: 'Timer', group: 'temporal' },
   { key: 'temporal_schedule', path: '/temporal/schedule', label: '日程视图', icon: 'Calendar', group: 'temporal' },
+  { key: 'temporal_mapping', path: '/temporal/mapping', label: '映射编辑器', icon: 'SetUp', group: 'temporal' },
+  { key: 'temporal_tasks', path: '/temporal/tasks', label: '任务清单', icon: 'List', group: 'temporal' },
 
   // ── 目标与项目 ──
   { key: 'goals', path: '/goals', label: '人生目标', icon: 'Flag', group: 'goals' },
   { key: 'reward', path: '/reward', label: '快乐银行', icon: 'Trophy', group: 'goals' },
   { key: 'reward_gifts', path: '/reward/gifts', label: '礼物清单', icon: 'Present', group: 'goals' },
+  { key: 'redemption', path: '/redemption', label: '三年赎回期', icon: 'Hourglass', group: 'goals' },
 
   // ── 身心健康 ──
   { key: 'health', path: '/health', label: '健康管理', icon: 'FirstAidKit', group: 'health' },
@@ -53,8 +56,11 @@ export const allMenuItems: MenuItem[] = [
   { key: 'wealth', path: '/wealth', label: '财务管理', icon: 'Money', group: 'wealth' },
 
   // ── 连接与足迹 ──
+  // 旅行四件套：心愿（想去）→ 路线推演（怎么走）→ 计划（哪天去/预算）→ 足迹（去过并沉淀）
   { key: 'travel', path: '/travel', label: '旅行记录', icon: 'Location', group: 'connection' },
   { key: 'travel_wishes', path: '/travel/wishes', label: '旅行心愿单', icon: 'Star', group: 'connection' },
+  { key: 'travel_plans', path: '/travel/plans', label: '旅行计划', icon: 'List', group: 'connection' },
+  { key: 'travel_route', path: '/travel/route', label: '路线推演', icon: 'Guide', group: 'connection' },
   { key: 'relation', path: '/relation', label: '关系管理', icon: 'User', group: 'connection' },
 
   // ── 工具箱 ──
@@ -73,7 +79,6 @@ export const allMenuItems: MenuItem[] = [
   { key: 'output', path: '/output', label: '个人良品率', icon: 'Briefcase', group: 'goals', defaultArchived: true },
   { key: 'dams', path: '/dams', label: '数字资产', icon: 'Cpu', group: 'wealth', defaultArchived: true },
   { key: 'food', path: '/food', label: '美食地图', icon: 'Food', group: 'connection', defaultArchived: true },
-  { key: 'travel_plans', path: '/travel/plans', label: '旅行计划', icon: 'List', group: 'connection', defaultArchived: true },
   { key: 'relation_conflicts', path: '/relation/conflicts', label: '成长记录', icon: 'Sunny', group: 'connection', defaultArchived: true },
 ]
 

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS `wealth_bill_list` (
   `category` varchar(50) DEFAULT NULL,
   `subcategory` varchar(50) DEFAULT NULL,
   `necessity` varchar(10) DEFAULT NULL,
+  `period_tag` varchar(10) DEFAULT NULL COMMENT '赎回归属(为自己/过渡/外部/不计入)',
   `project` varchar(100) DEFAULT NULL,
   `account` varchar(50) DEFAULT NULL,
   `account_currency` varchar(10) DEFAULT NULL,
@@ -286,12 +287,108 @@ CREATE TABLE IF NOT EXISTS `travel_wish` (
   `lat` double NULL,
   `status` varchar(20) NOT NULL,
   `visited_at` date NULL,
+  `visit_rating` smallint unsigned NULL,
+  `visit_notes` longtext NOT NULL,
+  `worth_revisit` tinyint(1) NOT NULL,
+  `visit_plan_id` int NULL,
+  `visit_record_id` int NULL,
   `notes` longtext NOT NULL,
   `created_at` datetime(6) NOT NULL,
   `updated_at` datetime(6) NOT NULL,
   KEY `travel_wish_name_c47f26_idx` (`name`),
   KEY `travel_wish_provinc_b3c39f_idx` (`province`),
   KEY `travel_wish_status_ce8a7b_idx` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# 三年赎回期（redemption app，managed 表，--no-migrations 下镜像）
+_CREATE_REDEMPTION_PERIOD_SQL = """
+CREATE TABLE IF NOT EXISTS `redemption_period` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `start_date` date NOT NULL,
+  `end_date` date NOT NULL,
+  `pool_principal` numeric(14, 2) NOT NULL,
+  `tracking_status` varchar(10) NOT NULL,
+  `paused_since` date NULL,
+  `resume_at` date NULL,
+  `baseline_toward_ratio` numeric(5, 4) NULL,
+  `baseline_set_week` integer NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_REDEMPTION_INJECT_SQL = """
+CREATE TABLE IF NOT EXISTS `redemption_pool_inject` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `inject_date` date NOT NULL,
+  `amount` numeric(14, 2) NOT NULL,
+  `source` varchar(20) NOT NULL,
+  `note` longtext NULL,
+  `created_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_REDEMPTION_RULE_SQL = """
+CREATE TABLE IF NOT EXISTS `redemption_attr_rule` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `match_field` varchar(20) NOT NULL,
+  `match_value` varchar(100) NOT NULL,
+  `attribution` varchar(10) NOT NULL,
+  `priority` integer NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `note` longtext NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_REDEMPTION_SNAPSHOT_SQL = """
+CREATE TABLE IF NOT EXISTS `redemption_week_snapshot` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `year` integer NOT NULL,
+  `week` integer NOT NULL,
+  `toward_hours` double NOT NULL,
+  `maintain_hours` double NOT NULL,
+  `external_hours` double NOT NULL,
+  `drain_hours` double NOT NULL,
+  `covered_hours` double NOT NULL,
+  `theoretical_hours` double NOT NULL,
+  `coverage_rate` double NOT NULL,
+  `toward_ratio` double NOT NULL,
+  `unit_cost` numeric(10, 2) NULL,
+  `snapshot_at` datetime(6) NOT NULL,
+  UNIQUE KEY `redemption_week_snapshot_year_week_1d0c3b_idx` (`year`, `week`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# 时间重构 L1 分组 / L2 活动类型映射（managed 表，--no-migrations 下镜像）
+_CREATE_ACTIVITY_GROUP_SQL = """
+CREATE TABLE IF NOT EXISTS `temporal_activity_group` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `name` varchar(50) NOT NULL,
+  `color` varchar(7) NULL,
+  `sort_order` integer NOT NULL,
+  `is_system` tinyint(1) NOT NULL,
+  `note` longtext NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  UNIQUE KEY `temporal_activity_group_name_4a5c8d_idx` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_TASK_META_SQL = """
+CREATE TABLE IF NOT EXISTS `temporal_task_meta` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `task_name` varchar(255) NOT NULL,
+  `activity_type` varchar(50) NOT NULL,
+  `default_attribution` varchar(10) NULL,
+  `is_system` tinyint(1) NOT NULL,
+  `note` longtext NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `group_id` integer NULL,
+  UNIQUE KEY `temporal_task_meta_task_name_6b7e1f_idx` (`task_name`),
+  KEY `temporal_ta_activi_2d3a6f_idx` (`activity_type`),
+  KEY `temporal_ta_group_3c4b7e_idx` (`group_id`),
+  CONSTRAINT `temporal_task_meta_group_id_8c9d2a_fk` FOREIGN KEY (`group_id`)
+    REFERENCES `temporal_activity_group` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
@@ -316,3 +413,9 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_ASK_TOPIC_SQL)
             cursor.execute(_CREATE_ASK_ANSWER_SQL)
             cursor.execute(_CREATE_WISH_TABLE_SQL)
+            cursor.execute(_CREATE_REDEMPTION_PERIOD_SQL)
+            cursor.execute(_CREATE_REDEMPTION_INJECT_SQL)
+            cursor.execute(_CREATE_REDEMPTION_RULE_SQL)
+            cursor.execute(_CREATE_REDEMPTION_SNAPSHOT_SQL)
+            cursor.execute(_CREATE_ACTIVITY_GROUP_SQL)
+            cursor.execute(_CREATE_TASK_META_SQL)

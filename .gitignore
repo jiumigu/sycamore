@@ -107,3 +107,9 @@ db_backups/
 docs/
 .claudeignore
 .dockerignore
+
+# 一次性运维 / 数据导入脚本（backend 根目录，本地留档不入库）
+backend/city_fix_admin_*.py
+backend/tmp_*.py
+backend/travel_fix_*.py
+backend/travel_import_*.py

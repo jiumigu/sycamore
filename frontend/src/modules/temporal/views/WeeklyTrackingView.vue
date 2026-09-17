@@ -1,18 +1,16 @@
 <template>
   <div class="weekly-tracking">
     <div class="page-header">
-      <h2>📊 年度周度时间追踪</h2>
+      <h2>📅 168h 周结构（时间面）</h2>
       <div class="controls">
-        <el-button @click="refreshCache" :loading="refreshing" size="small">
-          <el-icon><Refresh /></el-icon>
-          刷新缓存
+        <el-radio-group v-model="level" size="small" @change="renderView">
+          <el-radio-button value="by_l1">按 L1 归因</el-radio-button>
+          <el-radio-button value="by_l2">按 L2 类型</el-radio-button>
+        </el-radio-group>
+        <el-button @click="loadData" :loading="loading" size="small">
+          <el-icon><Refresh /></el-icon> 刷新
         </el-button>
-        <el-button type="primary" size="small" @click="taskDialogVisible = true; loadTasks()">
-          📋 任务清单
-        </el-button>
-        <span>基准小时/周：</span>
-        <el-input-number v-model="benchmark" :min="10" :max="80" :step="5" @change="fetchData" />
-        <span class="hint">百分比 = 实际小时 / 基准小时 × 100%</span>
+        <el-button type="primary" size="small" @click="$router.push('/temporal/tasks')">📋 任务清单</el-button>
       </div>
     </div>
 
@@ -20,378 +18,126 @@
     <el-row :gutter="16" class="stats-row">
       <el-col :span="6">
         <el-card class="stat-card">
-          <div class="stat-label">{{ currentYear }}年累计</div>
-          <div class="stat-value">{{ currentYearTotal }}h</div>
+          <div class="stat-label">近 {{ weeks.length }} 周累计</div>
+          <div class="stat-value">{{ totalHours }}h</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card class="stat-card">
           <div class="stat-label">周均投入</div>
-          <div class="stat-value">{{ currentYearAvg }}h</div>
+          <div class="stat-value">{{ avgHours }}h</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card class="stat-card">
-          <div class="stat-label">达标周数</div>
-          <div class="stat-value">{{ currentYearQualified }}周</div>
+          <div class="stat-label">平均记录完整度</div>
+          <div class="stat-value">{{ avgCompleteness }}%</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card class="stat-card">
-          <div class="stat-label">达标率</div>
-          <div class="stat-value">{{ currentYearQualifyRate }}%</div>
+          <div class="stat-label">赎回·投向占比</div>
+          <div class="stat-value">{{ towardRatio }}%</div>
         </el-card>
       </el-col>
     </el-row>
 
-    <!-- 主表格 -->
-    <el-card class="table-card">
-      <div class="table-wrapper">
-        <table class="tracking-table">
-          <thead>
-            <tr>
-              <th class="col-week">周次</th>
-              <template v-for="year in years" :key="year">
-                <th class="col-value">{{ year }}值</th>
-                <th class="col-pct">{{ year }}达成率</th>
-              </template>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="week in 52" :key="week">
-              <td class="col-week">{{ week }}</td>
-              <template v-for="year in years" :key="year">
-                <td class="col-value" :class="getCellClass(year, week, 'value')">
-                  {{ getValue(year, week) }}
-                </td>
-                <td class="col-pct" :class="getCellClass(year, week, 'pct')">
-                  {{ getPercentage(year, week) }}
-                </td>
-              </template>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <!-- 主图表 -->
+    <el-card class="chart-card" v-loading="loading">
+      <template #header><span>近 {{ weeks.length }} 周堆叠结构</span></template>
+      <Weekly168Chart :data="{ weeks }" :by-key="level" :height="340" />
+    </el-card>
 
-      <!-- 图例 -->
-      <div class="legend">
-        <span class="legend-item"><span class="legend-color" style="background:#e8f5e9"></span> 达标 ≥80%</span>
-        <span class="legend-item"><span class="legend-color" style="background:#fff9c4"></span> 接近 60-80%</span>
-        <span class="legend-item"><span class="legend-color" style="background:#fafafa"></span> 有记录 &lt;60%</span>
-        <span class="legend-item"><span class="legend-color" style="background:#f5f5f5;border:1px solid #eee"></span> 无数据</span>
+    <!-- 赎回四色块 -->
+    <el-card class="four-color-card">
+      <template #header><span>💎 赎回四色时间面（近 {{ weeks.length }} 周累计）</span></template>
+      <div class="four-color-grid">
+        <div v-for="c in fourColor" :key="c.key" class="fc-item" :style="{ borderColor: c.color }">
+          <span class="fc-dot" :style="{ background: c.color }"></span>
+          <span class="fc-label">{{ c.label }}</span>
+          <span class="fc-value">{{ c.hours }}h</span>
+          <span class="fc-pct">{{ c.pct }}%</span>
+        </div>
       </div>
     </el-card>
   </div>
-
-  <!-- 任务清单弹窗 -->
-  <el-dialog v-model="taskDialogVisible" title="📋 时间追踪任务清单" width="920px" :close-on-click-modal="false">
-    <div style="margin-bottom:10px">
-      <el-button size="small" type="primary" @click="openTaskForm()">+ 新增任务</el-button>
-      <span class="hint" style="margin-left:8px">共 {{ taskTotal }} 条 · 备注可在此编辑完善</span>
-    </div>
-    <el-table :data="tasks" v-loading="tasksLoading" stripe size="small" max-height="420">
-      <el-table-column label="任务" prop="task_name" min-width="130" show-overflow-tooltip />
-      <el-table-column label="开始时间" width="140">
-        <template #default="{ row }">{{ (row.start_time || '').slice(0, 16) }}</template>
-      </el-table-column>
-      <el-table-column label="时长" width="70">
-        <template #default="{ row }">{{ row.duration_display || '-' }}</template>
-      </el-table-column>
-      <el-table-column label="分类" width="90" prop="category_level1" />
-      <el-table-column label="类型" width="80" prop="task_type" />
-      <el-table-column label="备注" min-width="170" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.notes || '-' }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="110" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" link @click="openTaskForm(row)">编辑</el-button>
-          <el-button size="small" link type="danger" @click="handleDeleteTask(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    <el-pagination v-model:current-page="taskPage" :page-size="20" :total="taskTotal" layout="prev, pager, next" small
-      style="margin-top:12px;justify-content:center" @current-change="loadTasks" />
-  </el-dialog>
-
-  <!-- 任务新增/编辑弹窗 -->
-  <el-dialog v-model="taskFormVisible" :title="taskEditingId ? '编辑任务' : '新增任务'" width="520px">
-    <el-form :model="taskForm" label-width="80px" size="small">
-      <el-form-item label="任务名称" required>
-        <el-input v-model="taskForm.task_name" />
-      </el-form-item>
-      <el-form-item label="描述">
-        <el-input v-model="taskForm.task_description" type="textarea" :rows="2" />
-      </el-form-item>
-      <el-row :gutter="10">
-        <el-col :span="12">
-          <el-form-item label="开始时间">
-            <el-date-picker v-model="taskForm.start_time" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" style="width:100%" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="时长(时)">
-            <el-input-number v-model="taskForm.duration_hours" :min="0" :max="24" :step="0.5" style="width:100%" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row :gutter="10">
-        <el-col :span="12">
-          <el-form-item label="类型">
-            <el-input v-model="taskForm.task_type" placeholder="工作/学习/生活…" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="标签">
-            <el-input v-model="taskForm.tags" placeholder="逗号分隔" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-form-item label="备注">
-        <el-input v-model="taskForm.notes" type="textarea" :rows="2" placeholder="完善本次任务的备注说明" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button size="small" @click="taskFormVisible = false">取消</el-button>
-      <el-button size="small" type="primary" :loading="taskSaving" @click="saveTask">保存</el-button>
-    </template>
-  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, computed, onMounted } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import * as temporalApi from '@/modules/temporal/api/temporalApi'
+import Weekly168Chart from '../components/Weekly168Chart.vue'
+import type { WeeklyStructureWeek } from '../types/temporalTypes'
+import { ATTRIBUTION_COLOR_MAP } from '../types/temporalTypes'
 
-const benchmark = ref(30)
-const trackingData = ref<Record<number, Record<number, { hours: number; percentage: number }>>>({})
-const years = ref<number[]>([])
+const weeks = ref<WeeklyStructureWeek[]>([])
+const level = ref<'by_l1' | 'by_l2'>('by_l1')
+const loading = ref(false)
 
-const refreshing = ref(false)
+const totalHours = computed(() => {
+  const all = weeks.value.flatMap((w) => Object.values(w.by_l1 as Record<string, number>))
+  return all.reduce((s, h) => s + h, 0).toFixed(1)
+})
+const avgHours = computed(() => {
+  if (!weeks.value.length) return '0.0'
+  return (parseFloat(totalHours.value) / weeks.value.length).toFixed(1)
+})
+const avgCompleteness = computed(() => {
+  if (!weeks.value.length) return 0
+  const avg = weeks.value.reduce((s, w) => s + w.completeness, 0) / weeks.value.length
+  return (avg * 100).toFixed(1)
+})
 
-const refreshCache = async () => {
-  refreshing.value = true
-  try {
-    await temporalApi.refreshWeeklyCache()
-    await fetchData()
-    ElMessage.success('缓存已刷新')
-  } catch {
-    ElMessage.error('刷新失败')
-  } finally {
-    refreshing.value = false
-  }
-}
-
-const currentYear = new Date().getFullYear()
-
-const fetchData = async () => {
-  const res = await temporalApi.getWeeklyTracking({
-    start_year: currentYear - 5,
-    end_year: currentYear + 4,
-    benchmark: benchmark.value,
+const fourColor = computed(() => {
+  const agg: Record<string, number> = {}
+  weeks.value.forEach((w) => {
+    Object.entries(w.redemption_4color || {}).forEach(([k, v]) => { agg[k] = (agg[k] || 0) + v })
   })
-  trackingData.value = res.data.data
-  years.value = Object.keys(res.data.data).map(Number).sort()
-}
-
-const getValue = (year: number, week: number): string => {
-  const d = trackingData.value[year]?.[week]
-  if (!d || d.hours === 0) return ''
-  return d.hours.toFixed(1)
-}
-
-const getPercentage = (year: number, week: number): string => {
-  const d = trackingData.value[year]?.[week]
-  if (!d) return ''
-  return d.percentage > 0 ? d.percentage.toFixed(0) + '%' : ''
-}
-
-const getCellClass = (year: number, week: number, type: string) => {
-  const d = trackingData.value[year]?.[week]
-  if (!d || d.hours === 0) return 'cell-empty'
-  if (type === 'pct') {
-    if (d.percentage >= 80) return 'cell-high'
-    if (d.percentage >= 60) return 'cell-mid'
-    if (d.percentage > 0) return 'cell-low'
-  }
-  return ''
-}
-
-// 当前年统计
-const currentYearTotal = computed(() => {
-  const data = trackingData.value[currentYear] || {}
-  return Object.values(data).reduce((sum: number, d: any) => sum + d.hours, 0).toFixed(1)
+  const total = Object.values(agg).reduce((s, v) => s + v, 0) || 1
+  const order = ['投向', '维持', '外部', '流失']
+  return order
+    .filter((k) => k in agg)
+    .map((k) => ({
+      key: k, label: k, color: ATTRIBUTION_COLOR_MAP[k] || '#94A3B8',
+      hours: Math.round(agg[k]), pct: ((agg[k] / total) * 100).toFixed(1),
+    }))
+})
+const towardRatio = computed(() => {
+  const t = fourColor.value.find((c) => c.key === '投向')
+  return t ? t.pct : '0.0'
 })
 
-const currentYearAvg = computed(() => {
-  const data = trackingData.value[currentYear] || {}
-  const weeks = Object.keys(data).length || 1
-  const total = Object.values(data).reduce((sum: number, d: any) => sum + d.hours, 0)
-  return (total / weeks).toFixed(1)
-})
-
-const currentYearQualified = computed(() => {
-  const data = trackingData.value[currentYear] || {}
-  return Object.values(data).filter((d: any) => d.percentage >= 80).length
-})
-
-const currentYearQualifyRate = computed(() => {
-  const data = trackingData.value[currentYear] || {}
-  const total = Object.keys(data).length || 1
-  return ((currentYearQualified.value / total) * 100).toFixed(1)
-})
-
-onMounted(fetchData)
-
-// ─── 任务清单 CRUD ───
-const taskDialogVisible = ref(false)
-const taskFormVisible = ref(false)
-const tasks = ref<any[]>([])
-const tasksLoading = ref(false)
-const taskTotal = ref(0)
-const taskPage = ref(1)
-const taskSaving = ref(false)
-const taskEditingId = ref<number | null>(null)
-const taskForm = reactive({
-  task_name: '', task_description: '', start_time: '', duration_hours: 0,
-  task_type: '其他', tags: '', notes: '',
-})
-
-async function loadTasks() {
-  tasksLoading.value = true
+async function loadData() {
+  loading.value = true
   try {
-    const res = await temporalApi.getTaskList({ page: taskPage.value, page_size: 20 })
-    const data = res.data
-    tasks.value = (data.results || data) as any[]
-    taskTotal.value = data.count ?? tasks.value.length
-  } catch { tasks.value = [] } finally { tasksLoading.value = false }
+    const res = await temporalApi.getWeeklyStructure({ weeks: 12 })
+    weeks.value = (res.data.weeks || []).slice(-12)
+  } catch { weeks.value = [] } finally { loading.value = false }
 }
+function renderView() { /* 图表由 byKey prop 响应式切换，无需重新请求 */ }
 
-function openTaskForm(row?: any) {
-  taskEditingId.value = row?.id ?? null
-  taskForm.task_name = row?.task_name || ''
-  taskForm.task_description = row?.task_description || ''
-  taskForm.start_time = row?.start_time || ''
-  taskForm.duration_hours = row?.duration_hours ?? 0
-  taskForm.task_type = row?.task_type || '其他'
-  taskForm.tags = row?.tags || ''
-  taskForm.notes = row?.notes || ''
-  taskFormVisible.value = true
-}
-
-async function saveTask() {
-  if (!taskForm.task_name.trim()) { ElMessage.warning('请输入任务名称'); return }
-  taskSaving.value = true
-  try {
-    if (taskEditingId.value) {
-      await temporalApi.updateTask(taskEditingId.value, { ...taskForm })
-    } else {
-      await temporalApi.createTask({ ...taskForm })
-    }
-    ElMessage.success('保存成功')
-    taskFormVisible.value = false
-    loadTasks()
-  } catch { ElMessage.error('保存失败') } finally { taskSaving.value = false }
-}
-
-async function handleDeleteTask(row: any) {
-  try {
-    await ElMessageBox.confirm(`确认删除任务「${row.task_name}」？`, '删除确认', { type: 'warning' })
-    await temporalApi.deleteTask(row.id)
-    ElMessage.success('已删除')
-    loadTasks()
-  } catch { /* 取消 */ }
-}
-
+onMounted(loadData)
 </script>
 
 <style scoped lang="scss">
-.weekly-tracking {
-  padding: 24px;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
-
-  h2 { margin: 0; font-size: 18px; }
-
-  .controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    .hint { font-size: 12px; color: #999; }
-  }
-}
-
-.stats-row {
-  margin-bottom: 16px;
-}
-
-.stat-card {
-  text-align: center;
-  .stat-label { font-size: 12px; color: #999; }
-  .stat-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
-}
-
-.table-wrapper {
-  overflow: auto;
-  max-height: calc(100vh - 300px);
-}
-
-.tracking-table {
-  border-collapse: collapse;
-  font-size: 12px;
-  white-space: nowrap;
-
-  th, td {
-    padding: 3px 6px;
-    border: 1px solid #eee;
-    text-align: center;
-    min-width: 50px;
-  }
-
-  th {
-    background: #f5f7fa;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  .col-week {
-    position: sticky;
-    left: 0;
-    background: #f5f7fa;
-    z-index: 2;
-    font-weight: 600;
-    min-width: 40px;
-  }
-
-  .col-value { font-weight: 500; }
-  .col-pct { font-size: 11px; color: #666; }
-
-  .cell-high { background: #c8e6c9 !important; font-weight: 700; }
-  .cell-mid { background: #fff9c4 !important; }
-  .cell-low { background: #fafafa; }
-  .cell-empty { background: #f5f5f5; color: #ddd; }
-}
-
-.legend {
-  display: flex;
-  gap: 16px;
-  margin-top: 12px;
-  font-size: 12px;
-  color: #666;
-
-  .legend-color {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    border-radius: 2px;
-    vertical-align: middle;
-    margin-right: 4px;
-  }
+.weekly-tracking { padding: 24px;
+  .page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
+    h2 { margin: 0; font-size: 18px; }
+    .controls { display: flex; align-items: center; gap: 8px; margin-left: auto; } }
+  .stats-row { margin-bottom: 16px; }
+  .stat-card { text-align: center; border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    .stat-label { font-size: 12px; color: #999; }
+    .stat-value { font-size: 22px; font-weight: 700; margin-top: 4px; } }
+  .chart-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
+    :deep(.el-card__header) { padding: 14px 20px; font-size: 14px; font-weight: 500; } }
+  .four-color-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    :deep(.el-card__header) { padding: 14px 20px; font-size: 14px; font-weight: 500; } }
+  .four-color-grid { display: flex; gap: 12px; flex-wrap: wrap;
+    .fc-item { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid #eee; border-radius: 8px; min-width: 150px;
+      .fc-dot { width: 12px; height: 12px; border-radius: 3px; }
+      .fc-label { font-size: 13px; color: #4b5563; }
+      .fc-value { font-size: 16px; font-weight: 700; }
+      .fc-pct { font-size: 12px; color: #9ca3af; } } }
 }
 </style>

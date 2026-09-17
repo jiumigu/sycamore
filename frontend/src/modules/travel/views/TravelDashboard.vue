@@ -6,13 +6,19 @@
         <h1><span class="header-icon">🗺️</span> 旅行足迹</h1>
         <p class="header-desc">走过的每一座城市，都值得被记住</p>
       </div>
-      <el-button type="primary" @click="showForm = true">
-        <el-icon><Plus /></el-icon> 添加记录
-      </el-button>
+      <div class="header-actions">
+        <el-radio-group v-model="viewMode">
+          <el-radio-button value="map">🗺️ 足迹地图</el-radio-button>
+          <el-radio-button value="log">📔 行程日志</el-radio-button>
+        </el-radio-group>
+        <el-button type="primary" @click="showForm = true">
+          <el-icon><Plus /></el-icon> 添加记录
+        </el-button>
+      </div>
     </div>
 
     <!-- 加载状态 -->
-    <div v-loading="store.loading" class="loading-wrap">
+    <div v-if="viewMode === 'map'" v-loading="store.loading" class="loading-wrap">
       <!-- 统计卡片 -->
       <el-row :gutter="12" class="stats-row">
         <el-col :span="4" v-for="card in statCards" :key="card.key">
@@ -37,7 +43,11 @@
       <!-- 地图 -->
       <el-card class="map-card" shadow="never" v-if="store.mapData">
         <div class="map-legend">
-          <span class="legend-title">省份热力</span>
+          <span class="legend-title">城市热力</span>
+          <span v-if="store.mapData?.heat_max" class="legend-hint">
+            最高 {{ store.mapData.heat_max }} 次
+          </span>
+          <span class="legend-tip">鼠标移到区域上显示地市名称与到访明细</span>
           <span class="legend-item" v-for="l in heatLegend" :key="l.label">
             <span class="legend-dot" :style="{ background: l.color }"></span>
             {{ l.label }}
@@ -106,6 +116,104 @@
       </el-card>
     </div>
 
+    <!-- 行程日志视图 -->
+    <div v-else v-loading="logLoading" class="trip-log-view">
+      <div class="log-toolbar">
+        <div class="log-stats">
+          <span class="log-stat"><b>{{ tripLog.total_days }}</b> 天行程</span>
+          <span class="log-stat"><b>{{ tripLog.total_items }}</b> 个打卡点</span>
+          <span class="log-stat pending"><b>{{ tripLog.pending_days }}</b> 天待沉淀</span>
+        </div>
+        <el-date-picker
+          v-model="logRange"
+          type="daterange"
+          unlink-panels
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          @change="loadTripLog"
+        />
+      </div>
+
+      <el-empty v-if="!tripLog.days.length" description="还没有打卡记录，去旅行心愿单打卡后会自动出现在这里" />
+
+      <div
+        v-for="day in tripLog.days"
+        :key="day.date + day.city"
+        class="log-day"
+        :class="{ done: day.consolidated }"
+      >
+        <div class="log-day-head">
+          <span class="log-date">{{ formatDay(day.date) }}</span>
+          <span class="log-city">📍 {{ day.city }}</span>
+          <el-tag v-if="day.consolidated" size="small" type="success" effect="plain">已沉淀足迹</el-tag>
+          <el-tag v-else size="small" type="warning" effect="plain">临时日志</el-tag>
+          <span class="log-meta">
+            {{ day.item_count }} 项
+            <template v-if="day.avg_rating"> · 均分 {{ day.avg_rating }}</template>
+            <template v-if="day.worth_count"> · {{ day.worth_count }} 项值得反复</template>
+          </span>
+          <span class="log-actions">
+            <el-button v-if="!day.consolidated" size="small" type="primary" plain @click="openConsolidate(day)">沉淀为足迹</el-button>
+            <span v-else-if="day.record" class="log-record-info">
+              <template v-if="day.record.tcost">💰 ¥{{ day.record.tcost }}</template>
+              <template v-if="day.record.rating"> · {{ '⭐'.repeat(day.record.rating) }}</template>
+              <template v-if="day.record.companions"> · {{ day.record.companions }}</template>
+            </span>
+          </span>
+        </div>
+        <div class="log-items">
+          <div v-for="it in day.items" :key="it.id" class="log-item">
+            <span class="li-icon">{{ it.is_food ? '🍽️' : '📍' }}</span>
+            <span class="li-name">{{ it.name }}</span>
+            <el-rate v-if="it.rating" :model-value="it.rating" disabled size="small" />
+            <el-tag v-if="it.worth_revisit" size="small" effect="plain" type="danger">值得反复</el-tag>
+            <span v-if="it.notes" class="li-notes">{{ it.notes }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 沉淀为足迹弹窗 -->
+    <el-dialog v-model="showConsolidate" title="沉淀为旅行足迹" width="520px" :close-on-click-modal="false">
+      <div v-if="consolidateDay" class="consolidate-body">
+        <div class="consolidate-head">
+          <span>🗓️ {{ formatDay(consolidateDay.date) }}</span>
+          <span class="ch-city">📍 {{ consolidateDay.city }}</span>
+        </div>
+        <div class="consolidate-summary">{{ consolidateDay.summary }}</div>
+        <el-form label-width="90px" class="consolidate-form">
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item label="花费(元)">
+                <el-input-number v-model="consolidateForm.tcost" :min="0" style="width:100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="停留天数">
+                <el-input-number v-model="consolidateForm.duration_days" :min="1" style="width:100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item label="满意度">
+            <el-rate v-model="consolidateForm.rating" :max="5" show-text />
+          </el-form-item>
+          <el-form-item label="同行伙伴">
+            <el-input v-model="consolidateForm.companions" placeholder="如：独自、朋友、家人" />
+          </el-form-item>
+          <el-form-item label="足迹摘要">
+            <el-input v-model="consolidateForm.tremark" type="textarea" :rows="2" />
+          </el-form-item>
+        </el-form>
+        <div class="consolidate-hint">沉淀后生成一条旅行足迹，参与地图热力与年度统计；打卡明细仍保留在行程日志中。</div>
+      </div>
+      <template #footer>
+        <el-button @click="showConsolidate = false">取消</el-button>
+        <el-button type="primary" :loading="consolidating" @click="submitConsolidate">确认沉淀</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 添加/编辑表单弹窗 -->
     <el-dialog v-model="showForm" :title="editingRecord ? '编辑旅行记录' : '✈️ 添加旅行记录'" width="560px" :close-on-click-modal="false">
       <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
@@ -169,9 +277,10 @@ import { Plus } from '@element-plus/icons-vue'
 import { usePrivacyMask } from '@/shared/composables/usePrivacyMask'
 import * as echarts from 'echarts'
 import * as toolkitApi from '../../toolkit/api/toolkitApi'
+import * as travelApi from '../api/travelApi'
 import { useTravelStore } from '../stores/travelStore'
 import ChinaHeatmap from '../components/ChinaHeatmap.vue'
-import type { TravelRecord } from '../types/travelTypes'
+import type { TravelRecord, TripLog, TripLogDay } from '../types/travelTypes'
 
 const store = useTravelStore()
 const { maskAmount, maskLocation } = usePrivacyMask()
@@ -179,6 +288,82 @@ const showForm = ref(false)
 const submitting = ref(false)
 const editingRecord = ref<TravelRecord | null>(null)
 const selectedYear = ref('')
+
+// ===== 行程日志（打卡聚合视图） =====
+const viewMode = ref<'map' | 'log'>('map')
+const logLoading = ref(false)
+const logRange = ref<[string, string] | null>(null)
+const tripLog = ref<TripLog>({ days: [], total_days: 0, total_items: 0, pending_days: 0 })
+const showConsolidate = ref(false)
+const consolidating = ref(false)
+const consolidateDay = ref<TripLogDay | null>(null)
+const consolidateForm = ref({
+  tcost: null as number | null,
+  duration_days: 1,
+  rating: 0,
+  companions: '',
+  tremark: '',
+})
+
+async function loadTripLog() {
+  logLoading.value = true
+  try {
+    const params: { from?: string; to?: string } = {}
+    if (logRange.value?.[0]) params.from = logRange.value[0]
+    if (logRange.value?.[1]) params.to = logRange.value[1]
+    const res = await travelApi.getTripLog(params)
+    tripLog.value = res.data
+  } catch {
+    ElMessage.error('加载行程日志失败')
+  } finally {
+    logLoading.value = false
+  }
+}
+
+function formatDay(date: string): string {
+  const [, m, d] = date.split('-')
+  return `${Number(m)}月${Number(d)}日`
+}
+
+function openConsolidate(day: TripLogDay) {
+  consolidateDay.value = day
+  consolidateForm.value = {
+    tcost: null,
+    duration_days: 1,
+    rating: day.avg_rating ? Math.round(day.avg_rating) : 0,
+    companions: '',
+    tremark: day.summary,
+  }
+  showConsolidate.value = true
+}
+
+async function submitConsolidate() {
+  if (!consolidateDay.value) return
+  consolidating.value = true
+  try {
+    await travelApi.consolidateTripDay({
+      date: consolidateDay.value.date,
+      city: consolidateDay.value.city,
+      tcost: consolidateForm.value.tcost,
+      duration_days: consolidateForm.value.duration_days,
+      rating: consolidateForm.value.rating || null,
+      companions: consolidateForm.value.companions,
+      tremark: consolidateForm.value.tremark,
+    })
+    ElMessage.success('已沉淀为旅行足迹')
+    showConsolidate.value = false
+    await loadTripLog()
+    refreshAll()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '沉淀失败')
+  } finally {
+    consolidating.value = false
+  }
+}
+
+watch(viewMode, (mode) => {
+  if (mode === 'log') loadTripLog()
+})
 
 const trendChartRef = ref<HTMLElement>()
 const pieChartRef = ref<HTMLElement>()
@@ -246,7 +431,7 @@ const formRules = {
 }
 
 const heatLegend = [
-  { label: '未去过', color: '#E5E5E5' },
+  { label: '未去过', color: '#E9EDF3' },
   { label: '偶尔', color: '#B3D4FF' },
   { label: '多次', color: '#7BB3FF' },
   { label: '频繁', color: '#3D7EFF' },
@@ -555,6 +740,18 @@ onUnmounted(() => {
         color: #374151;
       }
 
+      .legend-hint {
+        font-size: 12px;
+        color: #9CA3AF;
+        margin-left: -6px;
+      }
+
+      .legend-tip {
+        font-size: 12px;
+        color: #9CA3AF;
+        margin-left: auto;
+      }
+
       .legend-divider {
         width: 1px;
         height: 20px;
@@ -708,6 +905,155 @@ onUnmounted(() => {
         padding: 16px 0 4px;
       }
     }
+  }
+}
+
+/* ===== 行程日志视图 ===== */
+.travel-dashboard .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.trip-log-view {
+  .log-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: #fff;
+    border-radius: 10px;
+    border: 1px solid #EEF0F3;
+  }
+
+  .log-stats {
+    display: flex;
+    gap: 20px;
+    font-size: 13px;
+    color: #6B7280;
+
+    b {
+      color: #1F2937;
+      font-size: 16px;
+      margin-right: 4px;
+    }
+
+    .pending b {
+      color: #D97706;
+    }
+  }
+
+  .log-day {
+    background: #fff;
+    border: 1px dashed #E5E7EB;
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+
+    &.done {
+      border-style: solid;
+      border-color: #E5E7EB;
+    }
+
+    .log-day-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+
+      .log-date {
+        font-size: 15px;
+        font-weight: 600;
+        color: #1F2937;
+      }
+
+      .log-city {
+        font-size: 14px;
+        color: #374151;
+      }
+
+      .log-meta {
+        font-size: 12px;
+        color: #9CA3AF;
+      }
+
+      .log-actions {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+      }
+
+      .log-record-info {
+        font-size: 12px;
+        color: #6B7280;
+      }
+    }
+
+    .log-items {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-left: 4px;
+
+      .log-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        color: #374151;
+
+        .li-icon {
+          font-size: 15px;
+        }
+
+        .li-name {
+          font-weight: 500;
+        }
+
+        .li-notes {
+          color: #9CA3AF;
+          font-size: 12px;
+          max-width: 260px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      }
+    }
+  }
+}
+
+.consolidate-body {
+  .consolidate-head {
+    display: flex;
+    gap: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #1F2937;
+
+    .ch-city {
+      font-weight: 400;
+      color: #4B5563;
+    }
+  }
+
+  .consolidate-summary {
+    margin: 8px 0 16px;
+    padding: 8px 12px;
+    background: #F9FAFB;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #4B5563;
+  }
+
+  .consolidate-hint {
+    font-size: 12px;
+    line-height: 1.5;
+    color: #9CA3AF;
   }
 }
 </style>

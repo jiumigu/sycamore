@@ -62,12 +62,32 @@ class ProgressAggregator:
 
     @staticmethod
     def _times_raw(year: int, month: int | None = None) -> float:
-        from apps.temporal.models import TemporalTask
+        """时间投入原始小时（v0.3）：仅汇总 resolve_attribution 落入 {投向,维持,外部} 的小时
+
+        流失与未归类排除；divisor=30（constants.py 不变）。历史向后兼容由
+        DEFAULT_FALLBACK_ATTR='投向' + 迁移映射（旧类→非流失）双重保证。
+        """
+        from apps.temporal.constants import DEFAULT_FALLBACK_ATTR
+        from apps.temporal.models import TaskMeta, TemporalTask
+        from apps.temporal.services import resolve_attribution
 
         qs = TemporalTask.objects.filter(year=year)
         if month:
             qs = qs.filter(mon=str(month).zfill(2))
-        return qs.aggregate(h=Sum('duration_hours'))['h'] or 0
+        rows = qs.values('task_name').annotate(h=Sum('duration_hours'))
+        # 未归类（activity_type='未归类'）明确排除，不参与 30h=1 点换算
+        unclassified_names = set(
+            TaskMeta.objects.filter(activity_type='未归类').values_list('task_name', flat=True)
+        )
+        attr_map = resolve_attribution([r['task_name'] for r in rows])
+        total = 0.0
+        for r in rows:
+            tn = r['task_name']
+            if tn in unclassified_names:
+                continue
+            if attr_map.get(tn, DEFAULT_FALLBACK_ATTR) in ('投向', '维持', '外部'):
+                total += float(r['h'])
+        return total
 
     @staticmethod
     def _words_raw(year: int, month: int | None = None) -> float:

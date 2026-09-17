@@ -1,5 +1,5 @@
 import request from '@/shared/utils/request'
-import type { TravelFormData, TravelPlanInput, TravelWish } from '../types/travelTypes'
+import type { ConsolidatePayload, PlanFromRouteInput, TravelFormData, TravelPlanInput, TravelWish } from '../types/travelTypes'
 
 export function getTravelRecords(params?: Record<string, unknown>) {
   return request({ url: '/travel/records/', method: 'get', params })
@@ -94,6 +94,34 @@ export function markWishVisited(id: number) {
   return request({ url: `/travel/wishes/${id}/mark_visited/`, method: 'post' })
 }
 
+export function recordWishVisit(id: number, data: {
+  visited_at?: string
+  visit_rating?: number | null
+  visit_notes?: string
+  worth_revisit?: boolean
+  visit_plan?: number | null
+}) {
+  return request({ url: `/travel/wishes/${id}/record_visit/`, method: 'post', data })
+}
+
 export function addWishToPlan(id: number, data: { plan_id?: number; start_date?: string }) {
   return request({ url: `/travel/wishes/${id}/add_to_plan/`, method: 'post', data })
+}
+
+// ===== 行程日志 =====
+export function getTripLog(params?: { from?: string; to?: string; plan?: number; city?: string }) {
+  return request({ url: '/travel/trip-log/', method: 'get', params })
+}
+
+export function consolidateTripDay(data: ConsolidatePayload) {
+  return request({ url: '/travel/trip-log/consolidate/', method: 'post', data })
+}
+
+// ===== 路线 → 计划 =====
+export function getRoutePreview(data: { destinations: string[] }) {
+  return request({ url: '/travel/plans/route-preview/', method: 'post', data })
+}
+
+export function createPlanFromRoute(data: PlanFromRouteInput) {
+  return request({ url: '/travel/plans/from-route/', method: 'post', data })
 }

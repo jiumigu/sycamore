@@ -1,7 +1,7 @@
 from django.db import models
 from django.utils import timezone
 
-from .constants import CATEGORY_CHOICES
+from .constants import ATTRIBUTION_CHOICES, CATEGORY_CHOICES
 
 
 class TemporalTask(models.Model):
@@ -102,3 +102,62 @@ class WeeklyTimeCache(models.Model):
         indexes = [
             models.Index(fields=['year']),
         ]
+
+
+class ActivityGroup(models.Model):
+    """[已弃用 v3.57.0] 旧的「自建聚合分组」层。
+
+    L1 语义订正为「归因（投向/维持/外部/流失）」后此层取消。
+    表 `temporal_activity_group` 保留不删（历史数据零损失），代码侧不再读写。
+    """
+
+    name = models.CharField(max_length=50, unique=True, verbose_name='分组名(L1)')
+    color = models.CharField(max_length=7, blank=True, null=True, verbose_name='主题色')
+    sort_order = models.IntegerField(default=0, verbose_name='排序')
+    is_system = models.BooleanField(default=False, verbose_name='系统预设')
+    note = models.TextField(blank=True, null=True, verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'temporal_activity_group'
+        verbose_name = '时间分组'
+        verbose_name_plural = '时间分组'
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return self.name
+
+
+class TaskMeta(models.Model):
+    """三层分类映射：L3 task_name → L2 活动类型 / L1 归因
+
+    注：`group` 字段为旧「聚合分组」遗留（已弃用），保留列不删，代码不再读写。
+    """
+
+    task_name = models.CharField(max_length=255, unique=True, verbose_name='任务名(L0)')
+    group = models.ForeignKey(
+        ActivityGroup, null=True, blank=True,
+        on_delete=models.SET_NULL, verbose_name='所属L1分组',
+    )
+    activity_type = models.CharField(max_length=50, verbose_name='活动类型(L2)')
+    default_attribution = models.CharField(
+        max_length=10, blank=True, null=True,
+        choices=ATTRIBUTION_CHOICES, verbose_name='默认归因(L3)',
+    )
+    is_system = models.BooleanField(default=False, verbose_name='系统预设')
+    note = models.TextField(blank=True, null=True, verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'temporal_task_meta'
+        verbose_name = '活动类型映射'
+        verbose_name_plural = '活动类型映射'
+        indexes = [
+            models.Index(fields=['activity_type']),
+            models.Index(fields=['group']),
+        ]
+
+    def __str__(self):
+        return f'{self.task_name} → {self.activity_type}'

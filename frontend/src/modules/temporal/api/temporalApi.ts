@@ -1,4 +1,7 @@
 import request from '@/shared/utils/request'
+import type {
+  CompletenessData, SunburstData, WeeklyStructure,
+} from '../types/temporalTypes'
 
 // ─── 每日记录 (OneDay) ───
 
@@ -113,8 +116,8 @@ export function deleteTask(id: number) {
   return request({ url: `/temporal/tasks/${id}/`, method: 'delete' })
 }
 
-export function getTaskContrib() {
-  return request({ url: '/temporal/tasks/contrib/', method: 'get' })
+export function getTaskContrib(params?: Record<string, unknown>) {
+  return request({ url: '/temporal/tasks/contrib/', method: 'get', params })
 }
 
 export function getOnedayContrib() {
@@ -127,4 +130,30 @@ export function getTaskDailyDetail(params: { date: string }) {
 
 export function getOnedayDailyDetail(params: { date: string }) {
   return request<{ date: string; total?: number; items: any[] }>({ url: '/temporal/oneday/daily_detail/', method: 'get', params })
+}
+
+// ─── 三层分类（L1 归因 / L2 活动类型 / L3 task_name）───
+
+export function getTaskMeta(params?: Record<string, unknown>) {
+  return request({ url: '/temporal/tasks/meta/', method: 'get', params })
+}
+
+export function getUnclassified(params?: Record<string, unknown>) {
+  return request<{ count: number; items: any[] }>({ url: '/temporal/tasks/unclassified/', method: 'get', params })
+}
+
+export function batchSetMeta(data: Record<string, unknown>) {
+  return request({ url: '/temporal/tasks/batch_set_meta/', method: 'post', data })
+}
+
+export function getSunburst(params?: Record<string, unknown>) {
+  return request<SunburstData>({ url: '/temporal/tasks/sunburst/', method: 'get', params })
+}
+
+export function getCompleteness(params?: Record<string, unknown>) {
+  return request<CompletenessData>({ url: '/temporal/tasks/completeness/', method: 'get', params })
+}
+
+export function getWeeklyStructure(params?: Record<string, unknown>) {
+  return request<WeeklyStructure>({ url: '/temporal/weekly-structure/', method: 'get', params })
 }

@@ -2,8 +2,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as temporalApi from '../api/temporalApi'
 import type {
-  BalanceData, CalendarDay, DistributionData, ImportResult,
-  OneDayPage, OneDayPageStats, RankingItem, TaskOverview, TemporalTask, TrendItem,
+  BalanceData, CalendarDay, CompletenessData, DistributionData,
+  ImportResult, OneDayPage, OneDayPageStats, RankingItem, SunburstData,
+  TaskOverview, TemporalTask, TrendItem, WeeklyStructure,
 } from '../types/temporalTypes'
 
 export const useTemporalStore = defineStore('temporal', () => {
@@ -104,6 +105,12 @@ export const useTemporalStore = defineStore('temporal', () => {
   const distributionData = ref<DistributionData | null>(null)
   const calendarData = ref<CalendarDay[]>([])
 
+  // ─── 三层分类（L1 归因 / L2 类型 / L3 task_name）───
+  const unclassified = ref<{ count: number; items: Array<{ task_name: string; total_hours: number; record_count: number }> }>({ count: 0, items: [] })
+  const completeness = ref<CompletenessData | null>(null)
+  const sunburst = ref<SunburstData | null>(null)
+  const weeklyStructure = ref<WeeklyStructure | null>(null)
+
   async function fetchTaskList(params?: Record<string, unknown>) {
     taskLoading.value = true
     try {
@@ -120,11 +127,47 @@ export const useTemporalStore = defineStore('temporal', () => {
     }
   }
 
+  async function loadUnclassified(params?: Record<string, unknown>) {
+    const res = await temporalApi.getUnclassified(params)
+    unclassified.value = res.data
+    return res.data
+  }
+
+  async function batchSetMeta(data: Record<string, unknown>) {
+    const res = await temporalApi.batchSetMeta(data)
+    return res.data
+  }
+
+  async function fetchSunburst(year?: number) {
+    const params: Record<string, unknown> = {}
+    if (year) params.year = year
+    const res = await temporalApi.getSunburst(params)
+    sunburst.value = res.data
+    return res.data
+  }
+
+  async function fetchCompleteness(year?: number) {
+    const params: Record<string, unknown> = {}
+    if (year) params.year = year
+    const res = await temporalApi.getCompleteness(params)
+    completeness.value = res.data
+    return res.data
+  }
+
+  async function fetchWeeklyStructure(year?: number, weeks = 12) {
+    const params: Record<string, unknown> = { weeks }
+    if (year) params.year = year
+    const res = await temporalApi.getWeeklyStructure(params)
+    weeklyStructure.value = res.data
+    return res.data
+  }
+
   async function fetchOverview(year?: number) {
     const params: Record<string, unknown> = {}
     if (year) params.year = year
     const res = await temporalApi.getTaskStats(params)
     overview.value = res.data
+    completeness.value = res.data.completeness ?? null
     return res.data
   }
 
@@ -201,6 +244,10 @@ export const useTemporalStore = defineStore('temporal', () => {
     rankingData.value = []
     distributionData.value = null
     calendarData.value = []
+    unclassified.value = { count: 0, items: [] }
+    completeness.value = null
+    sunburst.value = null
+    weeklyStructure.value = null
   }
 
   return {
@@ -209,6 +256,8 @@ export const useTemporalStore = defineStore('temporal', () => {
     taskList, taskTotal, taskLoading, overview, trendData, balanceData, rankingData, distributionData, calendarData,
     fetchTaskList, fetchOverview, fetchTrend, fetchBalance, fetchRanking, fetchDistribution, fetchCalendar,
     fetchAllTaskData, importCsv,
+    unclassified, completeness, sunburst, weeklyStructure,
+    loadUnclassified, batchSetMeta, fetchSunburst, fetchCompleteness, fetchWeeklyStructure,
     resetState,
   }
 })

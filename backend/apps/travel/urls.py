@@ -15,6 +15,8 @@ urlpatterns = [
     path('stats/', views.TravelStatsView.as_view(), name='travel-stats'),
     path('provinces/', views.ProvinceListView.as_view(), name='travel-provinces'),
     path('years/', views.YearListView.as_view(), name='travel-years'),
+    path('trip-log/', views.TripLogView.as_view(), name='travel-trip-log'),
+    path('trip-log/consolidate/', views.TripLogConsolidateView.as_view(), name='travel-trip-log-consolidate'),
     path('', include(plan_router.urls)),
     path('', include(wish_router.urls)),
 ]

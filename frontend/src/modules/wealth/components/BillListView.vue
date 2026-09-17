@@ -13,6 +13,19 @@
       <span class="sum-grand">共 {{ statsGrand.count }} 笔 / ¥{{ statsGrand.total.toLocaleString() }}</span>
     </div>
 
+    <!-- 赎回归属小结（为自己/过渡/外部/不计入/未标记，收入支出合计） -->
+    <div class="necessity-summary period-summary">
+      <span class="sum-label"><el-icon><Collection /></el-icon> 赎回归属</span>
+      <span v-for="s in periodStatsList" :key="s.period_tag" class="sum-item">
+        <el-tag :style="periodTagStyle(s.period_tag)" size="small" effect="plain">
+          {{ s.period_tag === 'unmarked' ? '未标记' : s.period_tag }}
+        </el-tag>
+        {{ s.count }} 笔
+        <b>¥{{ s.total.toLocaleString() }}</b>
+      </span>
+      <span class="sum-grand">共 {{ periodStatsGrand.count }} 笔 / ¥{{ periodStatsGrand.total.toLocaleString() }}</span>
+    </div>
+
     <!-- 工具条 -->
     <div class="bill-toolbar">
       <el-button type="primary" @click="openForm()">
@@ -32,11 +45,31 @@
         </template>
       </el-dropdown>
 
+      <el-dropdown trigger="click" :disabled="!canPeriodBatch" @command="applyBatchPeriodTag">
+        <el-button :disabled="!canPeriodBatch">
+          批量归属<el-badge v-if="selectedRows.length" :value="selectedRows.length" class="batch-badge" />
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="t in PERIOD_TAGS" :key="t" :command="t">
+              <el-tag :style="periodTagStyle(t)" size="small" effect="plain">{{ t }}</el-tag>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
       <el-select
         v-model="necessityFilter" size="small" clearable placeholder="必要性" style="width: 110px"
         @change="reloadFromFilter"
       >
         <el-option v-for="o in necessityFilterOptions" :key="o.value" :label="o.label" :value="o.value" />
+      </el-select>
+
+      <el-select
+        v-model="periodTagFilter" size="small" clearable placeholder="赎回归属" style="width: 110px"
+        @change="reloadFromFilter"
+      >
+        <el-option v-for="o in PERIOD_TAG_FILTER_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
 
       <el-select v-model="billTypeFilter" size="small" clearable placeholder="类型" style="width: 96px" @change="reloadFromFilter">
@@ -66,7 +99,7 @@
       :data="bills" v-loading="billsLoading" stripe size="small" max-height="480"
       @selection-change="(rows: any[]) => (selectedRows = rows)"
     >
-      <el-table-column type="selection" width="42" :selectable="(row: any) => row.transaction_type === '支出'" />
+      <el-table-column type="selection" width="42" :selectable="(row: any) => true" />
       <el-table-column label="日期" width="104">
         <template #default="{ row }">{{ (row.date || '').slice(0, 10) }}</template>
       </el-table-column>
@@ -88,6 +121,17 @@
             <el-option v-for="o in necessitySelectOptions" :key="o.value" :label="o.label" :value="o.value" />
           </el-select>
           <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="归属" width="116">
+        <template #default="{ row }">
+          <el-select
+            size="small" :model-value="row.period_tag || ''" style="width: 110px"
+            @change="(v: string) => onRowPeriodTagChange(row, v)"
+          >
+            <el-option label="未标记" value="" />
+            <el-option v-for="t in PERIOD_TAGS" :key="t" :label="t" :value="t" />
+          </el-select>
         </template>
       </el-table-column>
       <el-table-column label="分类" width="72" prop="category" />
@@ -133,6 +177,11 @@
             <el-radio-button value="">不标记</el-radio-button>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="赎回归属">
+          <el-select v-model="form.period_tag" clearable placeholder="选择归属（收入支出都标）" style="width: 100%">
+            <el-option v-for="t in PERIOD_TAGS" :key="t" :label="t" :value="t" />
+          </el-select>
+        </el-form-item>
         <el-row :gutter="10">
           <el-col :span="12">
             <el-form-item label="日期">
@@ -172,8 +221,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, DataAnalysis } from '@element-plus/icons-vue'
+import { Plus, Search, DataAnalysis, Collection } from '@element-plus/icons-vue'
 import * as wealthApi from '../api/wealthApi'
+import { PERIOD_TAGS, PERIOD_TAG_META, PERIOD_TAG_FILTER_OPTIONS } from '../types/wealthTypes'
 
 /** 外部（月度日历）联动年月：默认按该月筛选 */
 const props = defineProps<{ year?: number; month?: number }>()
@@ -196,6 +246,12 @@ const necessitySelectOptions = [
   { label: '未标记', value: '' },
 ]
 
+// ─── 赎回归属 ───
+function periodTagStyle(tag: string) {
+  const m = PERIOD_TAG_META[tag] || PERIOD_TAG_META.unmarked
+  return { color: m.color, borderColor: m.color, backgroundColor: m.bg }
+}
+
 // ─── 列表 ───
 const bills = ref<any[]>([])
 const billsLoading = ref(false)
@@ -206,6 +262,7 @@ const selectedRows = ref<any[]>([])
 // ─── 筛选 ───
 const billTypeFilter = ref('')
 const necessityFilter = ref('')
+const periodTagFilter = ref('')
 const billSearch = ref('')
 const billDateRange = ref<[string, string] | null>(null)
 const rangeTouched = ref(false) // 用户是否手动改过日期范围（改过则脱离年月联动）
@@ -246,6 +303,7 @@ function applySearch() {
 function resetFilters() {
   billTypeFilter.value = ''
   necessityFilter.value = ''
+  periodTagFilter.value = ''
   billSearch.value = ''
   rangeTouched.value = false
   billDateRange.value = defaultMonthRange.value
@@ -258,6 +316,7 @@ function listParams() {
   const params: Record<string, unknown> = { page: billPage.value, page_size: PAGE_SIZE }
   if (billTypeFilter.value) params.transaction_type = billTypeFilter.value
   if (necessityFilter.value) params.necessity = necessityFilter.value
+  if (periodTagFilter.value) params.period_tag = periodTagFilter.value
   if (billDateRange.value?.length === 2) {
     params.date_from = billDateRange.value[0]
     params.date_to = billDateRange.value[1]
@@ -284,6 +343,10 @@ async function loadBills() {
 const statsList = ref<{ necessity: string; count: number; total: number }[]>([])
 const statsGrand = ref({ count: 0, total: 0 })
 
+// ─── 赎回归属小结（收入支出合计） ───
+const periodStatsList = ref<{ period_tag: string; count: number; total: number }[]>([])
+const periodStatsGrand = ref({ count: 0, total: 0 })
+
 async function loadStats() {
   try {
     const params: Record<string, unknown> = { transaction_type: '支出' }
@@ -301,6 +364,26 @@ async function loadStats() {
     statsList.value = []
     statsGrand.value = { count: 0, total: 0 }
   }
+  await loadPeriodTagStats()
+}
+
+async function loadPeriodTagStats() {
+  try {
+    const params: Record<string, unknown> = {}
+    if (billDateRange.value?.length === 2) {
+      params.date_from = billDateRange.value[0]
+      params.date_to = billDateRange.value[1]
+    }
+    const res = await wealthApi.getPeriodTagStats(params)
+    periodStatsList.value = (res.data?.summary || []).filter((s: any) => s.count > 0)
+    periodStatsGrand.value = {
+      count: res.data?.grand_count ?? 0,
+      total: res.data?.grand_total ?? 0,
+    }
+  } catch {
+    periodStatsList.value = []
+    periodStatsGrand.value = { count: 0, total: 0 }
+  }
 }
 
 // ─── 批量标记 ───
@@ -308,6 +391,7 @@ const selectedExpenseCount = computed(
   () => selectedRows.value.filter((r) => r.transaction_type === '支出').length,
 )
 const canBatch = computed(() => selectedExpenseCount.value > 0)
+const canPeriodBatch = computed(() => selectedRows.value.length > 0)
 
 async function applyBatch(necessity: string) {
   if (!canBatch.value) return
@@ -315,6 +399,20 @@ async function applyBatch(necessity: string) {
   try {
     const res = await wealthApi.batchSetNecessity(ids, necessity)
     ElMessage.success(`已批量标记 ${res.data?.updated ?? ids.length} 笔为「${necessity}」`)
+    selectedRows.value = []
+    loadBills()
+    loadStats()
+  } catch {
+    ElMessage.error('批量标记失败')
+  }
+}
+
+async function applyBatchPeriodTag(tag: string) {
+  if (!canPeriodBatch.value) return
+  const ids = selectedRows.value.map((r) => r.id)
+  try {
+    const res = await wealthApi.batchSetPeriodTag(ids, tag)
+    ElMessage.success(`已批量标记 ${res.data?.updated ?? ids.length} 笔为「${tag}」`)
     selectedRows.value = []
     loadBills()
     loadStats()
@@ -336,13 +434,26 @@ async function onRowNecessityChange(row: any, val: string) {
   }
 }
 
+// ─── 行内快速改赎回归属（收入支出都生效） ───
+async function onRowPeriodTagChange(row: any, val: string) {
+  const prev = row.period_tag || ''
+  row.period_tag = val
+  try {
+    await wealthApi.updateBill(row.id, { period_tag: val })
+    loadPeriodTagStats()
+  } catch {
+    row.period_tag = prev
+    ElMessage.error('修改失败')
+  }
+}
+
 // ─── 新增 / 编辑 ───
 const formVisible = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive({
   transaction_type: '支出', amount: 0, date: '', category: '', subcategory: '',
-  merchant: '', notes: '', necessity: '',
+  merchant: '', notes: '', necessity: '', period_tag: '',
 })
 
 function openForm(row?: any) {
@@ -355,6 +466,7 @@ function openForm(row?: any) {
   form.merchant = row?.merchant || ''
   form.notes = row?.notes || ''
   form.necessity = row?.transaction_type === '支出' ? (row?.necessity || '') : ''
+  form.period_tag = row?.period_tag || ''
   formVisible.value = true
 }
 

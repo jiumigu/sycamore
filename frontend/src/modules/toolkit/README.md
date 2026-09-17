@@ -18,10 +18,11 @@
 | `FixedExpense.vue` | 固定开销计算器 |
 | `ElectricityRecord.vue` | 用电记录（统计卡 + 趋势图 + 历史表） |
 | `CareerEnergyAudit.vue` | 职业能量审计 |
-| `TravelRoute.vue` | 旅行路线推演（地图 + 路线抽屉） |
 | `HourlyWage.vue` | 时薪计算器 |
 | `FreeSpending.vue` | 自由支配额度 |
 | `HealthSelfCheck.vue` | 身体健康自查 |
+
+> `TravelRoute.vue`（旅行路线推演）已于 2026-09-11 **迁出工具箱** → `modules/travel/views/TravelRouteView.vue`（路由 `/travel/route`）。它本质是旅行计划的编排器，与 `TravelPlan` 强耦合，放在通用工具箱里用户找不到。工具箱侧保留工具卡片，进入 `/toolkit/travel-route` 时由 `ToolDetail.vue` 渲染一张「已迁入旅行模块」的跳转卡片（后端 `toolkit_travel_route_preset` 表与 `/api/toolkit/travel-routes/` 接口未动）。
 
 ### 执行型工具（执行记录进入「执行历史」页）
 

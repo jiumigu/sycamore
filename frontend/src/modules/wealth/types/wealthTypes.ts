@@ -476,3 +476,33 @@ export const FLAG_OPTIONS = [
   { value: 1, label: '已到期' },
   { value: 2, label: '已取出' },
 ] as const
+
+// ══════════════════════════════════════════
+// 三年赎回期 · 账单赎回归属标记
+// ══════════════════════════════════════════
+
+/** 赎回归属四档（上线版，跑 2 个月复盘后可能拆「过渡」） */
+export const PERIOD_TAGS = ['为自己', '过渡', '外部', '不计入'] as const
+export type PeriodTag = (typeof PERIOD_TAGS)[number]
+
+/** 赎回归属标签/配色（涨红跌绿之外的独立语义色） */
+export const PERIOD_TAG_META: Record<string, { label: string; color: string; bg: string }> = {
+  为自己: { label: '为自己', color: '#7C3AED', bg: '#F3E8FF' },
+  过渡: { label: '过渡', color: '#2563EB', bg: '#DBEAFE' },
+  外部: { label: '外部', color: '#D97706', bg: '#FEF3C7' },
+  不计入: { label: '不计入', color: '#6B7280', bg: '#F3F4F6' },
+  unmarked: { label: '未标记', color: '#9CA3AF', bg: '#F3F4F6' },
+}
+
+/** 赎回归属筛选下拉选项 */
+export const PERIOD_TAG_FILTER_OPTIONS = [
+  { label: '未标记', value: 'unmarked' },
+  ...PERIOD_TAGS.map((t) => ({ label: t, value: t })),
+]
+
+/** 赎回归属小结项 */
+export interface PeriodTagStat {
+  period_tag: string
+  count: number
+  total: number
+}

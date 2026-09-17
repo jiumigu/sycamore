@@ -59,6 +59,7 @@
             <el-icon class="expand-icon" :class="{ expanded: expandedPlanId === plan.id }"><ArrowDown /></el-icon>
           </div>
           <div class="plan-actions" @click.stop>
+            <el-button size="small" @click="viewRoute(plan)">🚂 路线</el-button>
             <el-button size="small" @click="editPlan(plan)">✏️ 编辑</el-button>
             <el-button size="small" @click="copyPlan(plan)">📋 复制</el-button>
             <el-button size="small" type="danger" @click="deletePlan(plan.id)">🗑️ 删除</el-button>
@@ -77,6 +78,47 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 计划内打卡录入弹窗 -->
+    <el-dialog v-model="visitDialogVisible" title="打卡记录" width="460px" :close-on-click-modal="false">
+      <div v-if="visitItem" class="visit-item-name">
+        {{ getItemIcon(visitItem.item_type) }} {{ visitItem.name }}
+        <span v-if="visitPlan" class="visit-plan-name">{{ visitPlan.name }}</span>
+      </div>
+      <p class="visit-tip">记录后会自动写入「旅行足迹 → 行程日志」，也可跳过只打卡。</p>
+      <el-form label-width="90px">
+        <el-form-item label="打卡日期">
+          <el-date-picker
+            v-model="visitForm.visited_at"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="默认今天"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="评分">
+          <el-rate v-model="visitForm.visit_rating" :texts="RATE_TEXTS" show-text clearable />
+        </el-form-item>
+        <el-form-item label="打卡评价">
+          <el-input
+            v-model="visitForm.visit_notes"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="味道 / 体验 / 值不值得排队的真实感受…"
+          />
+        </el-form-item>
+        <el-form-item label="值得反复">
+          <el-switch v-model="visitForm.worth_revisit" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="visitDialogVisible = false">取消</el-button>
+        <el-button :loading="visitSaving" @click="confirmVisit(false)">只打卡</el-button>
+        <el-button type="primary" :loading="visitSaving" @click="confirmVisit(true)">打卡并记录</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 新建/编辑弹窗 -->
     <el-dialog v-model="showCreateDialog" :title="editingPlanId ? '编辑旅行计划' : '新建旅行计划'" width="680px" append-to-body>
@@ -122,6 +164,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, ArrowDown } from '@element-plus/icons-vue'
 import * as api from '../api/travelApi'
@@ -133,6 +176,7 @@ import {
   type TravelPlanStats,
 } from '../types/travelTypes'
 
+const router = useRouter()
 const plans = ref<TravelPlan[]>([])
 const stats = ref<TravelPlanStats | null>(null)
 const loading = ref(false)
@@ -231,6 +275,24 @@ function togglePlan(id: number) {
   expandedPlanId.value = expandedPlanId.value === id ? null : id
 }
 
+/** 打开路线推演：优先复用计划生成时记录的完整站点序列 */
+function viewRoute(plan: TravelPlan) {
+  const matched = /^由路线推演生成：(.+)$/.exec(plan.notes || '')
+  let origin = ''
+  let dests: string[] = []
+  if (matched) {
+    const seq = matched[1].split('→').map(s => s.trim()).filter(Boolean)
+    origin = seq[0] || ''
+    dests = seq.slice(1)
+  }
+  if (!dests.length) dests = [plan.destination].filter(Boolean)
+  if (!dests.length) {
+    ElMessage.warning('该计划还没有目的地')
+    return
+  }
+  router.push({ path: '/travel/route', query: { origin, destinations: dests.join(',') } })
+}
+
 async function savePlan() {
   if (!createForm.name.trim()) {
     ElMessage.warning('请填写计划名称')
@@ -286,6 +348,15 @@ async function deletePlan(id: number) {
 }
 
 async function toggleItem(plan: TravelPlan, item: TravelPlanItem) {
+  // 未完成 → 完成：有关联心愿时先录入打卡详情（可跳过），保证行程日志字段完整
+  if (!item.is_completed && item.wish) {
+    openVisitDialog(plan, item)
+    return
+  }
+  await doToggleItem(plan, item)
+}
+
+async function doToggleItem(plan: TravelPlan, item: TravelPlanItem) {
   try {
     const res = await api.toggleTravelPlanItem(plan.id, item.id)
     const updated = res.data as TravelPlanItem
@@ -296,6 +367,62 @@ async function toggleItem(plan: TravelPlan, item: TravelPlanItem) {
     }
   } catch {
     ElMessage.error('操作失败')
+  }
+}
+
+// ===== 计划内打卡录入 =====
+const RATE_TEXTS = ['踩雷', '一般', '还行', '不错', '值得专程去']
+const visitDialogVisible = ref(false)
+const visitSaving = ref(false)
+const visitPlan = ref<TravelPlan | null>(null)
+const visitItem = ref<TravelPlanItem | null>(null)
+const visitForm = ref({
+  visited_at: '',
+  visit_rating: 0,
+  visit_notes: '',
+  worth_revisit: false,
+})
+
+function todayStr() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function openVisitDialog(plan: TravelPlan, item: TravelPlanItem) {
+  visitPlan.value = plan
+  visitItem.value = item
+  visitForm.value = {
+    visited_at: todayStr(),
+    visit_rating: 0,
+    visit_notes: '',
+    worth_revisit: false,
+  }
+  visitDialogVisible.value = true
+}
+
+async function confirmVisit(withRecord: boolean) {
+  const plan = visitPlan.value
+  const item = visitItem.value
+  if (!plan || !item) return
+  visitSaving.value = true
+  try {
+    if (withRecord && item.wish) {
+      await api.recordWishVisit(item.wish, {
+        visited_at: visitForm.value.visited_at || todayStr(),
+        visit_rating: visitForm.value.visit_rating || null,
+        visit_notes: visitForm.value.visit_notes,
+        worth_revisit: visitForm.value.worth_revisit,
+      })
+    }
+    await doToggleItem(plan, item)
+    visitDialogVisible.value = false
+    ElMessage.success(withRecord ? '已打卡并记录' : '已打卡')
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+    ElMessage.error(msg || '打卡失败')
+  } finally {
+    visitSaving.value = false
   }
 }
 
@@ -481,5 +608,30 @@ onMounted(fetchAll)
 
 .add-item-btn {
   margin-top: 4px;
+}
+
+/* ===== 计划内打卡录入 ===== */
+.visit-item-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #1F2937;
+
+  .visit-plan-name {
+    font-size: 12px;
+    font-weight: 400;
+    color: #6B7280;
+    background: #F3F4F6;
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+}
+
+.visit-tip {
+  margin: 6px 0 16px;
+  font-size: 12px;
+  color: #9CA3AF;
 }
 </style>

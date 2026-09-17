@@ -21,6 +21,7 @@ urlpatterns = [
     path('api/dams/', include('apps.dams.urls')),
     path('api/food/', include('apps.food.urls')),
     path('api/inbox/', include('apps.inbox.urls')),
+    path('api/redemption/', include('apps.redemption.urls')),
     path('api/core/', include('apps.core.urls')),
     path('api/treasure/', include('apps.treasure.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

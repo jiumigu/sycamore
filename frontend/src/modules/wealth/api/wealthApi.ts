@@ -236,6 +236,16 @@ export function getNecessityStats(params?: Record<string, unknown>) {
   return request({ url: '/wealth/bills/necessity_stats/', method: 'get', params })
 }
 
+/** 批量标记赎回归属（收入/支出均生效） */
+export function batchSetPeriodTag(ids: number[], periodTag: string) {
+  return request({ url: '/wealth/bills/batch-period-tag/', method: 'post', data: { ids, period_tag: periodTag } })
+}
+
+/** 赎回归属小结（为自己/过渡/外部/不计入/未标记 笔数与金额，收入支出合计） */
+export function getPeriodTagStats(params?: Record<string, unknown>) {
+  return request({ url: '/wealth/bills/period_tag_stats/', method: 'get', params })
+}
+
 export function getBillContrib() {
   return request({ url: '/wealth/bills/contrib/', method: 'get' })
 }

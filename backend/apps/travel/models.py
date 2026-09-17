@@ -128,6 +128,7 @@ class TravelWish(models.Model):
         ('大学', '🎓 大学'),
         ('书店', '📚 书店'),
         ('街区', '🏙️ 街区'),
+        ('早市', '🌅 早市'),
         ('夜市', '🍢 夜市'),
         ('路线', '🚶 路线'),
         ('其他', '📌 其他'),
@@ -136,6 +137,11 @@ class TravelWish(models.Model):
     user_id = models.IntegerField(default=1, verbose_name='用户ID')
     name = models.CharField(max_length=200, verbose_name='名称')
     category = models.CharField(max_length=20, default='景点', choices=CATEGORY_CHOICES, verbose_name='分类')
+    visit_plan = models.ForeignKey(
+        'TravelPlan', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='wishes', verbose_name='所属行程',
+    )
+    visit_record_id = models.IntegerField(null=True, blank=True, verbose_name='已沉淀足迹ID')
     province = models.CharField(max_length=50, blank=True, default='', verbose_name='省份')
     city = models.CharField(max_length=100, blank=True, default='', verbose_name='城市')
     district = models.CharField(max_length=100, blank=True, default='', verbose_name='区县')
@@ -143,6 +149,9 @@ class TravelWish(models.Model):
     lat = models.FloatField(null=True, blank=True, verbose_name='纬度')
     status = models.CharField(max_length=20, default='想去', choices=STATUS_CHOICES, verbose_name='状态')
     visited_at = models.DateField(null=True, blank=True, verbose_name='打卡日期')
+    visit_rating = models.PositiveSmallIntegerField(null=True, blank=True, verbose_name='打卡评分')
+    visit_notes = models.TextField(blank=True, default='', verbose_name='打卡评价')
+    worth_revisit = models.BooleanField(default=False, verbose_name='值得反复')
     notes = models.TextField(blank=True, default='', verbose_name='备注')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')

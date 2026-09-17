@@ -11,15 +11,23 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from django.db.models import DateField, Sum
+from django.db.models import Count, DateField, Sum
 from django.db.models.functions import Cast
 
-from .models import OneDayPage, TemporalTask, WeeklyTimeCache
+from .models import OneDayPage, TaskMeta, TemporalTask, WeeklyTimeCache
 from .serializers import (
     OneDayPageSerializer,
+    TaskMetaSerializer,
     TemporalTaskSerializer,
 )
-from .services import CSVImportService, DailyLogAutoService, OneDayPageService, TemporalStatsService
+from .services import (
+    CSVImportService,
+    DailyLogAutoService,
+    OneDayPageService,
+    TemporalStatsService,
+    resolve_attribution,
+    resolve_task_meta,
+)
 
 
 def _build_contrib_response(rows):
@@ -58,9 +66,23 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         if month:
             qs = qs.filter(mon=month)
 
-        category = params.get('category')
-        if category:
-            qs = qs.filter(category_level1=category)
+        # 三层过滤：L1 归因(attribution) / L2 活动类型(activity_type) / L3 task_name
+        activity_type = params.get('activity_type')
+        if activity_type:
+            names = list(TaskMeta.objects.filter(activity_type=activity_type).values_list('task_name', flat=True))
+            qs = qs.filter(task_name__in=names)
+
+        attribution = params.get('attribution')
+        if attribution:
+            # order_by() 清序：避免 Django 把 start_time 注入 DISTINCT 列致去重失效
+            all_names = list(qs.order_by().values_list('task_name', flat=True).distinct())
+            names = [tn for tn, a in resolve_attribution(all_names).items() if a == attribution]
+            qs = qs.filter(task_name__in=names)
+
+        unclassified = params.get('unclassified')
+        if unclassified in ('1', 'true', 'True'):
+            names = list(TaskMeta.objects.filter(activity_type='未归类').values_list('task_name', flat=True))
+            qs = qs.filter(task_name__in=names)
 
         task_name = params.get('task_name')
         if task_name:
@@ -80,7 +102,6 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
 
         return qs
 
-    @action(detail=False, methods=['get'])
     @action(detail=False, methods=["get"])
     def daily_detail(self, request):
         # 每日明细：按日期查当日所有时间任务
@@ -97,12 +118,16 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         ws = timezone.make_aware(datetime.combine(d, datetime.min.time()))
         we = timezone.make_aware(datetime.combine(d, datetime.max.time()))
         qs = TemporalTask.objects.filter(start_time__gte=ws, start_time__lte=we).order_by('start_time')
+        meta = resolve_task_meta([t.task_name for t in qs])
+        attr = resolve_attribution([t.task_name for t in qs])
         items = [{
             'id': t.id,
             'start_time': t.start_time.isoformat() if t.start_time else None,
             'task_name': t.task_name,
             'category_level1': t.category_level1,
             'category_level2': t.category_level2 or '',
+            'activity_type': (meta.get(t.task_name) or {}).get('activity_type'),
+            'attribution': attr.get(t.task_name),
             'duration_hours': round(t.duration_hours or 0, 2),
             'notes': t.notes or '',
         } for t in qs]
@@ -114,16 +139,47 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def contrib(self, request):
-        """贡献图：单日持续小时数聚合"""
+        """贡献图：单日聚合，支持 ?metric=hours|record_count|toward|deepwork|sleep（默认 hours）"""
+        metric = request.query_params.get('metric', 'hours')
         rows = list(
             TemporalTask.objects.exclude(start_time__isnull=True)
             .annotate(d=Cast('start_time', DateField()))
-            .values('d')
-            .annotate(v=Sum('duration_hours'))
+            .values('d', 'task_name', 'duration_hours')
             .order_by('d')
-            .values_list('d', 'v')
         )
-        return Response(_build_contrib_response(rows))
+        meta = resolve_task_meta([r['task_name'] for r in rows])
+        attr = resolve_attribution([r['task_name'] for r in rows])
+        day_map: dict = {}
+        for r in rows:
+            d = r['d']
+            h = float(r['duration_hours'] or 0)
+            tn = r['task_name']
+            at = (meta.get(tn) or {}).get('activity_type')
+            a = attr.get(tn)
+            bucket = day_map.setdefault(d, {'hours': 0.0, 'count': 0, 'toward': 0.0, 'deepwork': 0.0, 'sleep': 0.0})
+            bucket['hours'] += h
+            bucket['count'] += 1
+            if a == '投向':
+                bucket['toward'] += h
+            if at == '深度工作':
+                bucket['deepwork'] += h
+            if at == '睡眠':
+                bucket['sleep'] += h
+        metric_key = {
+            'hours': 'hours', 'record_count': 'count', 'toward': 'toward',
+            'deepwork': 'deepwork', 'sleep': 'sleep',
+        }.get(metric, 'hours')
+        data = [{'date': d.isoformat(), 'value': round(float(v[metric_key]), 2)} for d, v in day_map.items()]
+        min_year = min((d.year for d in day_map), default=datetime.now().year)
+        max_year = max((d.year for d in day_map), default=datetime.now().year)
+        return Response({
+            'min_year': min_year, 'max_year': max_year, 'metric': metric, 'data': data,
+            'summary': {
+                'total_days': len(data),
+                'max_date': max(data, key=lambda x: x['value'])['date'] if data else None,
+                'max_value': max((x['value'] for x in data), default=0),
+            },
+        })
 
     @action(detail=False, methods=['get'])
     def task_names(self, request):
@@ -169,12 +225,13 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def trend(self, request):
-        """趋势数据"""
+        """趋势数据，支持 ?level=l1|l2（默认 l1 按 L1 分组堆叠）"""
         year = request.query_params.get('year')
         group = request.query_params.get('group', 'month')
+        level = request.query_params.get('level', 'l1')
         if year:
             year = int(year)
-        data = TemporalStatsService.get_trend(year, group)
+        data = TemporalStatsService.get_trend(year, group, level)
         return Response(data)
 
     @action(detail=False, methods=['get'])
@@ -212,6 +269,91 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         if year:
             year = int(year)
         data = TemporalStatsService.get_calendar(year)
+        return Response(data)
+
+    @action(detail=False, methods=['get'])
+    def meta(self, request):
+        """L2 活动类型映射清单（分页）"""
+        qs = TaskMeta.objects.all()
+        name = request.query_params.get('name')
+        if name:
+            qs = qs.filter(task_name__icontains=name)
+        unclassified_only = request.query_params.get('unclassified_only')
+        if unclassified_only in ('1', 'true', 'True'):
+            qs = qs.filter(activity_type='未归类')
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(TaskMetaSerializer(page, many=True).data)
+        return Response(TaskMetaSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=['get'])
+    def unclassified(self, request):
+        """未归类任务池：活动类型='未归类' 的 task_name 汇总（按真实时长）"""
+        names = list(TaskMeta.objects.filter(activity_type='未归类').values_list('task_name', flat=True))
+        agg = TemporalTask.objects.filter(task_name__in=names).values('task_name').annotate(
+            total_hours=Sum('duration_hours'), record_count=Count('id'),
+        ).order_by('-total_hours')
+        data = [
+            {'task_name': r['task_name'], 'total_hours': round(float(r['total_hours'] or 0), 2),
+             'record_count': r['record_count']}
+            for r in agg
+        ]
+        return Response({'count': len(data), 'items': data})
+
+    @action(detail=False, methods=['post'])
+    def batch_set_meta(self, request):
+        """批量设 L3→L2(活动类型) + L1(归因)：写 temporal_task_meta；attribution 非空则额外写 redemption_attr_rule"""
+        task_names = request.data.get('task_names') or []
+        activity_type = request.data.get('activity_type')
+        attribution = request.data.get('attribution')
+        if not task_names or not activity_type:
+            return Response({'error': 'task_names 与 activity_type 必填'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated = 0
+        for tn in task_names:
+            TaskMeta.objects.update_or_create(
+                task_name=tn,
+                defaults={'activity_type': activity_type,
+                          'default_attribution': attribution or None},
+            )
+            updated += 1
+            if attribution:
+                from apps.redemption.models import RedemptionAttrRule
+                RedemptionAttrRule.objects.update_or_create(
+                    match_field='task_name', match_value=tn,
+                    defaults={'attribution': attribution, 'priority': 100, 'is_active': True,
+                              'note': '时间重构批量设置'},
+                )
+        return Response({'updated': updated, 'activity_type': activity_type, 'attribution': attribution})
+
+    @action(detail=False, methods=['get'])
+    def sunburst(self, request):
+        """旭日/嵌套饼图数据：内圈 L1，外圈 L2"""
+        year = request.query_params.get('year')
+        if year:
+            year = int(year)
+        return Response(TemporalStatsService.get_sunburst(year))
+
+    @action(detail=False, methods=['get'])
+    def completeness(self, request):
+        """记录完整度"""
+        year = request.query_params.get('year')
+        if year:
+            year = int(year)
+        return Response(TemporalStatsService.get_completeness(year))
+
+
+class WeeklyStructureView(APIView):
+    """168h 周结构（替代 weekly-tracking 的达标表，v0.2 决策 4 移除 30h benchmark）"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        year = request.GET.get('year')
+        if year:
+            year = int(year)
+        weeks = int(request.GET.get('weeks', 12))
+        data = TemporalStatsService.get_168h_structure(year, weeks)
         return Response(data)
 
 

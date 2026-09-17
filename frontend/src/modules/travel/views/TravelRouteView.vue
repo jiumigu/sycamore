@@ -2,8 +2,13 @@
   <div class="travel-route">
     <!-- 页面标题 -->
     <div class="page-head">
-      <h2 class="page-title">🚂 旅行路线推演</h2>
-      <p class="subtitle">输入出发地和多个目的地，生成小火车沿路线逐个抵达的动画</p>
+      <div class="head-left">
+        <h2 class="page-title">🚂 旅行路线推演</h2>
+        <p class="subtitle">编排出发地与多个目的地，一键生成旅行计划并带入心愿</p>
+      </div>
+      <el-button type="primary" :disabled="!stops.length" @click="openPlanDialog">
+        生成旅行计划
+      </el-button>
     </div>
 
     <!-- 地图全屏 -->
@@ -106,19 +111,79 @@
         <el-button type="primary" @click="savePreset" :loading="savingPreset">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 生成旅行计划弹窗 -->
+    <el-dialog v-model="planDialogVisible" title="生成旅行计划" width="580px" destroy-on-close>
+      <el-form label-width="90px">
+        <el-form-item label="计划名称">
+          <el-input v-model="planForm.name" placeholder="如：福建沿海线 3 日游" />
+        </el-form-item>
+        <el-form-item label="出发日期">
+          <el-date-picker
+            v-model="planForm.start_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="可选"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="路线">
+          <div class="route-line">{{ routeText }}</div>
+        </el-form-item>
+      </el-form>
+
+      <el-divider>从心愿单带入（可选）</el-divider>
+      <div v-loading="previewLoading" class="station-list">
+        <div v-for="s in previewStations" :key="s.city" class="station">
+          <div class="station-head">
+            <el-checkbox
+              :model-value="isStationChecked(s.city)"
+              :disabled="s.wish_count === 0"
+              @change="(val: any) => toggleStation(s.city, !!val)"
+            >
+              📍 {{ s.city }}
+            </el-checkbox>
+            <span class="station-count">{{ s.wish_count }} 个想去</span>
+          </div>
+          <div v-if="isStationChecked(s.city) && s.wishes.length" class="station-wishes">
+            <el-checkbox-group v-model="wishSelected">
+              <el-checkbox v-for="w in s.wishes" :key="w.id" :value="w.id" class="wish-check">
+                {{ w.is_food ? '🍽️' : '📍' }} {{ w.name }}
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
+        </div>
+        <el-empty
+          v-if="!previewLoading && previewStations.length === 0"
+          description="暂无匹配的城市心愿"
+          :image-size="60"
+        />
+        <div v-else-if="!previewLoading && noWishStation" class="station-hint">
+          未勾选任何心愿时，会为每个目的地各生成一条待细化条目。
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="planDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingPlan" @click="submitPlan">生成计划</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import betterEchartsMaps from 'better-echarts-maps/dist/china.js'
 import draggable from 'vuedraggable'
 
-import * as api from '../../api/toolkitApi'
-import type { CityCoordinate, TravelRoutePreset } from '../../types/toolkitTypes'
+import * as api from '../../toolkit/api/toolkitApi'
+import * as travelApi from '../api/travelApi'
+import type { CityCoordinate, TravelRoutePreset } from '../../toolkit/types/toolkitTypes'
+import type { RouteStation } from '../types/travelTypes'
 
 const drawerOpen = ref(false)
 const origin = ref('')
@@ -611,10 +676,105 @@ function handleResize() {
   chart?.resize()
 }
 
+// ===== 生成旅行计划（路线 → 计划） =====
+const router = useRouter()
+const route = useRoute()
+
+const planDialogVisible = ref(false)
+const previewLoading = ref(false)
+const savingPlan = ref(false)
+const previewStations = ref<RouteStation[]>([])
+const wishSelected = ref<number[]>([])
+const planForm = ref({ name: '', start_date: '' })
+
+const routeText = computed(() => {
+  const dests = destinations.value.filter(d => d.trim())
+  return [origin.value.trim(), ...dests].filter(Boolean).join(' → ')
+})
+
+const noWishStation = computed(() => previewStations.value.every(s => s.wish_count === 0))
+
+function isStationChecked(city: string): boolean {
+  const s = previewStations.value.find(x => x.city === city)
+  if (!s || !s.wishes.length) return false
+  return s.wishes.every(w => wishSelected.value.includes(w.id))
+}
+
+function toggleStation(city: string, checked: boolean) {
+  const s = previewStations.value.find(x => x.city === city)
+  if (!s) return
+  const ids = s.wishes.map(w => w.id)
+  if (checked) {
+    wishSelected.value = Array.from(new Set([...wishSelected.value, ...ids]))
+  } else {
+    wishSelected.value = wishSelected.value.filter(id => !ids.includes(id))
+  }
+}
+
+async function openPlanDialog() {
+  const dests = destinations.value.filter(d => d.trim())
+  if (!dests.length) {
+    ElMessage.warning('请先选择或新建一条路线')
+    return
+  }
+  planForm.value = {
+    name: selectedPreset.value?.name || `${dests[0]}等 ${dests.length} 站`,
+    start_date: '',
+  }
+  wishSelected.value = []
+  previewStations.value = []
+  planDialogVisible.value = true
+  previewLoading.value = true
+  try {
+    const res = await travelApi.getRoutePreview({ destinations: dests })
+    previewStations.value = res.data?.stations || []
+    // 默认全选各站心愿，一键成计划
+    wishSelected.value = previewStations.value.flatMap(s => s.wishes.map(w => w.id))
+  } catch {
+    ElMessage.error('加载城市心愿失败')
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+async function submitPlan() {
+  const dests = destinations.value.filter(d => d.trim())
+  if (!dests.length) return
+  savingPlan.value = true
+  try {
+    await travelApi.createPlanFromRoute({
+      name: planForm.value.name,
+      origin: origin.value.trim(),
+      destinations: dests,
+      start_date: planForm.value.start_date || null,
+      wish_ids: wishSelected.value,
+    })
+    planDialogVisible.value = false
+    ElMessage.success('已生成旅行计划')
+    router.push('/travel/plans')
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+    ElMessage.error(msg || '生成计划失败')
+  } finally {
+    savingPlan.value = false
+  }
+}
+
+/** 从旅行计划页跳转过来时，用 query 预填路线并直接推演 */
+function applyQueryRoute() {
+  const qOrigin = (route.query.origin as string) || ''
+  const qDests = (route.query.destinations as string) || ''
+  if (!qDests) return
+  origin.value = qOrigin
+  destinations.value = qDests.split(',').map(s => s.trim()).filter(Boolean)
+  nextTick(() => startJourney())
+}
+
 onMounted(() => {
   loadCities()
   loadPresets()
   window.addEventListener('resize', handleResize)
+  applyQueryRoute()
 })
 
 onUnmounted(() => {
@@ -636,9 +796,15 @@ onUnmounted(() => {
 
 .page-head {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 12px 20px 10px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
+
+  .head-left { min-width: 0; }
 
   .page-title {
     margin: 0;
@@ -814,5 +980,54 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
+}
+
+/* ===== 生成旅行计划弹窗 ===== */
+.route-line {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.station-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.station {
+  border: 1px solid #EEF0F3;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+
+  .station-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    .station-count {
+      font-size: 12px;
+      color: #9CA3AF;
+    }
+  }
+
+  .station-wishes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    padding: 4px 0 2px 24px;
+
+    .wish-check {
+      margin-right: 0;
+      height: 24px;
+    }
+  }
+}
+
+.station-hint {
+  font-size: 12px;
+  color: #9CA3AF;
+  line-height: 1.6;
 }
 </style>

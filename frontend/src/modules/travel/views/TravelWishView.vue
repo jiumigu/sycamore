@@ -34,6 +34,7 @@
             <span class="dot" style="background: #e6a23c" />想去
             <span class="dot" style="background: #409eff" />已列入计划
             <span class="dot" style="background: #67c23a" />已打卡
+            <span class="legend-hint">· 跟随下方筛选缩放 ★ 加粗为值得反复</span>
           </span>
         </div>
       </template>
@@ -86,20 +87,31 @@
               <span>{{ [w.city, w.district].filter(Boolean).join(' · ') || w.province || '—' }}</span>
               <span class="wish-status" :class="statusClass(w.status)">{{ w.status }}</span>
             </div>
+            <div v-if="w.status === '已打卡'" class="wish-record">
+              <span v-if="w.visit_rating" class="rec-stars">{{ starsText(w.visit_rating) }}</span>
+              <span v-if="w.worth_revisit" class="rec-revisit">{{ revisitLabel(w.category, true) }}</span>
+              <span v-if="w.visited_at" class="rec-date">🗓️ {{ w.visited_at }}</span>
+            </div>
+            <div v-if="w.visit_notes" class="wish-visit-notes" :title="w.visit_notes">{{ w.visit_notes }}</div>
             <div class="wish-actions" @click.stop>
               <el-button
+                v-if="w.status !== '已打卡'"
                 size="small"
-                :type="w.status === '已打卡' ? 'warning' : 'success'"
+                type="success"
                 plain
-                @click="toggleVisited(w)"
+                @click="openVisit(w)"
               >
-                {{ w.status === '已打卡' ? '取消打卡' : '✓ 打卡' }}
+                ✓ 打卡
               </el-button>
+              <template v-else>
+                <el-button size="small" type="warning" plain @click="openVisit(w)">✎ 记录</el-button>
+                <el-button size="small" plain @click="toggleVisited(w)">↩ 取消打卡</el-button>
+              </template>
               <el-button
+                v-if="w.status !== '已打卡'"
                 size="small"
                 type="primary"
                 plain
-                :disabled="w.status === '已打卡'"
                 @click="openAddToPlan(w)"
               >
                 加入计划
@@ -110,7 +122,6 @@
                 </template>
               </el-popconfirm>
             </div>
-            <div v-if="w.visited_at" class="wish-visited">🗓️ {{ w.visited_at }}</div>
           </div>
         </div>
       </div>
@@ -139,6 +150,68 @@
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveWish">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 打卡记录弹窗 -->
+    <el-dialog v-model="visitVisible" :title="visitTitle" width="460px">
+      <div v-if="visitTarget" class="visit-wish-name">
+        {{ CATEGORY_LABELS[visitTarget.category] || '📌' }} {{ visitTarget.name }}
+        <span class="plan-wish-city">{{ visitTarget.city || visitTarget.province }}</span>
+      </div>
+      <p class="visit-hint">打卡后心愿状态自动变为「已打卡」，可随时回改。</p>
+      <el-form label-width="90px">
+        <el-form-item label="打卡日期">
+          <el-date-picker
+            v-model="visitForm.visited_at"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="默认今天"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="本次行程">
+          <el-select
+            v-model="visitForm.visit_plan"
+            clearable
+            filterable
+            placeholder="可选：归属到某趟旅行计划"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="p in plans"
+              :key="p.id"
+              :label="`${p.name}（${p.destination || '未定'} · ${p.status}）`"
+              :value="p.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="评分">
+          <el-rate
+            v-model="visitForm.visit_rating"
+            :texts="RATE_TEXTS"
+            show-text
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="打卡评价">
+          <el-input
+            v-model="visitForm.visit_notes"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="味道 / 体验 / 值不值得排队的真实感受…"
+          />
+        </el-form-item>
+        <el-form-item :label="revisitLabel(visitTarget?.category)">
+          <el-switch v-model="visitForm.worth_revisit" />
+          <span class="visit-hint inline">{{ visitForm.worth_revisit ? '已标记' : '未标记' }}</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="visitVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingVisit" @click="saveVisit">保存记录</el-button>
       </template>
     </el-dialog>
 
@@ -180,20 +253,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import betterEchartsMaps from 'better-echarts-maps/dist/china.js'
 import {
   getWishes, createWish, updateWish, deleteWish,
-  getWishStats, markWishVisited, addWishToPlan, getTravelPlans,
+  getWishStats, markWishVisited, recordWishVisit, addWishToPlan, getTravelPlans,
 } from '../api/travelApi'
 import type { TravelWish, WishStats, TravelPlanOption } from '../types/travelTypes'
 
 const CATEGORY_LABELS: Record<string, string> = {
   景点: '📍 景点', 美食: '🍽️ 美食', 古镇: '🏘️ 古镇', 寺庙: '🛕 寺庙',
   自然: '⛰️ 自然', 大学: '🎓 大学', 书店: '📚 书店', 街区: '🏙️ 街区',
-  夜市: '🍢 夜市', 路线: '🚶 路线', 其他: '📌 其他',
+  早市: '🌅 早市', 夜市: '🍢 夜市', 路线: '🚶 路线', 其他: '📌 其他',
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -219,36 +292,103 @@ const searchText = ref('')
 const mapRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
 
+interface MapPoint {
+  name: string
+  value: [number, number]
+  city: string
+  district: string
+  status: string
+  category: string
+  rating: number | null
+  revisit: string
+}
+
+interface MapTipParam {
+  name: string
+  data?: MapPoint
+}
+
+/** 由当前筛选出的点位推算视野中心与缩放（点位越集中越放大） */
+function focusOf(points: Array<{ lng: number | null; lat: number | null }>) {
+  const lngs = points.map(p => p.lng).filter((v): v is number => v != null)
+  const lats = points.map(p => p.lat).filter((v): v is number => v != null)
+  if (!lngs.length || !lats.length) return { center: [104, 35], zoom: 1.15 }
+  const minLng = Math.min(...lngs)
+  const maxLng = Math.max(...lngs)
+  const minLat = Math.min(...lats)
+  const maxLat = Math.max(...lats)
+  // 单点或极小范围按 0.02 度兜底，避免 log2 溢出
+  const span = Math.max(maxLng - minLng, maxLat - minLat, 0.02)
+  return {
+    center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
+    zoom: Math.min(9, Math.max(1.15, 1.15 + Math.log2(60 / span) * 0.9)),
+  }
+}
+
 function renderMap() {
   if (!chart) return
   const located = filteredWishes.value.filter(w => w.lng != null && w.lat != null)
   const seriesByStatus = (status: string) => located
     .filter(w => w.status === status)
-    .map(w => ({ name: w.name, value: [w.lng, w.lat], city: w.city, category: w.category }))
+    .map(w => ({
+      name: w.name,
+      value: [w.lng as number, w.lat as number] as [number, number],
+      city: w.city,
+      district: w.district,
+      status: w.status,
+      category: w.category,
+      rating: w.visit_rating,
+      revisit: w.worth_revisit ? revisitLabel(w.category, true) : '',
+      // 值得反复的点画大一点、加白描边，一眼能挑出来
+      symbolSize: w.worth_revisit ? 13 : 8,
+      itemStyle: {
+        color: STATUS_COLOR[status],
+        opacity: 0.88,
+        borderColor: '#fff',
+        borderWidth: w.worth_revisit ? 2 : 0,
+      },
+    }))
   chart.setOption({
     tooltip: {
       trigger: 'item',
-      formatter: (p: { name: string; data: { city: string; category: string } }) =>
-        `${p.name}<br/>${p.data?.city || ''}`,
+      formatter: (p: MapTipParam) => {
+        const d = p.data
+        const lines = [`<b>${p.name}</b>`]
+        if (d) {
+          const place = [d.city, d.district].filter(Boolean).join(' · ')
+          if (place) lines.push(place)
+          lines.push(`状态：${d.status}`)
+          lines.push(`分类：${CATEGORY_LABELS[d.category] || d.category}`)
+          if (d.rating) lines.push(`评分：${'★'.repeat(d.rating)}`)
+          if (d.revisit) lines.push(d.revisit)
+        }
+        return lines.join('<br/>')
+      },
     },
     geo: {
       map: 'china',
       roam: true,
-      zoom: 1.1,
+      ...focusOf(located),
       itemStyle: { areaColor: '#f5f7fa', borderColor: '#dcdfe6' },
       emphasis: { itemStyle: { areaColor: '#e8f0fe' } },
-      scaleLimit: { min: 0.8, max: 8 },
+      scaleLimit: { min: 0.8, max: 12 },
     },
-    series: (['想去', '已列入计划', '已打卡'] as const).map(s => ({
-      name: s,
+    series: (['想去', '已列入计划', '已打卡'] as const).map(st => ({
+      name: st,
       type: 'scatter',
       coordinateSystem: 'geo',
-      data: seriesByStatus(s),
+      data: seriesByStatus(st),
       symbolSize: 8,
-      itemStyle: { color: STATUS_COLOR[s], opacity: 0.85 },
+      itemStyle: { color: STATUS_COLOR[st], opacity: 0.85 },
     })),
   }, true)
 }
+
+// 筛选条件变化 → 地图重绘并聚焦到筛选结果（分类/状态/省市区/搜索都生效）
+watch(
+  [filterCategory, filterStatus, filterProvince, filterCity, filterDistrict, searchText],
+  () => { renderMap() }
+)
 
 // ===== 数据 =====
 async function loadAll() {
@@ -347,6 +487,71 @@ async function toggleVisited(w: TravelWish) {
   }
 }
 
+// ===== 打卡记录 =====
+const RATE_TEXTS = ['踩雷', '一般', '还行', '不错', '值得专程去']
+
+const visitVisible = ref(false)
+const visitTarget = ref<TravelWish | null>(null)
+const savingVisit = ref(false)
+const visitForm = ref({ visited_at: '', visit_plan: null as number | null, visit_rating: 0, visit_notes: '', worth_revisit: false })
+
+const visitTitle = computed(() =>
+  visitTarget.value?.status === '已打卡' ? '编辑打卡记录' : '打卡记录'
+)
+
+/** 美食/早市/夜市叫「反复吃」，其余叫「反复去」 */
+function revisitLabel(category?: string | null, short = false) {
+  const eat = ['美食', '早市', '夜市'].includes(category || '')
+  if (short) return eat ? '🔁 反复吃' : '🔁 反复去'
+  return eat ? '值得反复吃' : '值得反复去'
+}
+
+function starsText(rating?: number | null) {
+  const n = rating || 0
+  return n ? '★'.repeat(n) + '☆'.repeat(5 - n) : ''
+}
+
+function todayStr() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function openVisit(w: TravelWish) {
+  visitTarget.value = w
+  visitForm.value = {
+    visited_at: w.visited_at || todayStr(),
+    visit_plan: w.visit_plan ?? null,
+    visit_rating: w.visit_rating || 0,
+    visit_notes: w.visit_notes || '',
+    worth_revisit: !!w.worth_revisit,
+  }
+  if (plans.value.length === 0) loadPlans()
+  visitVisible.value = true
+}
+
+async function saveVisit() {
+  if (!visitTarget.value) return
+  savingVisit.value = true
+  try {
+    await recordWishVisit(visitTarget.value.id, {
+      visited_at: visitForm.value.visited_at || todayStr(),
+      visit_plan: visitForm.value.visit_plan,
+      visit_rating: visitForm.value.visit_rating || null,
+      visit_notes: visitForm.value.visit_notes,
+      worth_revisit: visitForm.value.worth_revisit,
+    })
+    visitVisible.value = false
+    await refresh()
+    ElMessage.success(`已记录：${visitTarget.value.name} · 已进入行程日志`)
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+    ElMessage.error(msg || '保存打卡记录失败')
+  } finally {
+    savingVisit.value = false
+  }
+}
+
 // ===== 新增 / 编辑 =====
 const editVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -420,6 +625,13 @@ async function openAddToPlan(w: TravelWish) {
     plans.value = res.data?.results || res.data || []
   } catch { /* 静默 */ }
   planVisible.value = true
+}
+
+async function loadPlans() {
+  try {
+    const res = await getTravelPlans()
+    plans.value = res.data?.results || res.data || []
+  } catch { /* 静默 */ }
 }
 
 async function confirmAddToPlan() {
@@ -639,10 +851,59 @@ onUnmounted(() => {
   margin-left: 0;
 }
 
-.wish-visited {
+.wish-record {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   font-size: 11px;
+  margin-top: 4px;
+}
+
+.rec-stars {
+  color: #f7ba2a;
+  letter-spacing: 1px;
+}
+
+.rec-revisit {
+  background: #fef0f0;
+  color: #f56c6c;
+  border-radius: 8px;
+  padding: 0 6px;
+}
+
+.rec-date {
   color: var(--el-color-success);
-  margin-top: 6px;
+}
+
+.wish-visit-notes {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.legend-hint {
+  color: var(--el-text-color-placeholder);
+  margin-left: 6px;
+}
+
+.visit-wish-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.visit-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin: 0 0 12px;
+}
+
+.visit-hint.inline {
+  margin: 0 0 0 10px;
 }
 
 .plan-wish-name {

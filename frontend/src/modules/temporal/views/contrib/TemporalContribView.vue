@@ -6,7 +6,9 @@
           <el-icon><ArrowLeft /></el-icon> 返回
         </el-button>
         <h2 class="page-title">{{ title }}</h2>
-        <el-tag size="small" type="info">单日持续小时数</el-tag>
+        <el-select v-model="metric" size="small" style="width:130px" @change="load(true)">
+          <el-option v-for="m in METRICS" :key="m.value" :label="m.label" :value="m.value" />
+        </el-select>
       </div>
       <el-button size="small" @click="load(true)">
         <el-icon><Refresh /></el-icon> 刷新
@@ -55,6 +57,15 @@ const minYear = ref(2020)
 const maxYear = ref(new Date().getFullYear())
 const loading = ref(false)
 
+const METRICS = [
+  { value: 'record_count', label: '记录数', unit: '次' },
+  { value: 'hours', label: '小时', unit: '小时' },
+  { value: 'toward', label: '投向小时', unit: '小时' },
+  { value: 'deepwork', label: '深度工作小时', unit: '小时' },
+  { value: 'sleep', label: '睡眠小时', unit: '小时' },
+]
+const metric = ref('record_count')
+
 // ─── 每日明细弹窗 ───
 const detailVisible = ref(false)
 const detailDate = ref('')
@@ -63,8 +74,9 @@ const detailLoading = ref(false)
 const detailSummary = ref('')
 const detailColumns = [
   { prop: 'start_time', label: '开始', width: 130, formatter: (v: string) => v ? v.slice(0, 16) : '' },
-  { prop: 'task_name', label: '任务', minWidth: 200 },
-  { prop: 'category_level1', label: '一级分类', width: 90 },
+  { prop: 'task_name', label: '任务（L3）', minWidth: 200 },
+  { prop: 'attribution', label: 'L1 归因', width: 90 },
+  { prop: 'activity_type', label: 'L2 类型', width: 100 },
   { prop: 'duration_hours', label: '时长(小时)', width: 90, align: 'right' as const },
   { prop: 'notes', label: '备注', minWidth: 120 },
 ]
@@ -103,7 +115,7 @@ async function load(force = false) {
         }
       }
     }
-    const res = await temporalApi.getTaskContrib()
+    const res = await temporalApi.getTaskContrib({ metric: metric.value })
     applyData(res.data)
     localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), body: res.data }))
   } catch {

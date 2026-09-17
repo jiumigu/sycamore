@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'apps.inbox',
     'apps.core',
     'apps.treasure',
+    'apps.redemption',
 ]
 
 MIDDLEWARE = [

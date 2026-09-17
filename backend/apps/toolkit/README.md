@@ -69,7 +69,7 @@ ToolkitExecution（任务记录层）
 |----------|------|------|
 | trad2simp | 繁简转换 | 繁体/简体文本互转 |
 | gif-compressor | GIF压缩 | 抽帧/缩放/减色/质量压缩 GIF |
-| travel_route | 旅行路线推演 | 地图可视化路线推演 |
+| travel_route | 旅行路线推演 | 地图可视化路线推演（**前端主入口已于 2026-09-11 迁入旅行模块 `/travel/route`**，工具箱内为跳转卡片；本 app 的 `TravelRoutePreset` 表与 `/travel-routes/` 接口保持不变） |
 | career_energy_audit | 职业能量审计 | 26项指标职业能量评估 + 自动判定 |
 | fixed-expense | 固定开销计算器 | 自定义开销项目，按日/月/年周期统一换算每天/每月/每年开销 |
 | electricity-record | 用电记录 | 记录电表读数，自动计算间隔/日均/本月累计用电，删除自动重算 |
