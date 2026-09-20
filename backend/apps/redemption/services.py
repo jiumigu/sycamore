@@ -10,15 +10,19 @@ from django.db.models import Case, Sum, When
 from django.db.models.functions import Cast
 from django.db.models import DateField, DecimalField, F, Q, Value
 
+# ⚠️ 归因词表**单一真源**在 apps.temporal.constants（v3.58.10 起收敛）。
+#    此处曾各存一份副本，导致改词要同时动 3 个地方、极易漂移。禁止在本文件重新定义。
+# ⚠️ 注意两者形状不同：ATTRIBUTION_CHOICES 是 (值, 显示名) 元组对（给 Django choices 用），
+#    ATTRIBUTION_CHOICES_LIST 才是纯值字符串列表。本模块只需要值，故取后者 ——
+#    曾因误用前者导致 hours 字典的 key 变成 tuple，JSON 序列化直接 TypeError。
+from apps.temporal.constants import ATTRIBUTION_CHOICES_LIST, PERIOD_TAG_CHOICES
+
 # 覆盖率分母：每天醒来 16h − 生存 4h = 12h 可支配（暂定，可改实测基准）
 THEORETICAL_DAILY_HOURS = 12
 # 单位赎回成本分母：12h/天 − 上班 4h/天 = 净增 8h/天
 REDEEMED_DAILY_HOURS = 8
 # 覆盖率低于该值给出「仅基于已记录部分，谨慎解读」提示
 COVERAGE_WARN_THRESHOLD = 0.5
-
-PERIOD_TAG_CHOICES = ['为自己', '过渡', '外部', '不计入']
-ATTRIBUTION_CHOICES = ['投向', '维持', '外部', '流失']
 
 
 def get_or_create_period():
@@ -129,34 +133,81 @@ def compute_tier_stats(period):
     ]
 
 
-def _match_attribution(task, rules_index):
-    """按优先级匹配一条归因规则，返回归因类别或 None。"""
+def match_attribution_rule_obj(task_name, activity_type, task_type, rules):
+    """按优先级匹配归因规则，返回**命中的规则对象**或 None（重叠取 priority 最高者）。
+
+    需要「命中是哪一条」时用它（如时间台账要提示「这条归因来自 L2 活动类型规则」、
+    以及撤销覆盖时要判断究竟能不能撤）；只关心归因值用 `match_attribution_rule`。
+    两者共用本函数，勿各写一份匹配逻辑。
+    """
     best = None
-    for rule in rules_index:
-        val = getattr(task, rule.match_field, None)
-        if val is None:
+    for rule in rules:
+        if rule.match_field == 'task_name':
+            val = task_name
+        elif rule.match_field == 'activity_type':
+            val = activity_type
+        elif rule.match_field == 'task_type':
+            val = task_type
+        else:
             continue
-        if str(val) == rule.match_value:
-            if best is None or rule.priority > best.priority:
-                best = rule
+        if val is None or str(val) != rule.match_value:
+            continue
+        if best is None or rule.priority > best.priority:
+            best = rule
+    return best
+
+
+def match_attribution_rule(task_name, activity_type, task_type, rules):
+    """按优先级匹配归因规则，返回归因值或 None（重叠取 priority 最高者）。
+
+    🔴 **单一真源**：temporal 侧的时间统计归因（`temporal.services.resolve_attribution_detail`）
+    与 redemption 侧的赎回期覆盖率（本模块 `compute_time_attribution`）共用本函数。
+    此前两处各写一份 `match_field` 判定，口径已经漂移 —— temporal 侧硬编码支持
+    `task_name` + `activity_type`，而本侧走 `getattr(task, rule.match_field)`，
+    于是 `activity_type` 规则**在时间统计页生效、在赎回期页面被静默跳过**（同一条规则两个页面两个结果）。
+
+    ⚠️ `activity_type`（L2 类型）**不在 ATracker 外部表**（`managed=False`，绝不加列），
+    它住在 `temporal_task_meta`，故由调用方按 task_name 反查后传入。
+
+    只认 `match_field ∈ {task_name, activity_type, task_type}`（与
+    `RedemptionAttrRule.MATCH_FIELD_CHOICES` 对应）；其余维度一律不匹配
+    （如已废弃的 `category_level2`，全库非空行数为 0）。
+    """
+    best = match_attribution_rule_obj(task_name, activity_type, task_type, rules)
     return best.attribution if best else None
 
 
+def _match_attribution(task, rules_index, activity_type_of=None):
+    """单条 TemporalTask 的规则匹配（`compute_time_attribution` 用）。
+
+    `activity_type_of` 是 `{task_name: activity_type}` 映射，见 `match_attribution_rule` 的说明。
+    """
+    return match_attribution_rule(
+        task_name=task.task_name,
+        activity_type=(activity_type_of or {}).get(task.task_name),
+        task_type=getattr(task, 'task_type', None),
+        rules=rules_index,
+    )
+
+
 def compute_time_attribution(period):
-    """窗口内 ATracker 任务经外挂规则映射后的四类小时 + 覆盖率。"""
-    from apps.temporal.models import TemporalTask
+    """窗口内 ATracker 任务经外挂规则映射后的五类归因小时 + 覆盖率。"""
+    from apps.temporal.models import TaskMeta, TemporalTask
     from .models import RedemptionAttrRule
 
     rules_index = list(RedemptionAttrRule.objects.filter(is_active=True))
+    # activity_type(L2) 不在外部表、住在 temporal_task_meta，按 task_name 反查；
+    # 该表只有几十行，全量取成映射比逐行查省事（避免 N+1）。
+    activity_type_of = dict(TaskMeta.objects.values_list('task_name', 'activity_type'))
     start_dt, end_dt = _window_bounds(period)
 
     tasks = TemporalTask.objects.filter(
         start_time__gte=start_dt, start_time__lte=end_dt,
     )
-    hours = {k: 0.0 for k in ATTRIBUTION_CHOICES}
+    hours = {k: 0.0 for k in ATTRIBUTION_CHOICES_LIST}
     covered = 0.0
     for t in tasks:
-        attr = _match_attribution(t, rules_index)
+        attr = _match_attribution(t, rules_index, activity_type_of)
         h = float(t.duration_hours or 0)
         if attr and h:
             hours[attr] += h
@@ -167,7 +218,8 @@ def compute_time_attribution(period):
     days_elapsed = max(days_elapsed, 0)
     theoretical = days_elapsed * THEORETICAL_DAILY_HOURS
     coverage_rate = round(covered / theoretical, 4) if theoretical else 0.0
-    toward_ratio = round(hours['投向'] / covered, 4) if covered else 0.0
+    # 占比 = 「成长」小时 / 有记录小时（对外字段名仍是 toward_ratio，见 models 里的说明）
+    toward_ratio = round(hours['成长'] / covered, 4) if covered else 0.0
 
     return {
         'hours': {k: round(v, 2) for k, v in hours.items()},
@@ -231,6 +283,7 @@ def sync_to_scenario(period, mode='preview'):
     support_weeks/end_age/end_week + 写 WealthScenarioHistory。
     start_age/start_week 取既有推演当前位置，不覆盖用户的长期推演。
     """
+    from apps.wealth.constants import WINDOW_END_AGE
     from apps.wealth.models import WealthCurrentScenario, WealthScenarioHistory
     from apps.wealth.services.coverage_calculator import calculate_coverage
 
@@ -254,6 +307,9 @@ def sync_to_scenario(period, mode='preview'):
         start_week=scenario.current_week,
         cash=float(pool['balance']),
         daily_budget=float(avg_daily),
+        # 与财富页保持同一计量窗口（19–60 岁）：本函数写入的就是财富推演的单例，
+        # 若用 78 岁上限会与页面展示口径不一致
+        max_age=WINDOW_END_AGE,
     )
     result = {
         'mode': mode,

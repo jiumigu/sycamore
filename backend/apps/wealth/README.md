@@ -53,3 +53,24 @@
 | GET | /cashflow/snapshot/list/ | 快照列表（?page=&page_size= 分页） |
 | POST | /cashflow/copy/ | 复制上月数据 |
 | GET | /cashflow/reconcile/ | 账面与实际对账 |
+
+## 资产口径（v3.58.19 财务规划口径纠偏）
+
+资产类指标的**唯一实现**在 `services/cashflow_service.py`，阈值与科目清单在 `constants.py`。
+
+| 口径 | 计算式 | 对外字段 |
+|------|--------|----------|
+| 流动资金 | 7 个活期账户之和（支付宝/微信/现金/建行/工行/中行/农信社） | `summary.flow_total` |
+| 金融资产 | 流动资金 + 公积金 | `summary.total` / `summary.financial_assets` |
+| 总资产 | 金融资产 + 应收借出 | `summary.total_assets` |
+| 净资产 | 总资产 − 负债 | `summary.net_worth`（`realnum` 为兼容别名，同值） |
+
+**三条强制约定**
+
+1. **比率类指标一律以「总资产」为分母** —— `liquidity_ratio` / `debt_ratio` / `provident_fund_ratio` 同分母才互相可比。分母漏计应收借出会使负债率被系统性高估；`debt_ratio_legacy` 只作旧口径对照，**不用于展示**。
+2. **应急金以「月数」判定** —— `emergency_fund_months = 流动资金 ÷ 近 EXPENSE_LOOKBACK_MONTHS 月平均月支出`。分子含银行卡活期（原实现只算支付宝+微信+现金）；目标月数由 `EMERGENCY_MONTHS_TARGET` 下发，**前端不写死阈值**。月均支出不可得时，`emergency_fund_months` / `emergency_gap` / `emergency_target_amount` 三个字段为 `null`。
+3. **月均支出对「有记录的月份数」取均值**，不除以固定回看月数 —— 否则无记录月份被当成零支出，把月数算虚高。取数优先 `wealth_bill_list` 明细，明细无数据时回落 `wealth_balance_list.outmoney`。
+
+⚠️ `wealth_cash_flow` 是 `managed = False` 的外部遗留表：**只读、不改结构**。科目为 8 个物理列，新增科目须另建 managed 表（P1 阶段方案见 `docs/财务三表能力评估-财务规划师视角-20260920.md`），**不得对该表执行 ALTER**。
+
+⚠️ 命名对应：`/cashflow/*` 这一组接口承载的是**资产负债表快照**（资产盘点），不是现金流量表。真正的现金流量表（按活动性质归集）尚未建设，命名空间预留给 `/cash-flow-statement/*`。

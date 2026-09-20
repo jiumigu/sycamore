@@ -121,7 +121,7 @@
               disabled
               size="small"
             />
-            <span v-if="record.price" class="card-price">¥{{ record.price }}</span>
+            <span v-if="record.price" class="card-price">¥{{ formatAmount(Number(record.price), 0) }}</span>
           </div>
           <div v-if="record.notes" class="card-notes">{{ record.notes }}</div>
         </div>
@@ -157,6 +157,7 @@ import { useFoodStore } from '../stores/foodStore'
 import { CATEGORY_OPTIONS, TASTE_LEVELS } from '../types/foodTypes'
 import type { FoodFormData, FoodRecord, FoodRecordList } from '../types/foodTypes'
 import * as foodApi from '../api/foodApi'
+import { formatAmount } from '@/shared/utils/format'
 import FoodStatsCards from '../components/stats/FoodStatsCards.vue'
 import FoodForm from '../components/FoodForm.vue'
 

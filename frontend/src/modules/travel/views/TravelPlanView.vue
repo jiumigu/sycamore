@@ -168,6 +168,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, ArrowDown } from '@element-plus/icons-vue'
 import * as api from '../api/travelApi'
+import { formatAmount } from '@/shared/utils/format'
 import {
   TRAVEL_PLAN_ITEM_TYPES,
   type TravelPlan,
@@ -198,7 +199,7 @@ const createForm = reactive<{
 })
 
 function fmt(n: unknown): string {
-  return Number(n ?? 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return formatAmount(Number(n ?? 0), 2)
 }
 
 function getStatusType(status: string): string {

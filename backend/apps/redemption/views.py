@@ -95,19 +95,32 @@ class RedemptionResumeView(APIView):
 
 
 class InjectListCreateView(ListCreateAPIView):
-    """现金池注入流水：GET 列表 / POST 新增。"""
+    """现金池注入流水：GET 列表 / POST 新增。
+
+    同 `AttrRuleListCreateView`：关掉全局分页，返回裸数组（前端按数组取用）。
+    """
 
     queryset = RedemptionPoolInject.objects.all()
     serializer_class = PoolInjectSerializer
     permission_classes = [AllowAny]
+    pagination_class = None
 
 
 class AttrRuleListCreateView(ListCreateAPIView):
-    """归因规则：GET 列表 / POST 新增。"""
+    """归因规则：GET 列表 / POST 新增。
+
+    🔴 `pagination_class = None`：全局 `StandardPagination` 会把响应包成
+    `{count, next, previous, results}`，而前端（`AttrRuleEditor.vue`）与 API 层
+    （`request<AttrRule[]>`）都按**裸数组**取用 → 一旦分页生效，页面把对象当数组，
+    `length` 得到 undefined，表现为「现有规则 ()」+ 空表格，**规则明明存在却看不见**
+    （2026-09-18 发现：库内 3 条真实规则被显示成 0 条）。
+    规则量级为个位数，本就不需要分页；与项目其他列表接口的裸数组风格保持一致。
+    """
 
     queryset = RedemptionAttrRule.objects.all()
     serializer_class = AttrRuleSerializer
     permission_classes = [AllowAny]
+    pagination_class = None
 
 
 class AttrRuleDetailView(APIView):

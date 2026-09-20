@@ -61,6 +61,19 @@ class CoverageInputSerializer(serializers.Serializer):
     daily_interest_rate = serializers.DecimalField(max_digits=10, decimal_places=8, default=0)
 
 
+class BudgetInputSerializer(serializers.Serializer):
+    """反算输入参数：给定本金与目标天数，求每日可提取额
+
+    与 CoverageInputSerializer 的差异：只收「净额」相关输入，不收年龄/周数
+    （反算不需要起点位置，它算的是「从现在起 n 天」）。
+    月被动收入折算仍由前端处理，后端只认净额——与正算保持同一分工。
+    """
+    current_cash = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    # 天数带小数（如 10.5 年 = 3835.44 天），由前端按单位换算后传入
+    target_days = serializers.FloatField(min_value=1, max_value=200000)
+    daily_interest_rate = serializers.DecimalField(max_digits=10, decimal_places=8, default=0)
+
+
 class LifeSummarySerializer(serializers.Serializer):
     """人生总览"""
     total_income = serializers.FloatField()
@@ -70,6 +83,10 @@ class LifeSummarySerializer(serializers.Serializer):
     lived_weeks = serializers.IntegerField()
     surplus_weeks = serializers.IntegerField()
     deficit_weeks = serializers.IntegerField()
+    # 计量窗口（19–60 岁）—— 以上指标均在此窗口内统计
+    window_start_age = serializers.IntegerField()
+    window_end_age = serializers.IntegerField()
+    window_weeks = serializers.IntegerField()
 
 
 class DailyBillSerializer(serializers.Serializer):
@@ -284,19 +301,40 @@ class BalanceInfoSerializer(serializers.ModelSerializer):
 
 
 class AccountSummarySerializer(serializers.Serializer):
-    """资产汇总"""
+    """资产汇总
+
+    口径（v3.58.19 纠偏）：
+        total / financial_assets = 活期账户 + 公积金
+        total_assets             = financial_assets + 应收借出
+        net_worth                = total_assets − 负债（与 realnum 同值，realnum 为兼容保留）
+    """
     flow_total = serializers.FloatField()
     total = serializers.FloatField()
+    financial_assets = serializers.FloatField()
+    total_assets = serializers.FloatField()
+    net_worth = serializers.FloatField()
     borrow = serializers.FloatField()
     lend = serializers.FloatField()
     realnum = serializers.FloatField()
 
 
 class HealthMetricsSerializer(serializers.Serializer):
-    """资产健康指标"""
+    """资产健康指标
+
+    应急金以「月数」判定（绝对金额阈值会与支出水平脱钩）：
+        emergency_fund_months = emergency_fund ÷ monthly_expense_avg
+        emergency_gap         = max(目标金额 − 应急金, 0)
+    月均支出无数据时，三个派生字段均为 null。
+    """
     emergency_fund = serializers.FloatField()
+    emergency_fund_months = serializers.FloatField(allow_null=True)
+    emergency_months_target = serializers.FloatField()
+    emergency_target_amount = serializers.FloatField(allow_null=True)
+    emergency_gap = serializers.FloatField(allow_null=True)
+    monthly_expense_avg = serializers.FloatField()
     liquidity_ratio = serializers.FloatField()
     debt_ratio = serializers.FloatField()
+    debt_ratio_legacy = serializers.FloatField()
     provident_fund_ratio = serializers.FloatField()
 
 
@@ -314,6 +352,9 @@ class AssetTrendItemSerializer(serializers.Serializer):
     yearmon = serializers.CharField()
     flow_total = serializers.FloatField()
     total = serializers.FloatField()
+    financial_assets = serializers.FloatField()
+    total_assets = serializers.FloatField()
+    net_worth = serializers.FloatField()
     accumulationfund = serializers.FloatField()
     zplay = serializers.FloatField()
     wechat = serializers.FloatField()
@@ -332,6 +373,9 @@ class SnapshotListItemSerializer(serializers.Serializer):
     btime = serializers.CharField(allow_null=True)
     flow_total = serializers.FloatField()
     total = serializers.FloatField()
+    financial_assets = serializers.FloatField()
+    total_assets = serializers.FloatField()
+    net_worth = serializers.FloatField()
     zplay = serializers.FloatField()
     wechat = serializers.FloatField()
     cash = serializers.FloatField()

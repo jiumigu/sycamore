@@ -7,7 +7,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { usePrivacyMask } from '@/shared/composables/usePrivacyMask'
+import { formatAmount } from '@/shared/utils/format'
 
 const props = withDefaults(defineProps<{
   value: number | null | undefined
@@ -20,15 +20,10 @@ const props = withDefaults(defineProps<{
   precision: 2,
 })
 
-const { maskAmount } = usePrivacyMask()
-
 const formatted = computed(() => {
   if (props.value === null || props.value === undefined) return '0.00'
-  const raw = Math.abs(props.value).toLocaleString('zh-CN', {
-    minimumFractionDigits: props.precision,
-    maximumFractionDigits: props.precision,
-  })
-  return maskAmount(raw)
+  // 符号由模板按 showSign 统一渲染，这里只负责数值大小 + 千分位 + 脱敏
+  return formatAmount(Math.abs(props.value), props.precision)
 })
 
 const colorClass = computed(() => {

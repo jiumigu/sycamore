@@ -47,9 +47,10 @@ function updateChart() {
   if (!chart) return
   const labels = props.data.map(d => d.yearmon)
   const series = [
-    { name: '总资产', key: 'total', color: '#1890ff' },
-    { name: '现金流', key: 'flow_total', color: '#52c41a' },
-    { name: '公积金', key: 'accumulationfund', color: '#fa8c16' },
+    { name: '净资产', key: 'net_worth', color: '#1890ff' },
+    { name: '金融资产', key: 'financial_assets', color: '#52c41a' },
+    { name: '流动资金', key: 'flow_total', color: '#fa8c16' },
+    { name: '公积金', key: 'accumulationfund', color: '#722ed1' },
   ]
 
   chart.setOption({

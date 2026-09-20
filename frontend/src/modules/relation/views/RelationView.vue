@@ -68,7 +68,7 @@
               <div class="reminder-dot" :style="{ background: QUALITY_CONFIG[r.quality]?.color || '#9CA3AF' }"></div>
               <div class="reminder-info">
                 <span class="reminder-name">{{ maskName(r.name, privacyStore.privacyMode) }}</span>
-                <span class="reminder-tags" v-if="r.tags">{{ privacyStore.privacyMode ? '***' : r.tags }}</span>
+                <span class="reminder-tags" v-if="r.tags">{{ maskTags(r.tags, privacyStore.privacyMode) }}</span>
               </div>
               <div class="reminder-meta">
                 <span v-if="r.days_since !== null" class="reminder-days">{{ r.days_since }}天未联系</span>
@@ -95,7 +95,7 @@
                 <div class="card-meta">
                   <div class="relation-name">{{ maskName(r.name, privacyStore.privacyMode) }}</div>
                   <div class="relation-tags" v-if="r.tags">
-                    <el-tag v-for="tag in r.tags.split(/[,，、]/).filter(Boolean).slice(0, 3)" :key="tag" size="small" round>{{ privacyStore.privacyMode ? '***' : tag.trim() }}</el-tag>
+                    <el-tag v-for="tag in r.tags.split(/[,，、]/).filter(Boolean).slice(0, 3)" :key="tag" size="small" round>{{ maskTags(tag.trim(), privacyStore.privacyMode) }}</el-tag>
                   </div>
                 </div>
                 <el-tag :type="relationTagType(r.relation_type)" effect="dark" size="small" class="quality-tag">{{ relationTypeLabel(r.relation_type) }}</el-tag>
@@ -259,7 +259,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { maskName } from '@/shared/utils/privacy'
+import { maskName, maskTags } from '@/shared/utils/privacy'
 import ReaderList from '../components/ReaderList.vue'
 import MonthlySummaryTab from '../components/reader/MonthlySummaryTab.vue'
 import { useRelationshipStore } from '../stores/relationshipStore'

@@ -3,8 +3,8 @@
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="header-left">
-        <h1 class="page-title">现金实时盘点</h1>
-        <el-tag type="warning" class="module-tag">财务维度</el-tag>
+        <h1 class="page-title">资产盘点</h1>
+        <el-tag type="warning" class="module-tag">资产负债表口径</el-tag>
       </div>
       <div class="header-actions">
         <el-button type="primary" @click="openNewDialog">

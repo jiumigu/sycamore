@@ -8,12 +8,12 @@
           {{ s.necessity === 'unmarked' ? '未标记' : s.necessity }}
         </el-tag>
         {{ s.count }} 笔
-        <b>¥{{ s.total.toLocaleString() }}</b>
+        <b>¥{{ formatAmount(s.total, 0) }}</b>
       </span>
-      <span class="sum-grand">共 {{ statsGrand.count }} 笔 / ¥{{ statsGrand.total.toLocaleString() }}</span>
+      <span class="sum-grand">共 {{ statsGrand.count }} 笔 / ¥{{ formatAmount(statsGrand.total, 0) }}</span>
     </div>
 
-    <!-- 赎回归属小结（为自己/过渡/外部/不计入/未标记，收入支出合计） -->
+    <!-- 赎回归属小结（为自己/过渡/为别人/不计入/未标记，收入支出合计） -->
     <div class="necessity-summary period-summary">
       <span class="sum-label"><el-icon><Collection /></el-icon> 赎回归属</span>
       <span v-for="s in periodStatsList" :key="s.period_tag" class="sum-item">
@@ -21,9 +21,9 @@
           {{ s.period_tag === 'unmarked' ? '未标记' : s.period_tag }}
         </el-tag>
         {{ s.count }} 笔
-        <b>¥{{ s.total.toLocaleString() }}</b>
+        <b>¥{{ formatAmount(s.total, 0) }}</b>
       </span>
-      <span class="sum-grand">共 {{ periodStatsGrand.count }} 笔 / ¥{{ periodStatsGrand.total.toLocaleString() }}</span>
+      <span class="sum-grand">共 {{ periodStatsGrand.count }} 笔 / ¥{{ formatAmount(periodStatsGrand.total, 0) }}</span>
     </div>
 
     <!-- 工具条 -->
@@ -107,7 +107,7 @@
       <el-table-column label="金额" width="96" align="right">
         <template #default="{ row }">
           <span :class="row.transaction_type === '收入' ? 'amount income' : 'amount'">
-            {{ row.transaction_type === '收入' ? '+' : '-' }}¥{{ Number(row.amount).toLocaleString() }}
+            {{ formatSignedAmount(row.transaction_type === '收入' ? Number(row.amount) : -Number(row.amount), 0, true) }}
           </span>
         </template>
       </el-table-column>
@@ -224,6 +224,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, DataAnalysis, Collection } from '@element-plus/icons-vue'
 import * as wealthApi from '../api/wealthApi'
 import { PERIOD_TAGS, PERIOD_TAG_META, PERIOD_TAG_FILTER_OPTIONS } from '../types/wealthTypes'
+import { formatAmount, formatSignedAmount } from '@/shared/utils/format'
 
 /** 外部（月度日历）联动年月：默认按该月筛选 */
 const props = defineProps<{ year?: number; month?: number }>()
@@ -503,7 +504,7 @@ async function saveBill() {
 async function handleDelete(row: any) {
   try {
     await ElMessageBox.confirm(
-      `确认删除这笔账单（${row.date?.slice(0, 10)} ¥${row.amount}）？`,
+      `确认删除这笔账单（${row.date?.slice(0, 10)} ¥${formatAmount(row.amount, 0)}）？`,
       '删除确认', { type: 'warning' },
     )
     await wealthApi.deleteBill(row.id)

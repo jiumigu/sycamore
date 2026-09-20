@@ -18,7 +18,7 @@
         <el-card shadow="hover" class="stat-card">
           <div class="stat-body">
             <div class="stat-label">累计损失</div>
-            <div class="stat-value text-danger">¥{{ stats?.total_loss ?? 0 }}</div>
+            <div class="stat-value text-danger">¥{{ formatAmount(stats?.total_loss ?? 0) }}</div>
           </div>
         </el-card>
       </el-col>
@@ -68,7 +68,7 @@
         <el-table-column prop="event_date" label="日期" width="100" />
         <el-table-column label="关联人" width="80">
           <template #default="{ row }">
-            {{ privacyStore.privacyMode ? maskName(row.contact_name, true) : row.contact_name }}
+            {{ maskName(row.contact_name, privacyStore.privacyMode) }}
           </template>
         </el-table-column>
         <el-table-column prop="title" label="事件" min-width="150" show-overflow-tooltip />
@@ -82,7 +82,7 @@
         </el-table-column>
         <el-table-column label="损失" width="100" align="right">
           <template #default="{ row }">
-            <span v-if="row.loss_amount" class="text-danger">¥{{ row.loss_amount }}</span>
+            <span v-if="row.loss_amount" class="text-danger">¥{{ formatAmount(row.loss_amount, 0) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
@@ -123,7 +123,7 @@
             clearable
             style="width: 100%"
           >
-            <el-option v-for="c in filteredContacts" :key="c.id" :label="privacyStore.privacyMode ? maskName(c.name, true) : c.name" :value="c.id" />
+            <el-option v-for="c in filteredContacts" :key="c.id" :label="maskName(c.name, privacyStore.privacyMode)" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="事件标题">
@@ -182,6 +182,7 @@ import * as conflictApi from '../api/conflictApi'
 import { getRelationshipList } from '../api/relationshipApi'
 import type { Relationship } from '../types/relationshipTypes'
 import { maskName } from '@/shared/utils/privacy'
+import { formatAmount } from '@/shared/utils/format'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
 
 const privacyStore = usePrivacyStore()

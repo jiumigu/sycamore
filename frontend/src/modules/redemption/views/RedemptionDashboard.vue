@@ -104,12 +104,12 @@
 
       <div class="metric-row">
         <div class="metric-cell">
-          <span class="mc-cap">投向占比</span>
+          <span class="mc-cap">成长占比</span>
           <span class="mc-num">{{ (stats.time.toward_ratio * 100).toFixed(1) }}%</span>
         </div>
         <div class="metric-cell">
           <span class="mc-cap">单位赎回成本</span>
-          <span class="mc-num">¥{{ stats.unit_cost != null ? stats.unit_cost.toFixed(2) : '—' }}/h</span>
+          <span class="mc-num">¥{{ stats.unit_cost != null ? formatAmount(stats.unit_cost, 2) : '—' }}/h</span>
         </div>
       </div>
       <div class="note-line">
@@ -133,6 +133,7 @@ import * as rapi from '../api/redemptionApi'
 import type { RedemptionStats } from '../types/redemptionTypes'
 import { ATTRIBUTION_META } from '../types/redemptionTypes'
 import { PERIOD_TAG_META } from '@/modules/wealth/types/wealthTypes'
+import { formatAmount } from '@/shared/utils/format'
 
 const stats = ref<RedemptionStats>(emptyStats())
 const phase = ref('')
@@ -150,7 +151,7 @@ function emptyStats(): RedemptionStats {
 }
 
 function fmt(n: number) {
-  return Number(n || 0).toLocaleString()
+  return formatAmount(n, 0)
 }
 
 function tagStyle(tag: string) {

@@ -224,7 +224,7 @@
           <el-col :span="8">
             <div class="compare-item" :class="dailyBalance >= 0 ? 'positive' : 'negative'">
               <div>日结余</div>
-              <div class="compare-value">{{ dailyBalance >= 0 ? '+' : '' }}¥{{ fmt(dailyBalance) }}</div>
+              <div class="compare-value">{{ formatSignedAmount(dailyBalance, 2, true) }}</div>
             </div>
           </el-col>
         </el-row>
@@ -253,13 +253,13 @@
           </template>
         </el-table-column>
         <el-table-column label="时薪" width="100">
-          <template #default="{ row }">¥{{ row.hourly_wage }}/h</template>
+          <template #default="{ row }">{{ maskAmount(row.hourly_wage, privacyStore.privacyMode) }}/h</template>
         </el-table-column>
         <el-table-column label="月收入" width="100">
-          <template #default="{ row }">¥{{ fmt(row.total_monthly || row.monthly_salary) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.total_monthly || row.monthly_salary, privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="日收入" width="100">
-          <template #default="{ row }">¥{{ fmt(row.total_daily || (Number(row.monthly_salary) / 30)) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.total_daily || (Number(row.monthly_salary) / 30), privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="月投入" width="72">
           <template #default="{ row }">{{ row.total_hours_per_month }}h</template>
@@ -297,24 +297,24 @@
           <div class="section-title">💵 收入构成</div>
           <div class="detail-row">
             <span>💼 工资收入</span>
-            <span>¥{{ fmt(viewingRecord.monthly_salary || 0) }}/月</span>
+            <span>{{ maskAmount(viewingRecord.monthly_salary || 0, privacyStore.privacyMode) }}/月</span>
           </div>
           <div v-for="source in (viewingRecord.extra_incomes || [])" :key="source.name + source.period + source.amount" class="detail-row">
             <span>💰 {{ source.name || '未命名来源' }}</span>
-            <span>¥{{ fmt(source.amount) }}/{{ periodLabel(source.period) }}</span>
+            <span>{{ maskAmount(source.amount, privacyStore.privacyMode) }}/{{ periodLabel(source.period) }}</span>
           </div>
           <el-divider />
           <div class="detail-row total">
             <span>📊 月总收入</span>
-            <span>¥{{ fmt(viewingRecord.total_monthly || viewingRecord.monthly_salary || 0) }}</span>
+            <span>{{ maskAmount(viewingRecord.total_monthly || viewingRecord.monthly_salary || 0, privacyStore.privacyMode) }}</span>
           </div>
           <div class="detail-row">
             <span>日收入</span>
-            <span>¥{{ fmt(detailIncomeDaily) }}</span>
+            <span>{{ maskAmount(detailIncomeDaily, privacyStore.privacyMode) }}</span>
           </div>
           <div class="detail-row">
             <span>时薪</span>
-            <span>¥{{ viewingRecord.hourly_wage }}/h</span>
+            <span>{{ maskAmount(viewingRecord.hourly_wage, privacyStore.privacyMode) }}/h</span>
           </div>
         </div>
 
@@ -339,17 +339,17 @@
           <div v-if="latestExpense">
             <div class="detail-row">
               <span>日收入</span>
-              <span class="text-success">¥{{ fmt(detailIncomeDaily) }}</span>
+              <span class="text-success">{{ maskAmount(detailIncomeDaily, privacyStore.privacyMode) }}</span>
             </div>
             <div class="detail-row">
               <span>日固定开销</span>
-              <span class="text-danger">¥{{ fmt(latestExpense.total_daily) }}</span>
+              <span class="text-danger">{{ maskAmount(latestExpense.total_daily, privacyStore.privacyMode) }}</span>
             </div>
             <el-divider />
             <div class="detail-row total">
               <span>日结余</span>
               <span :class="detailBalance >= 0 ? 'text-success' : 'text-danger'">
-                {{ detailBalance >= 0 ? '+' : '' }}¥{{ fmt(detailBalance) }}
+                {{ formatSignedAmount(detailBalance, 2, true) }}
               </span>
             </div>
             <div class="detail-row">
@@ -378,6 +378,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { maskAmount } from '@/shared/utils/privacy'
+import { formatSignedAmount } from '@/shared/utils/format'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
 import { getHourlyWageList, createHourlyWage, updateHourlyWage, deleteHourlyWage, getFixedExpenseList } from '../../api/toolkitApi'
 import type { HourlyWageRecord, FixedExpenseRecord } from '../../types/toolkitTypes'

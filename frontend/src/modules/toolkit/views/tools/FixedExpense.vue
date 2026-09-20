@@ -109,13 +109,13 @@
           <template #default="{ row }">{{ row.name || '未命名记录' }}</template>
         </el-table-column>
         <el-table-column label="每天" width="90">
-          <template #default="{ row }">¥{{ fmt(row.total_daily) }}</template>
+          <template #default="{ row }">¥{{ maskAmountText(fmt(row.total_daily), privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="每月" width="100">
-          <template #default="{ row }">¥{{ fmt(row.total_monthly) }}</template>
+          <template #default="{ row }">¥{{ maskAmountText(fmt(row.total_monthly), privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="每年" width="100">
-          <template #default="{ row }">¥{{ fmt(row.total_yearly) }}</template>
+          <template #default="{ row }">¥{{ maskAmountText(fmt(row.total_yearly), privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="项目数" width="70">
           <template #default="{ row }">{{ (row.items || []).length }}</template>
@@ -154,8 +154,8 @@
           </div>
           <div v-for="item in (viewingRecord.items || [])" :key="item.name + item.amount + item.period" class="table-row">
             <span class="col-name">{{ item.icon }} {{ item.name || '未命名项目' }}</span>
-            <span class="col-original">¥{{ fmt(item.amount) }}/{{ periodLabel(item.period) }}</span>
-            <span class="col-monthly">¥{{ fmt(convertToMonthly(item)) }}</span>
+            <span class="col-original">¥{{ maskAmountText(fmt(item.amount), privacyStore.privacyMode) }}/{{ periodLabel(item.period) }}</span>
+            <span class="col-monthly">¥{{ maskAmountText(fmt(convertToMonthly(item)), privacyStore.privacyMode) }}</span>
           </div>
         </div>
         <el-empty v-if="!viewingRecord.items?.length" description="无明细项目" :image-size="40" />
@@ -165,11 +165,11 @@
         <div class="detail-summary">
           <div class="summary-row">
             <span>月固定开销</span>
-            <span class="summary-value">¥{{ fmt(viewingRecord.total_monthly) }}</span>
+            <span class="summary-value">¥{{ maskAmountText(fmt(viewingRecord.total_monthly), privacyStore.privacyMode) }}</span>
           </div>
           <div class="summary-row">
             <span>日固定开销</span>
-            <span class="summary-value">¥{{ fmt(viewingRecord.total_daily) }}</span>
+            <span class="summary-value">¥{{ maskAmountText(fmt(viewingRecord.total_daily), privacyStore.privacyMode) }}</span>
           </div>
         </div>
 
@@ -192,6 +192,10 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFixedExpenseList, createFixedExpense, updateFixedExpense, deleteFixedExpense } from '../../api/toolkitApi'
 import type { FixedExpenseRecord } from '../../types/toolkitTypes'
+import { maskAmountText } from '@/shared/utils/privacy'
+import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
+
+const privacyStore = usePrivacyStore()
 
 type Period = 'daily' | 'monthly' | 'yearly'
 

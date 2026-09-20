@@ -28,8 +28,15 @@ export interface PoolInject {
   created_at: string
 }
 
-export type AttrField = 'task_type' | 'task_name' | 'category_level2'
-export type Attribution = '投向' | '维持' | '外部' | '流失'
+/** 匹配维度（须与后端 `RedemptionAttrRule.MATCH_FIELD_CHOICES` 对齐）。
+ *
+ * ⚠️ 三点语义：① `activity_type` 是 L2 活动类型，不在 ATracker 外部表，后端按 task_name
+ * 反查 `temporal_task_meta` 得到，**曾因前端漏列而选不到、后端又走 getattr 静默跳过**；
+ * ② `task_type` 在当前数据里恒等于 `task_name`（外部表写入约定），保留是为兼容历史规则；
+ * ③ 已移除 `category_level2` —— v0.3 起停写，全库非空行数为 0。
+ */
+export type AttrField = 'task_name' | 'activity_type' | 'task_type'
+export type Attribution = '成长' | '关系' | '维持' | '谋生' | '流失'
 
 export interface AttrRule {
   id: number
@@ -91,8 +98,9 @@ export interface SyncResult {
 
 /** 归因类别配色 */
 export const ATTRIBUTION_META: Record<string, { color: string; bg: string }> = {
-  投向: { color: '#7C3AED', bg: '#F3E8FF' },
+  成长: { color: '#7C3AED', bg: '#F3E8FF' },
+  关系: { color: '#0D9488', bg: '#CCFBF1' },
   维持: { color: '#2563EB', bg: '#DBEAFE' },
-  外部: { color: '#D97706', bg: '#FEF3C7' },
+  谋生: { color: '#D97706', bg: '#FEF3C7' },
   流失: { color: '#DC2626', bg: '#FEE2E2' },
 }

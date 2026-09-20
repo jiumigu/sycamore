@@ -7,8 +7,8 @@
 | `MonthlyCalendarView.vue` | 月度日历主页（导航+网格+统计） |
 | `MonthlyReviewView.vue` | 月度复盘 |
 | `RegularDeposit.vue` | 定期存款管理 |
-| `CashFlowView.vue` | 现金盘点 |
-| `WealthHub.vue` | 财务管理入口（子路由容器，承载 6 个子页 tab：宏观热力图/月度日历/月度复盘/定期存款/现金盘点/贡献图） |
+| `CashFlowView.vue` | 资产盘点（资产负债表口径） |
+| `WealthHub.vue` | 财务管理入口（子路由容器，承载 6 个子页 tab：宏观热力图/月度日历/月度复盘/定期存款/资产盘点/贡献图） |
 
 ## Components
 | 文件 | 职责 |
@@ -25,7 +25,7 @@
 | `regular/RegularFilter.vue` | 筛选栏 |
 | `regular/RegularForm.vue` | 创建/编辑弹窗 |
 | `regular/MatureHandler.vue` | 到期处理弹窗 |
-| `cashflow/AssetOverview.vue` | 资产全景卡片（11项资产分布） |
-| `cashflow/AssetTrend.vue` | 资产趋势折线图（ECharts） |
-| `cashflow/HealthMetrics.vue` | 健康指标卡片（负债率/自由资金等） |
-| `cashflow/SnapshotHistory.vue` | 盘点历史列表（15列全字段 + 隐私脱敏 + 分页） |
+| `cashflow/AssetOverview.vue` | 资产全景卡片（8 账户分布饼图 + 净资产主指标 + 五项明细） |
+| `cashflow/AssetTrend.vue` | 资产趋势折线图（净资产/金融资产/流动资金/公积金 四条线） |
+| `cashflow/HealthMetrics.vue` | 健康指标卡片（应急金月数/活期占比/负债率/公积金占比） |
+| `cashflow/SnapshotHistory.vue` | 盘点历史列表（全字段 + 净资产列 + 隐私脱敏 + 分页） |

@@ -24,7 +24,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="净结余">
           <span :class="data.net >= 0 ? 'detail__income' : 'detail__expense'">
-            ￥{{ fmt(data.net) }}
+            ¥{{ fmt(data.net) }}
           </span>
         </el-descriptions-item>
       </el-descriptions>

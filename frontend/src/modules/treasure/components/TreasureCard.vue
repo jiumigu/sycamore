@@ -16,14 +16,14 @@
         <span class="card-category">{{ thing.category_display || thing.category }}</span>
       </div>
 
-      <h3 class="card-name">{{ thing.name }}</h3>
+      <h3 class="card-name">{{ maskText(thing.name) }}</h3>
 
       <!-- 好物 -->
       <template v-if="thing.record_type === '好'">
-        <p class="card-content">{{ thing.why_good }}</p>
+        <p class="card-content">{{ maskFreeText(thing.why_good) }}</p>
         <div class="card-meta">
-          <span v-if="thing.where_to_find" class="meta-location">📍 {{ thing.where_to_find }}</span>
-          <span v-if="thing.scene" class="meta-scene">{{ thing.scene }}</span>
+          <span v-if="thing.where_to_find" class="meta-location">📍 {{ maskText(thing.where_to_find) }}</span>
+          <span v-if="thing.scene" class="meta-scene">{{ maskText(thing.scene) }}</span>
           <el-tag v-if="thing.still_available" size="small" type="success">✅ 还能找到</el-tag>
           <el-tag v-else size="small" type="danger">❌ 已找不到</el-tag>
         </div>
@@ -34,15 +34,15 @@
         <div class="bad-section">
           <div class="bad-field">
             <span class="bad-label">💥 踩坑：</span>
-            <span class="card-content">{{ thing.avoid_reason }}</span>
+            <span class="card-content">{{ maskFreeText(thing.avoid_reason) }}</span>
           </div>
           <div v-if="thing.consequence" class="bad-field">
             <span class="bad-label">😵 后果：</span>
-            <span>{{ thing.consequence }}</span>
+            <span>{{ maskFreeText(thing.consequence) }}</span>
           </div>
           <div v-if="thing.scene" class="bad-field">
             <span class="bad-label">📍 场景：</span>
-            <span>{{ thing.scene }}</span>
+            <span>{{ maskText(thing.scene) }}</span>
           </div>
         </div>
         <div class="card-meta">
@@ -52,7 +52,7 @@
 
       <!-- 标签 -->
       <div v-if="thing.tags" class="card-tags">
-        <el-tag v-for="tag in getTags(thing.tags)" :key="tag" size="small" type="info">
+        <el-tag v-for="tag in displayTags" :key="tag" size="small" type="info">
           {{ tag }}
         </el-tag>
       </div>
@@ -71,10 +71,16 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Edit, Delete } from '@element-plus/icons-vue'
+import { usePrivacyMask } from '@/shared/composables/usePrivacyMask'
+import { MASK_TEXT } from '@/shared/utils/privacy'
 import type { GoodThing } from '../types/treasureTypes'
 
-defineProps<{ thing: GoodThing }>()
+const props = defineProps<{ thing: GoodThing }>()
+
+const { isActive, maskText, maskFreeText } = usePrivacyMask()
+const displayTags = computed(() => (isActive.value ? [MASK_TEXT] : getTags(props.thing.tags)))
 
 defineEmits<{
   edit: [thing: GoodThing]

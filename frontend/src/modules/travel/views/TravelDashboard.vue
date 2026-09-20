@@ -92,7 +92,7 @@
                 <span v-if="r.rating" class="timeline-rating">{{ '⭐'.repeat(r.rating) }}</span>
               </div>
               <div class="timeline-meta">
-                <span v-if="r.tcost">💰 ¥{{ maskAmount(r.tcost) }}</span>
+                <span v-if="r.tcost">💰 {{ maskAmount(r.tcost) }}</span>
                 <span v-if="r.companions">👥 {{ r.companions }}</span>
                 <span v-if="r.duration_days">📆 {{ r.duration_days }} 天</span>
               </div>
@@ -157,7 +157,7 @@
           <span class="log-actions">
             <el-button v-if="!day.consolidated" size="small" type="primary" plain @click="openConsolidate(day)">沉淀为足迹</el-button>
             <span v-else-if="day.record" class="log-record-info">
-              <template v-if="day.record.tcost">💰 ¥{{ day.record.tcost }}</template>
+              <template v-if="day.record.tcost">💰 {{ maskAmount(day.record.tcost) }}</template>
               <template v-if="day.record.rating"> · {{ '⭐'.repeat(day.record.rating) }}</template>
               <template v-if="day.record.companions"> · {{ day.record.companions }}</template>
             </span>
@@ -452,7 +452,7 @@ const statCards = computed(() => {
     { key: 'cities', label: '到访城市', value: `${o.city_count} 个`, bg: '#fff7e6', color: '#fa8c16' },
     { key: 'provinces', label: '到访省份', value: `${o.province_count} 个`, bg: '#f6ffed', color: '#52c41a' },
     { key: 'days', label: '累计天数', value: o.total_days ? `${o.total_days} 天` : '-', bg: '#fff0f6', color: '#eb2f96' },
-    { key: 'cost', label: '总花费', value: o.total_cost ? `¥${o.total_cost.toLocaleString()}` : '-', bg: '#fef3e8', color: '#e67e22' },
+    { key: 'cost', label: '总花费', value: o.total_cost ? maskAmount(o.total_cost) : '-', bg: '#fef3e8', color: '#e67e22' },
     { key: 'rating', label: '平均满意度', value: o.avg_rating ? `${o.avg_rating} ⭐` : '-', bg: '#f3e8ff', color: '#9333ea' },
   ]
 })

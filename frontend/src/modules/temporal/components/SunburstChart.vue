@@ -1,5 +1,9 @@
 <template>
-  <div ref="chartRef" class="sunburst-chart" :style="{ height: height + 'px' }"></div>
+  <div class="sunburst-wrap" :style="{ height: height + 'px' }">
+    <div ref="chartRef" class="sunburst-chart"></div>
+    <!-- 空数据（该年份无记录）：清空画布并给明确提示，不残留上一次的图形 -->
+    <div v-if="isEmpty" class="chart-empty">{{ emptyText }}</div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -11,7 +15,7 @@
  *   的文字允许溢出到自己扇区之外、落在相邻扇区的空白处，不引线、不出圆
  * - L3 任务名**恒在圆外**：引线 + 左右分侧 + 垂直避让，避免文字互相堆叠
  */
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import type { SunburstData } from '../types/temporalTypes'
 import { ACTIVITY_TYPE_COLOR_MAP, ATTRIBUTION_COLOR_MAP } from '../types/temporalTypes'
@@ -19,10 +23,14 @@ import { ACTIVITY_TYPE_COLOR_MAP, ATTRIBUTION_COLOR_MAP } from '../types/tempora
 const props = withDefaults(defineProps<{
   data: SunburstData | null
   height?: number
-}>(), { height: 400 })
+  emptyText?: string
+}>(), { height: 400, emptyText: '暂无数据' })
 
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
+
+/** 数据为空（如选到没有记录的年份）——必须清图，否则会残留上一次的环 */
+const isEmpty = computed(() => !(props.data?.groups?.length))
 
 const FONT = '-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif'
 const FALLBACK_COLOR = '#94A3B8'
@@ -289,6 +297,8 @@ function buildOption(W: number, H: number): any {
 function render() {
   if (!chartRef.value) return
   if (!chart) chart = echarts.init(chartRef.value)
+  // 空数据：清空画布（否则 buildOption 里 total 的 `|| 1` 兜底会画出一整圈灰色占位环）
+  if (isEmpty.value) { chart.clear(); return }
   const W = chart.getWidth(), H = chart.getHeight()
   if (!W || !H) return
   chart.setOption(buildOption(W, H), true)
@@ -321,5 +331,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.sunburst-chart { width: 100%; }
+.sunburst-wrap {
+  position: relative;
+  width: 100%;
+  .sunburst-chart { width: 100%; height: 100%; }
+  .chart-empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #9CA3AF; font-size: 13px; pointer-events: none;
+  }
+}
 </style>

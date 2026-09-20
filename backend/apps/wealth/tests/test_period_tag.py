@@ -19,7 +19,7 @@ class TestPeriodTag:
         from rest_framework.test import APIClient
         c = APIClient()
         self._mk(period_tag='为自己')
-        self._mk(period_tag='外部')
+        self._mk(period_tag='为别人')
         b = self._mk()  # 未标记（None）
         b.period_tag = None
         b.save()

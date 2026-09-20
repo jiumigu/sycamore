@@ -5,7 +5,7 @@
         <el-icon><Flag /></el-icon>
         里程碑 ({{ completedCount }}/{{ milestones.length }})
       </span>
-      <span v-if="uniformReward > 0" class="uniform-reward">💰 每项奖励 ¥{{ uniformReward }}</span>
+      <span v-if="uniformReward > 0" class="uniform-reward">💰 每项奖励 ¥{{ formatAmount(uniformReward) }}</span>
       <el-button text size="small" type="primary" @click="$emit('add')">
         <el-icon><Plus /></el-icon> 添加
       </el-button>
@@ -39,6 +39,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatAmount } from '@/shared/utils/format'
+
 import { Flag, Plus } from '@element-plus/icons-vue'
 import type { Milestone } from '../types/goalTypes'
 

@@ -17,7 +17,7 @@
         </el-button>
         <el-button @click="switchToCashflow">
           <el-icon><Money /></el-icon>
-          现金盘点
+          资产盘点
         </el-button>
         <el-button @click="handleManualCreate">
           <el-icon><Edit /></el-icon>

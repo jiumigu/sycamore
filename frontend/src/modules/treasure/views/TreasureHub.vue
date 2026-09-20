@@ -143,32 +143,32 @@
 
           <div v-if="viewingItem.record_type === '好'" class="detail-section">
             <div class="detail-label">👍 为什么好</div>
-            <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.why_good }}</div>
+            <div class="detail-text" style="white-space: pre-wrap;">{{ maskFreeText(viewingItem.why_good) }}</div>
           </div>
 
           <template v-if="viewingItem.record_type === '歹'">
             <div class="detail-section">
               <div class="detail-label bad">👎 踩坑原因</div>
-              <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.avoid_reason }}</div>
+              <div class="detail-text" style="white-space: pre-wrap;">{{ maskFreeText(viewingItem.avoid_reason) }}</div>
             </div>
             <div v-if="viewingItem.consequence" class="detail-section">
               <div class="detail-label bad">😵 实际后果</div>
-              <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.consequence }}</div>
+              <div class="detail-text" style="white-space: pre-wrap;">{{ maskFreeText(viewingItem.consequence) }}</div>
             </div>
           </template>
 
           <div v-if="viewingItem.scene" class="detail-section">
             <div class="detail-label">📍 场景</div>
-            <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.scene }}</div>
+            <div class="detail-text" style="white-space: pre-wrap;">{{ maskText(viewingItem.scene) }}</div>
           </div>
 
           <div v-if="viewingItem.record_type === '好' && viewingItem.where_to_find" class="detail-section">
             <div class="detail-label">📍 在哪能找到</div>
-            <div class="detail-text" style="white-space: pre-wrap;">{{ viewingItem.where_to_find }}</div>
+            <div class="detail-text" style="white-space: pre-wrap;">{{ maskText(viewingItem.where_to_find) }}</div>
           </div>
 
           <div v-if="viewingItem.tags" class="detail-tags">
-            <el-tag v-for="tag in getTags(viewingItem.tags)" :key="tag" size="small" type="info">{{ tag }}</el-tag>
+            <el-tag v-for="tag in (isActive ? [MASK_TEXT] : getTags(viewingItem.tags))" :key="tag" size="small" type="info">{{ tag }}</el-tag>
           </div>
 
           <div class="detail-footer">
@@ -191,8 +191,11 @@ import { useTreasureStore } from '../stores/treasureStore'
 import { CATEGORY_OPTIONS, RECORD_TYPE_OPTIONS } from '../types/treasureTypes'
 import type { GoodThing } from '../types/treasureTypes'
 import TreasureCard from '../components/TreasureCard.vue'
+import { usePrivacyMask } from '@/shared/composables/usePrivacyMask'
+import { MASK_TEXT } from '@/shared/utils/privacy'
 
 const store = useTreasureStore()
+const { isActive, maskText, maskFreeText } = usePrivacyMask()
 
 const filterType = ref('')
 const filterCategory = ref('')
@@ -316,7 +319,7 @@ async function handleSubmit() {
 
 async function handleDelete(thing: GoodThing) {
   try {
-    await ElMessageBox.confirm(`确定删除"${thing.name}"？`, '提示', { type: 'warning' })
+    await ElMessageBox.confirm(`确定删除"${maskText(thing.name)}"？`, '提示', { type: 'warning' })
     await store.deleteThing(thing.id)
     ElMessage.success('已删除')
     fetchData()

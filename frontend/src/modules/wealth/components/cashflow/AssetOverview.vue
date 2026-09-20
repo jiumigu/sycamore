@@ -7,13 +7,13 @@
       </div>
       <div class="asset-overview__summary">
         <div class="asset-overview__total">
-          <span class="asset-overview__total-label">总资产</span>
-          <span class="asset-overview__total-value">￥{{ fmt(overview.summary.total) }}</span>
+          <span class="asset-overview__total-label">净资产</span>
+          <span class="asset-overview__total-value">¥{{ fmt(overview.summary.net_worth) }}</span>
         </div>
         <div class="asset-overview__items">
           <div class="asset-overview__item" v-for="item in assetItems" :key="item.key">
             <span class="asset-overview__item-label">{{ item.label }}</span>
-            <span class="asset-overview__item-value">￥{{ fmt(item.value) }}</span>
+            <span class="asset-overview__item-value">¥{{ fmt(item.value) }}</span>
           </div>
         </div>
       </div>
@@ -42,12 +42,13 @@ let chart: echarts.ECharts | null = null
 
 const assetItems = computed(() => {
   if (!props.overview) return []
+  const s = props.overview.summary
   return [
-    { key: 'flow_total', label: '总现金流', value: props.overview.summary.flow_total },
+    { key: 'financial_assets', label: '金融资产', value: s.financial_assets },
+    { key: 'flow_total', label: '流动资金', value: s.flow_total },
     { key: 'accumulationfund', label: '公积金', value: props.overview.accounts.accumulationfund },
-    { key: 'realnum', label: '真正在手', value: props.overview.summary.realnum },
-    { key: 'borrow', label: '负债', value: props.overview.summary.borrow },
-    { key: 'lend', label: '借出', value: props.overview.summary.lend },
+    { key: 'lend', label: '应收借出', value: s.lend },
+    { key: 'borrow', label: '负债', value: s.borrow },
   ]
 })
 

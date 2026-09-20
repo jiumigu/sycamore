@@ -1,6 +1,6 @@
 import request from '@/shared/utils/request'
 import type {
-  CompletenessData, SunburstData, WeeklyStructure,
+  CompletenessData, MetaLedgerData, SunburstData, WeeklyStructure,
 } from '../types/temporalTypes'
 
 // ─── 每日记录 (OneDay) ───
@@ -136,6 +136,11 @@ export function getOnedayDailyDetail(params: { date: string }) {
 
 export function getTaskMeta(params?: Record<string, unknown>) {
   return request({ url: '/temporal/tasks/meta/', method: 'get', params })
+}
+
+/** 分类台账：全量 task_name + 时长/次数/最近使用 + 有效归因及来源 */
+export function getMetaLedger(params?: Record<string, unknown>) {
+  return request<MetaLedgerData>({ url: '/temporal/tasks/meta_ledger/', method: 'get', params })
 }
 
 export function getUnclassified(params?: Record<string, unknown>) {

@@ -13,24 +13,24 @@
       </div>
     </div>
 
-    <!-- 行：年龄 × 周 -->
+    <!-- 行：年龄 × 周（仅渲染 DISPLAY_START_AGE ~ DISPLAY_END_AGE） -->
     <div class="heatmap__body">
-      <template v-for="age in 61" :key="'r' + age">
+      <template v-for="age in shownAges" :key="'r' + age">
         <div class="heatmap__row-label">
-          {{ START_AGE + age - 1 }}岁
+          {{ age }}岁
         </div>
         <div
           v-for="week in 52"
           :key="'c' + age + '-' + week"
           class="heatmap__cell"
-          :class="cellClasses(globalIndex(age - 1, week))"
+          :class="cellClasses(globalIndex(age, week))"
           :style="{
             width: cellSize + 'px',
             height: cellSize + 'px',
-            backgroundColor: cellColor(globalIndex(age - 1, week)),
+            backgroundColor: cellColor(globalIndex(age, week)),
           }"
-          @click="handleClick(globalIndex(age - 1, week))"
-          @mouseenter="handleHover(globalIndex(age - 1, week))"
+          @click="handleClick(globalIndex(age, week))"
+          @mouseenter="handleHover(globalIndex(age, week))"
           @mouseleave="handleLeave"
         />
       </template>
@@ -43,17 +43,17 @@
       :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
     >
       <div class="heatmap__tooltip-title">
-        ￥{{ tooltip.data?.age_year }}岁 · 第{{ tooltip.data?.week_number }}周
+        {{ tooltip.data?.age_year }}岁 · 第{{ tooltip.data?.week_number }}周
       </div>
       <div class="heatmap__tooltip-row">
-        <span>收入</span><span class="heatmap__tooltip-income">+￥{{ fmt(tooltip.data?.income) }}</span>
+        <span>收入</span><span class="heatmap__tooltip-income">¥+{{ fmt(tooltip.data?.income) }}</span>
       </div>
       <div class="heatmap__tooltip-row">
-        <span>支出</span><span class="heatmap__tooltip-expense">-￥{{ fmt(tooltip.data?.expense) }}</span>
+        <span>支出</span><span class="heatmap__tooltip-expense">¥-{{ fmt(tooltip.data?.expense) }}</span>
       </div>
       <div class="heatmap__tooltip-row">
         <span>净结余</span>
-        <span :class="netColorClass(tooltip.data?.net)">￥{{ fmt(tooltip.data?.net) }}</span>
+        <span :class="netColorClass(tooltip.data?.net)">¥{{ fmt(tooltip.data?.net) }}</span>
       </div>
       <div v-if="isCovered(tooltip.index ?? -1)" class="heatmap__tooltip-coverage">
         ✅ 现金流覆盖
@@ -80,10 +80,29 @@ const emit = defineEmits<{
 
 const store = useWealthStore()
 
-const START_AGE = 18
+/**
+ * 显示年龄窗口 —— 仅控制**渲染哪些行**，不改变任何数据。
+ * 19 岁：18 岁那一年无账单、整行零值，显示无意义；
+ * 60 岁：60 岁之后不再维护这套体系，显示太长反而干扰当下。
+ */
+const DISPLAY_START_AGE = 19
+const DISPLAY_END_AGE = 60
 
-function globalIndex(ageOffset: number, week: number): number {
-  return ageOffset * 52 + (week - 1)
+/**
+ * 后端索引原点固定为 18 岁（global_week_index = (age - 18) * 52 + week - 1），
+ * 周历表 3172 行也是按 18~78 岁生成的，**改这个值会让全表索引错位，勿动**。
+ */
+const BASE_AGE = 18
+
+/** 实际渲染的年龄列表 */
+const shownAges = Array.from(
+  { length: DISPLAY_END_AGE - DISPLAY_START_AGE + 1 },
+  (_, i) => DISPLAY_START_AGE + i,
+)
+
+/** 年龄 + 周 → 后端全局周索引 */
+function globalIndex(age: number, week: number): number {
+  return (age - BASE_AGE) * 52 + (week - 1)
 }
 
 /** 获取周历条目 */

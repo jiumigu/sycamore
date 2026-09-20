@@ -157,5 +157,3 @@ export function createElectricityRecord(data: Record<string, unknown>) {
 export function deleteElectricityRecord(id: number) {
   return request({ url: `/toolkit/electricity-records/${id}/`, method: 'delete' })
 }
-
-// ────────── 标签管理器 ──────────

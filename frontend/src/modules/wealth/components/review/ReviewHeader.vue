@@ -22,7 +22,7 @@
               <div class="stat-info">
                 <div class="stat-value" :class="card.valueClass">
                   <template v-if="card.unit === '%'">{{ card.displayValue }}</template>
-                  <template v-else>￥{{ fmt(card.value) }}</template>
+                  <template v-else>¥{{ fmt(card.value) }}</template>
                 </div>
                 <div class="stat-label">
                   {{ card.label }}

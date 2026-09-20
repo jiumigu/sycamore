@@ -76,26 +76,26 @@
           <el-col :span="12" v-if="relationship.they_give_me">
             <div class="give-card give-in">
               <div class="give-title">← 他能给我</div>
-              <div class="give-content">{{ privacyStore.privacyMode ? '***' : relationship.they_give_me }}</div>
+              <div class="give-content">{{ maskFreeText(relationship.they_give_me, privacyStore.privacyMode) }}</div>
             </div>
           </el-col>
           <el-col :span="12" v-if="relationship.i_give_them">
             <div class="give-card give-out">
               <div class="give-title">→ 我能给他</div>
-              <div class="give-content">{{ privacyStore.privacyMode ? '***' : relationship.i_give_them }}</div>
+              <div class="give-content">{{ maskFreeText(relationship.i_give_them, privacyStore.privacyMode) }}</div>
             </div>
           </el-col>
         </el-row>
 
         <div class="info-section" v-if="relationship.notes">
           <div class="info-section-label">📝 备注</div>
-          <div class="info-section-content">{{ privacyStore.privacyMode ? '***' : relationship.notes }}</div>
+          <div class="info-section-content">{{ maskFreeText(relationship.notes, privacyStore.privacyMode) }}</div>
         </div>
 
         <div class="info-section" v-if="relationship.tags">
           <div class="info-section-label">🏷️ 标签</div>
           <div class="tags-wrap">
-            <el-tag v-for="tag in tagList" :key="tag" size="small" round>{{ privacyStore.privacyMode ? '***' : tag }}</el-tag>
+            <el-tag v-for="tag in tagList" :key="tag" size="small" round>{{ maskTags(tag, privacyStore.privacyMode) }}</el-tag>
           </div>
         </div>
 
@@ -300,7 +300,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Plus, Edit, Delete, Promotion } from '@element-plus/icons-vue'
-import { maskName, maskLocation, maskText } from '@/shared/utils/privacy'
+import { maskName, maskLocation, maskText, maskFreeText, maskTags } from '@/shared/utils/privacy'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
 import { QUALITY_CONFIG, STATUS_OPTIONS, METHOD_OPTIONS, SHIFT_OPTIONS, RELATION_TYPE_LABELS, RELATION_TYPE_TAG, energyLabel } from '../types/relationshipTypes'
 import type { Relationship, Interaction } from '../types/relationshipTypes'

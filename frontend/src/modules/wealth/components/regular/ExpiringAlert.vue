@@ -17,7 +17,7 @@
           <span class="alert-dot" :style="{ background: statusConfig(item.status).color }"></span>
           <div>
             <span class="alert-bank">{{ item.bankinfo || '未知银行' }}</span>
-            <span class="alert-amount">{{ formatMoney(item.value) }}</span>
+            <span class="alert-amount">{{ maskAmount(item.value, privacyStore.privacyMode) }}</span>
           </div>
         </div>
         <div class="alert-right">
@@ -37,6 +37,10 @@
 import { computed } from 'vue'
 import type { ExpiringItem } from '../../types/wealthTypes'
 import { EXPIRING_STATUS_CONFIG } from '../../types/wealthTypes'
+import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
+import { maskAmount } from '@/shared/utils/privacy'
+
+const privacyStore = usePrivacyStore()
 
 const props = defineProps<{
   items: ExpiringItem[]
@@ -47,13 +51,6 @@ defineEmits<{
 }>()
 
 const expiredCount = computed(() => props.items.filter(i => i.status === 'expired').length)
-
-function formatMoney(v: number | null | undefined): string {
-  if (v == null) return '¥0'
-  const n = Math.round(v)
-  if (n >= 10000) return '¥' + (n / 10000).toFixed(1) + '万'
-  return '¥' + n.toLocaleString()
-}
 
 function statusConfig(status: string): { label: string; color: string; bg: string } {
   return EXPIRING_STATUS_CONFIG[status] || EXPIRING_STATUS_CONFIG.normal

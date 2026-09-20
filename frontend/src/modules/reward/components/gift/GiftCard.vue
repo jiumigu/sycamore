@@ -25,7 +25,7 @@
       <h3 class="gift-name" :title="gift.name">{{ gift.name }}</h3>
       <div class="gift-price">
         <span class="price-label">参考价格</span>
-        <span class="price-value">¥{{ formatMoney(gift.expected_reward) }}</span>
+        <span class="price-value">¥{{ formatAmount(gift.expected_reward) }}</span>
       </div>
 
       <!-- 进度条 -->
@@ -43,7 +43,7 @@
           :show-text="false"
         />
         <div v-if="gift.status === 'pending' || gift.status === 'waiting'" class="needed">
-          还差 ¥{{ formatMoney(gift.needed) }}
+          还差 ¥{{ formatAmount(gift.needed) }}
         </div>
       </div>
 
@@ -113,12 +113,6 @@ defineEmits<{
   delete: [gift: GiftList]
 }>()
 
-function formatMoney(v: number | string | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
-  const n = typeof v === 'string' ? parseFloat(v) : v
-  return isNaN(n) ? '0.00' : n.toFixed(2)
-}
-
 const categoryColors: Record<string, string> = {
   physical: '#409EFF',
   experience: '#E6A23C',
@@ -147,6 +141,7 @@ const progressColor = computed(() => {
 })
 
 import { computed } from 'vue'
+import { formatAmount } from '@/shared/utils/format'
 
 function onImageError(e: Event) {
   const el = e.target as HTMLImageElement

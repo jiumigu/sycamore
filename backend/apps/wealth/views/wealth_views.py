@@ -13,10 +13,13 @@ from rest_framework.views import APIView
 from django.db.models import Case, Count, DateField, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast
 
+# 账单侧赎回归属词表单一真源（与时间侧 L1 归因**同源不同轴**，见 constants 注释）
+from apps.temporal.constants import PERIOD_TAG_CHOICES
+
 from ..models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthBillList
 from ..serializers import (
     WeekCalendarSerializer, CurrentScenarioSerializer, ScenarioHistorySerializer,
-    CoverageInputSerializer, LifeSummarySerializer,
+    CoverageInputSerializer, BudgetInputSerializer, LifeSummarySerializer,
     MonthlyCalendarSerializer, DailyDetailSerializer, MonthlySummarySerializer,
     BillCreateSerializer, BillSerializer,
     MonthlyReviewSerializer, TrendDataSerializer, CategoryRankingSerializer,
@@ -26,9 +29,13 @@ from ..serializers import (
     RegularListSerializer, RegularStatsSerializer, RegularFormSerializer,
     MatureProcessSerializer, ExpiringItemSerializer,
 )
+from ..constants import (
+    WINDOW_START_AGE, WINDOW_END_AGE, WINDOW_WEEKS,
+    WINDOW_START_INDEX, WINDOW_END_INDEX,
+)
 from ..services.calendar_init import init_week_calendar_for_user, update_lived_status
 from ..services.week_aggregator import aggregate_weekly_net_income, get_net_level
-from ..services.coverage_calculator import calculate_coverage
+from ..services.coverage_calculator import calculate_coverage, calculate_daily_budget
 from ..services.monthly_aggregator import (
     aggregate_monthly_days, get_daily_detail, calculate_monthly_summary,
 )
@@ -170,6 +177,7 @@ class CalculateCoverageView(CreateAPIView):
             cash=float(data['current_cash']),
             daily_budget=float(data['daily_budget']),
             daily_interest_rate=daily_interest_rate,
+            max_age=WINDOW_END_AGE,  # 推演只算到计量窗口末端（60 岁）
         )
 
         # 保存到当前推演
@@ -202,6 +210,44 @@ class CalculateCoverageView(CreateAPIView):
             'end_age': end_age,
             'end_week': end_week,
             'daily_interest_rate': daily_interest_rate,
+            # 计量窗口信息：前端据此显示「覆盖至 60 岁」而不是一个会跨出窗口的年数
+            'window_start_age': WINDOW_START_AGE,
+            'window_end_age': WINDOW_END_AGE,
+            'window_weeks': WINDOW_WEEKS,
+            'reached_window_end': end_age is None,
+        })
+
+
+class CalculateBudgetView(APIView):
+    """现金流反算：给定本金与目标天数 → 每日可提取额。
+
+    与正算 `CalculateCoverageView` 的关系是**互为反函数**，共用
+    `calculate_daily_budget` / `calculate_coverage` 同一套现金流假设。
+
+    🔴 与正算的关键差异：正算是「用户点一次按钮」的低频动作，会落
+    `WealthCurrentScenario` + `WealthScenarioHistory`；反算则由前端**输入即算**
+    高频触发（调「撑几年」时数字跟着动），故**必须是纯试算、零写库**。
+    违反这条会把历史表灌满无意义的中间态记录。
+    """
+
+    def post(self, request):
+        serializer = BudgetInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        cash = float(data['current_cash'])
+        days = float(data['target_days'])
+        daily_interest_rate = float(data.get('daily_interest_rate', 0))
+
+        daily_budget = calculate_daily_budget(
+            cash=cash, days=days, daily_interest_rate=daily_interest_rate,
+        )
+
+        return Response({
+            'daily_budget': round(daily_budget, 2),
+            'target_days': days,
+            'current_cash': cash,
+            'daily_interest_rate': daily_interest_rate,
         })
 
 
@@ -212,13 +258,21 @@ class LifeSummaryView(APIView):
         user_id = request.query_params.get('user_id', 1)
         aggregated = aggregate_weekly_net_income(int(user_id))
 
-        total_income = sum(v['income'] for v in aggregated.values())
-        total_expense = sum(v['expense'] for v in aggregated.values())
+        # 只在**计量窗口**（19–60 岁）内统计：窗口外的 18 岁与 61–78 岁两段
+        # 本就无记录，收支总额不受影响；但「已度过周数」这类计数型指标会随
+        # 口径变化（18 岁起算 713 周 → 19 岁起算 661 周），结余周占比的分母同此。
+        window = {
+            idx: v for idx, v in aggregated.items()
+            if WINDOW_START_INDEX <= idx <= WINDOW_END_INDEX
+        }
+
+        total_income = sum(v['income'] for v in window.values())
+        total_expense = sum(v['expense'] for v in window.values())
         total_net = total_income - total_expense
 
-        lived_weeks = sum(1 for v in aggregated.values())
-        surplus_weeks = sum(1 for v in aggregated.values() if v['net'] > 0)
-        deficit_weeks = sum(1 for v in aggregated.values() if v['net'] < 0)
+        lived_weeks = len(window)
+        surplus_weeks = sum(1 for v in window.values() if v['net'] > 0)
+        deficit_weeks = sum(1 for v in window.values() if v['net'] < 0)
 
         surplus_rate = round(surplus_weeks / lived_weeks * 100, 1) if lived_weeks > 0 else 0.0
 
@@ -230,6 +284,9 @@ class LifeSummaryView(APIView):
             'lived_weeks': lived_weeks,
             'surplus_weeks': surplus_weeks,
             'deficit_weeks': deficit_weeks,
+            'window_start_age': WINDOW_START_AGE,
+            'window_end_age': WINDOW_END_AGE,
+            'window_weeks': WINDOW_WEEKS,
         }
         serializer = LifeSummarySerializer(data)
         return Response(serializer.data)
@@ -964,13 +1021,16 @@ class BillViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='batch-period-tag')
     def batch_period_tag(self, request):
-        """批量标记赎回归属：POST {ids:[...], period_tag:'为自己'|'过渡'|'外部'|'不计入'}（收入/支出均生效）"""
+        """批量标记赎回归属：POST {ids:[...], period_tag:'为自己'|'过渡'|'为别人'|'不计入'}（收入/支出均生效）"""
         ids = request.data.get('ids') or []
         period_tag = (request.data.get('period_tag') or '').strip()
         if not isinstance(ids, list) or not ids:
             return Response({'error': 'ids 必填（数组）'}, status=status.HTTP_400_BAD_REQUEST)
-        if period_tag not in {'为自己', '过渡', '外部', '不计入'}:
-            return Response({'error': 'period_tag 仅支持 为自己/过渡/外部/不计入'}, status=status.HTTP_400_BAD_REQUEST)
+        if period_tag not in PERIOD_TAG_CHOICES:
+            return Response(
+                {'error': 'period_tag 仅支持 ' + '/'.join(PERIOD_TAG_CHOICES)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         # 与 batch-necessity 不同：此处不做 transaction_type='支出' 限制，收入也要标
         updated = WealthBillList.objects.filter(
             user_id=1, id__in=ids,
@@ -979,7 +1039,7 @@ class BillViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='period_tag_stats')
     def period_tag_stats(self, request):
-        """赎回归属小结：按 为自己/过渡/外部/不计入/未标记 分组的笔数与金额（收入支出合计）"""
+        """赎回归属小结：按 为自己/过渡/为别人/不计入/未标记 分组的笔数与金额（收入支出合计）"""
         params = self.request.query_params
         qs = WealthBillList.objects.filter(user_id=1)
         date_from = params.get('date_from')
@@ -996,7 +1056,7 @@ class BillViewSet(viewsets.ModelViewSet):
             qs.values('period_tag')
             .annotate(cnt=Count('id'), total=Sum('amount'))
         )
-        bucket = {n: {'count': 0, 'total': 0.0} for n in ('为自己', '过渡', '外部', '不计入', 'unmarked')}
+        bucket = {n: {'count': 0, 'total': 0.0} for n in (*PERIOD_TAG_CHOICES, 'unmarked')}
         for r in rows:
             n = r['period_tag'] or ''
             key = n if n in bucket else 'unmarked'

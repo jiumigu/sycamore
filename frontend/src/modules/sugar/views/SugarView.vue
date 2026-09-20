@@ -29,7 +29,7 @@
           <div class="stat-content">
             <div class="stat-icon" style="background: #D1FAE5"><span class="icon-text">💰</span></div>
             <div class="stat-info">
-              <div class="stat-value" style="color: #059669">¥{{ formatMoney(poolBalance) }}</div>
+              <div class="stat-value" style="color: #059669">¥{{ formatAmount(poolBalance) }}</div>
               <div class="stat-label">奖励池余额</div>
             </div>
           </div>
@@ -85,7 +85,7 @@
           </el-select>
         </div>
         <div class="filter-right">
-          <span class="total-reward">累计奖励+¥{{ formatMoney(stats.totalReward) }}</span>
+          <span class="total-reward">累计奖励+¥{{ formatAmount(stats.totalReward) }}</span>
         </div>
       </div>
     </el-card>
@@ -224,6 +224,7 @@ import type { SugarRecord } from '../types/sugarTypes'
 import SugarCard from '../components/SugarCard.vue'
 import { getRewardPool } from '@/modules/reward/api/rewardApi'
 import { getPresetByType } from '@/shared/api/coreApi'
+import { formatAmount } from '@/shared/utils/format'
 
 const store = useSugarStore()
 
@@ -395,7 +396,7 @@ async function handleSubmit() {
 async function handleDelete(record: SugarRecord) {
   try {
     await ElMessageBox.confirm(
-      `确定删除"${record.title}"吗？将扣回 ${record.reward_amount} 元奖励。`,
+      `确定删除"${record.title}"吗？将扣回 ${formatAmount(record.reward_amount)} 元奖励。`,
       '提示',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
@@ -435,12 +436,6 @@ onMounted(() => {
   refreshAll()
   loadPresetTags()
 })
-
-function formatMoney(v: number | string | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
-  const n = typeof v === 'string' ? parseFloat(v) : v
-  return isNaN(n) ? '0.00' : n.toFixed(2)
-}
 </script>
 
 <style scoped lang="scss">

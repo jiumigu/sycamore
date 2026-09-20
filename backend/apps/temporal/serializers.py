@@ -75,6 +75,34 @@ class TemporalTaskSerializer(serializers.ModelSerializer):
         m = resolve_task_meta([obj.task_name]).get(obj.task_name)
         return bool(m and m['is_unclassified'])
 
+    def validate(self, attrs):
+        """v3.58.6 手工新增/编辑的口径：时长不再由调用方指定，一律由起止时间算。
+
+        - 起止都给 → `duration_hours = 结束 − 开始`，并派生 `year/mon/day/week/quarter`
+          （日历字段是 read_only，若不在这里补，手工新增的行会落成 NULL，
+          于是年份筛选、月度趋势、完整度分母统统漏掉它）。
+        - 只给开始时间 → 只派生日历字段，**时长不猜**（沿用调用方给的值 / 编辑时保持原值）。
+        - 结束 ≤ 开始 → 报错。跨零点请把结束时间选到次日（与历史数据存法一致）。
+        """
+        from .services import build_time_fields
+
+        start = attrs.get('start_time', getattr(self.instance, 'start_time', None))
+        end = attrs.get('end_time', getattr(self.instance, 'end_time', None))
+
+        if start and end:
+            if end <= start:
+                raise serializers.ValidationError(
+                    {'end_time': '结束时间必须晚于开始时间（跨零点请把结束时间选到次日）'})
+            attrs.update(build_time_fields(start, end))
+        elif start:
+            attrs.update(build_time_fields(start))
+
+        # task_type 是历史列（CSV 导入里存的就是 task_name 本身）；手工新增保持同一约定，
+        # 免得同一列出现「有些行是任务名、有些行是 '其他'」两种含义。
+        if self.instance is None and not attrs.get('task_type'):
+            attrs['task_type'] = attrs.get('task_name') or '其他'
+        return attrs
+
 
 class TemporalTaskImportSerializer(serializers.Serializer):
     """CSV 导入序列化器"""

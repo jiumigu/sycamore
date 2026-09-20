@@ -1,41 +1,69 @@
-/** 隐私脱敏 composable */
+/**
+ * 隐私脱敏 composable —— 自动注入 privacyStore 状态
+ *
+ * 规则全部委托 `shared/utils/privacy.ts`（唯一真源），本文件只负责把
+ * `privacyStore.privacyMode` 喂进去，不再自带任何掩码逻辑。
+ */
 
 import { computed } from 'vue'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
+import {
+  maskName as maskNamePure,
+  maskTags as maskTagsPure,
+  maskLocation as maskLocationPure,
+  maskText as maskTextPure,
+  maskFreeText as maskFreeTextPure,
+  maskRate as maskRatePure,
+  maskAmountText,
+  maskAmountByType as maskAmountByTypePure,
+} from '@/shared/utils/privacy'
 
 export function usePrivacyMask() {
   const store = usePrivacyStore()
   const isActive = computed(() => store.privacyMode)
 
+  /** 已格式化金额串的掩码：'1,234.50' → '*,***.**'（不含 ¥） */
   function maskAmount(value: number | string | null | undefined): string {
-    if (!isActive.value || value == null || value === '') return String(value ?? '')
-    const str = String(value)
-    if (str.length <= 2) return '**'
-    return str[0] + '*'.repeat(str.length - 2) + str[str.length - 1]
+    return maskAmountText(value, isActive.value)
   }
 
   function maskName(name: string | null | undefined): string {
-    if (!isActive.value || !name) return name ?? ''
-    if (name.length <= 1) return '*'
-    return name[0] + '**'
+    return maskNamePure(name, isActive.value)
+  }
+
+  function maskTags(tags: string | string[] | null | undefined): string {
+    return maskTagsPure(tags, isActive.value)
   }
 
   function maskLocation(location: string | null | undefined): string {
-    if (!isActive.value || !location) return location ?? ''
-    if (location.length <= 1) return '*'
-    return location[0] + '*'
+    return maskLocationPure(location, isActive.value)
   }
 
   function maskText(text: string | null | undefined): string {
-    if (!isActive.value || !text) return text ?? ''
-    if (text.length <= 1) return '*'
-    return text[0] + '*'.repeat(Math.min(text.length - 1, 4))
+    return maskTextPure(text, isActive.value)
   }
 
-  function unmasked<T>(value: T): T {
-    if (!isActive.value) return value
-    return value
+  function maskFreeText(text: string | null | undefined): string {
+    return maskFreeTextPure(text, isActive.value)
   }
 
-  return { isActive, maskAmount, maskName, maskLocation, maskText, unmasked }
+  function maskRate(rate: number | string | null | undefined): string {
+    return maskRatePure(rate, isActive.value)
+  }
+
+  function maskAmountByType(value: number | string | null | undefined, type: string): string {
+    return maskAmountByTypePure(value, type, isActive.value)
+  }
+
+  return {
+    isActive,
+    maskAmount,
+    maskName,
+    maskTags,
+    maskLocation,
+    maskText,
+    maskFreeText,
+    maskRate,
+    maskAmountByType,
+  }
 }

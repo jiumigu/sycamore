@@ -10,15 +10,15 @@
     <el-table :data="items" v-loading="loading" stripe size="small" style="width: 100%" @row-click="handleRowClick">
       <el-table-column prop="yearmon" label="年月" min-width="140" />
       <el-table-column prop="income" label="收入" min-width="130" align="right">
-        <template #default="{ row }"><span class="money-value">￥{{ fmt(row.income) }}</span></template>
+        <template #default="{ row }"><span class="money-value">¥{{ fmt(row.income) }}</span></template>
       </el-table-column>
       <el-table-column prop="expense" label="支出" min-width="130" align="right">
-        <template #default="{ row }"><span class="money-value">￥{{ fmt(row.expense) }}</span></template>
+        <template #default="{ row }"><span class="money-value">¥{{ fmt(row.expense) }}</span></template>
       </el-table-column>
       <el-table-column prop="balance" label="结余" min-width="130" align="right">
         <template #default="{ row }">
           <span :class="['money-value', row.balance >= 0 ? 'text-income' : 'text-expense']">
-            {{ row.balance >= 0 ? '￥' : '-￥' }}{{ fmt(Math.abs(row.balance)) }}
+            {{ formatSignedAmount(row.balance) }}
           </span>
         </template>
       </el-table-column>
@@ -26,7 +26,7 @@
         <template #default="{ row }">{{ row.savings_rate }}%</template>
       </el-table-column>
       <el-table-column prop="deposit" label="存款余额" min-width="130" align="right">
-        <template #default="{ row }"><span class="money-value">￥{{ fmt(row.deposit) }}</span></template>
+        <template #default="{ row }"><span class="money-value">¥{{ fmt(row.deposit) }}</span></template>
       </el-table-column>
       <el-table-column label="操作" width="80" fixed="right">
         <template #default="{ row }">
@@ -54,7 +54,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { formatAmount } from '@/shared/utils/format'
+import { formatAmount, formatSignedAmount } from '@/shared/utils/format'
 import type { MonthlyListItem } from '../../types/wealthTypes'
 
 const props = withDefaults(defineProps<{

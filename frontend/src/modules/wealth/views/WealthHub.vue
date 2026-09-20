@@ -40,7 +40,7 @@ const tabs = [
   { name: 'wealth-monthly', label: '月度日历', icon: Calendar },
   { name: 'wealth-review', label: '月度复盘', icon: DataAnalysis },
   { name: 'wealth-regular', label: '定期存款', icon: Timer },
-  { name: 'wealth-cashflow', label: '现金盘点', icon: Money },
+  { name: 'wealth-cashflow', label: '资产盘点', icon: Money },
   { name: 'wealth-contrib', label: '贡献图', icon: TrendCharts },
 ]
 

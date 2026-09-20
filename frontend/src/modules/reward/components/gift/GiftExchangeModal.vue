@@ -11,7 +11,7 @@
         <div class="summary-icon">{{ categoryIcon }}</div>
         <div class="summary-info">
           <h3>{{ gift.name }}</h3>
-          <p class="summary-price">参考价格 ¥{{ formatMoney(gift.expected_reward) }}</p>
+          <p class="summary-price">参考价格 ¥{{ formatAmount(gift.expected_reward) }}</p>
         </div>
       </div>
 
@@ -20,12 +20,12 @@
       <div class="balance-info">
         <div class="info-row">
           <span>当前奖励池余额</span>
-          <span class="balance-value">¥{{ formatMoney(poolBalance) }}</span>
+          <span class="balance-value">¥{{ formatAmount(poolBalance) }}</span>
         </div>
         <div class="info-row">
           <span>兑换后余额</span>
           <span class="balance-value after" :class="{ insufficient: remaining < 0 }">
-            ¥{{ formatMoney(remaining) }}
+            ¥{{ formatAmount(remaining) }}
           </span>
         </div>
       </div>
@@ -52,7 +52,7 @@
             clearable
             style="width: 100%"
           />
-          <div class="form-tip">留空则按参考价格 {{ formatMoney(gift.expected_reward) }} 扣除</div>
+          <div class="form-tip">留空则按参考价格 {{ formatAmount(gift.expected_reward) }} 扣除</div>
         </el-form-item>
       </el-form>
     </div>
@@ -74,6 +74,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import type { GiftList } from '../../types/rewardTypes'
+import { formatAmount } from '@/shared/utils/format'
 
 const props = defineProps<{
   visible: boolean
@@ -106,12 +107,6 @@ const remaining = computed(() => {
   const deduct = form.actual_reward || props.gift.expected_reward
   return props.poolBalance - deduct
 })
-
-function formatMoney(v: number | string | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
-  const n = typeof v === 'string' ? parseFloat(v) : v
-  return isNaN(n) ? '0.00' : n.toFixed(2)
-}
 
 function handleConfirm() {
   if (!props.gift) return

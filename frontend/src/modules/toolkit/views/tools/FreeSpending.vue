@@ -72,16 +72,16 @@
           <template #default="{ row }">{{ row.created_at?.slice(0, 10) }}</template>
         </el-table-column>
         <el-table-column label="资产" width="120">
-          <template #default="{ row }">¥{{ fmt(row.liquid_assets) }}</template>
+          <template #default="{ row }">¥{{ maskAmountText(fmt(row.liquid_assets), privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="年收入" width="100">
-          <template #default="{ row }">¥{{ fmt(row.annual_income) }}</template>
+          <template #default="{ row }">¥{{ maskAmountText(fmt(row.annual_income), privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="债务" width="90">
-          <template #default="{ row }">¥{{ fmt(row.debt) }}</template>
+          <template #default="{ row }">¥{{ maskAmountText(fmt(row.debt), privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="额度" width="100">
-          <template #default="{ row }">¥{{ row.free_amount }}</template>
+          <template #default="{ row }">¥{{ maskAmountText(fmt(row.free_amount), privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column prop="notes" label="备注" min-width="100" show-overflow-tooltip />
         <el-table-column label="操作" width="60" fixed="right">
@@ -101,6 +101,10 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFreeSpendingList, createFreeSpending, deleteFreeSpending } from '../../api/toolkitApi'
 import type { FreeSpendingRecord } from '../../types/toolkitTypes'
+import { maskAmountText } from '@/shared/utils/privacy'
+import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
+
+const privacyStore = usePrivacyStore()
 
 const form = reactive({
   liquid_assets: 0,

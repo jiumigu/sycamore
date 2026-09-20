@@ -62,12 +62,12 @@ class ProgressAggregator:
 
     @staticmethod
     def _times_raw(year: int, month: int | None = None) -> float:
-        """时间投入原始小时（v0.3）：仅汇总 resolve_attribution 落入 {投向,维持,外部} 的小时
+        """时间投入原始小时（v0.3）：仅汇总 resolve_attribution 落入 ATTRIBUTION_COUNTED 的小时
 
         流失与未归类排除；divisor=30（constants.py 不变）。历史向后兼容由
-        DEFAULT_FALLBACK_ATTR='投向' + 迁移映射（旧类→非流失）双重保证。
+        DEFAULT_FALLBACK_ATTR（成长）+ 迁移映射（旧类→非流失）双重保证。
         """
-        from apps.temporal.constants import DEFAULT_FALLBACK_ATTR
+        from apps.temporal.constants import DEFAULT_FALLBACK_ATTR, ATTRIBUTION_COUNTED
         from apps.temporal.models import TaskMeta, TemporalTask
         from apps.temporal.services import resolve_attribution
 
@@ -85,7 +85,7 @@ class ProgressAggregator:
             tn = r['task_name']
             if tn in unclassified_names:
                 continue
-            if attr_map.get(tn, DEFAULT_FALLBACK_ATTR) in ('投向', '维持', '外部'):
+            if attr_map.get(tn, DEFAULT_FALLBACK_ATTR) in ATTRIBUTION_COUNTED:
                 total += float(r['h'])
         return total
 

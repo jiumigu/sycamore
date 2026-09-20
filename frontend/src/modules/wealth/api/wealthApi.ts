@@ -1,5 +1,5 @@
 import request from '@/shared/utils/request'
-import type { CalendarQueryParams, CoverageInput, BillCreateData } from '../types/wealthTypes'
+import type { CalendarQueryParams, CoverageInput, BudgetInput, BillCreateData } from '../types/wealthTypes'
 
 export function getCalendar(params?: CalendarQueryParams) {
   return request({ url: '/wealth/calendar/', method: 'get', params })
@@ -19,6 +19,11 @@ export function updateCurrentScenario(data: Record<string, unknown>) {
 
 export function calculateCoverage(data: CoverageInput) {
   return request({ url: '/wealth/calculate_coverage/', method: 'post', data })
+}
+
+/** 反算：本金 + 目标天数 → 每日可提取额（纯试算，后端不写任何表） */
+export function calculateBudget(data: BudgetInput) {
+  return request({ url: '/wealth/calculate_budget/', method: 'post', data })
 }
 
 export function getLifeSummary(params?: { user_id?: number }) {
@@ -103,7 +108,7 @@ export function generateBalanceInfo(data: { year: number; month: number; user_id
 }
 
 // ══════════════════════════════════════════
-// 现金盘点 API
+// 资产盘点 API（资产负债表口径）
 // ══════════════════════════════════════════
 
 /** 资产全景 */
@@ -241,7 +246,7 @@ export function batchSetPeriodTag(ids: number[], periodTag: string) {
   return request({ url: '/wealth/bills/batch-period-tag/', method: 'post', data: { ids, period_tag: periodTag } })
 }
 
-/** 赎回归属小结（为自己/过渡/外部/不计入/未标记 笔数与金额，收入支出合计） */
+/** 赎回归属小结（为自己/过渡/为别人/不计入/未标记 笔数与金额，收入支出合计） */
 export function getPeriodTagStats(params?: Record<string, unknown>) {
   return request({ url: '/wealth/bills/period_tag_stats/', method: 'get', params })
 }

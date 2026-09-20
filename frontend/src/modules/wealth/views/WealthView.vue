@@ -12,6 +12,10 @@
           结余 <b class="text-income">{{ summary?.surplus_weeks ?? 0 }}</b> 周 ·
           赤字 <b class="text-expense">{{ summary?.deficit_weeks ?? 0 }}</b> 周
         </span>
+        <el-button @click="showStats = !showStats">
+          <el-icon><DataAnalysis /></el-icon>
+          {{ showStats ? '隐藏概览' : '财务概览' }}
+        </el-button>
         <el-button @click="switchToMonthly">
           <el-icon><Calendar /></el-icon>
           月度日历
@@ -23,63 +27,65 @@
       </div>
     </div>
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="16" class="stats-row">
-      <el-col :xs="12" :sm="6">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: #e6f7ff">
-              <el-icon color="#1890ff"><TrendCharts /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value text-income">￥{{ fmt(summary?.total_income) }}</div>
-              <div class="stat-label">总收入</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: #fff1f0">
-              <el-icon color="#f5222d"><Bottom /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value text-expense">￥{{ fmt(summary?.total_expense) }}</div>
-              <div class="stat-label">总支出</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: #f6ffed">
-              <el-icon color="#52c41a"><Wallet /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value" :class="(summary?.total_net ?? 0) >= 0 ? 'text-income' : 'text-expense'">
-                ￥{{ fmt(summary?.total_net) }}
+    <!-- 统计卡片（默认折叠，点标题栏「财务概览」按钮展开） -->
+    <el-collapse-transition>
+      <el-row v-show="showStats" :gutter="16" class="stats-row">
+        <el-col :xs="12" :sm="6">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-content">
+              <div class="stat-icon" style="background: #e6f7ff">
+                <el-icon color="#1890ff"><TrendCharts /></el-icon>
               </div>
-              <div class="stat-label">净结余</div>
+              <div class="stat-info">
+                <div class="stat-value text-income">¥{{ fmt(summary?.total_income) }}</div>
+                <div class="stat-label">总收入</div>
+              </div>
             </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: #fff7e6">
-              <el-icon color="#fa8c16"><DataAnalysis /></el-icon>
+          </el-card>
+        </el-col>
+        <el-col :xs="12" :sm="6">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-content">
+              <div class="stat-icon" style="background: #fff1f0">
+                <el-icon color="#f5222d"><Bottom /></el-icon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-value text-expense">¥{{ fmt(summary?.total_expense) }}</div>
+                <div class="stat-label">总支出</div>
+              </div>
             </div>
-            <div class="stat-info">
-              <div class="stat-value text-info">{{ summary?.surplus_rate ?? 0 }}%</div>
-              <div class="stat-label">结余周占比</div>
+          </el-card>
+        </el-col>
+        <el-col :xs="12" :sm="6">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-content">
+              <div class="stat-icon" style="background: #f6ffed">
+                <el-icon color="#52c41a"><Wallet /></el-icon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-value" :class="(summary?.total_net ?? 0) >= 0 ? 'text-income' : 'text-expense'">
+                  ¥{{ fmt(summary?.total_net) }}
+                </div>
+                <div class="stat-label">净结余</div>
+              </div>
             </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+          </el-card>
+        </el-col>
+        <el-col :xs="12" :sm="6">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-content">
+              <div class="stat-icon" style="background: #fff7e6">
+                <el-icon color="#fa8c16"><DataAnalysis /></el-icon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-value text-info">{{ summary?.surplus_rate ?? 0 }}%</div>
+                <div class="stat-label">结余周占比</div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+    </el-collapse-transition>
 
     <!-- 推演 + 图例 -->
     <el-row :gutter="16" class="tools-row">
@@ -102,7 +108,8 @@
     <!-- 热力图 -->
     <el-card shadow="never" class="heatmap-card">
       <div class="heatmap-header">
-        <h3>61年 × 52周 现金流热力图</h3>
+        <h3>42年 × 52周 现金流热力图</h3>
+        <span class="heatmap-range">19 – 60 岁</span>
         <span class="heatmap-info">
           已度过 {{ summary?.lived_weeks ?? 0 }} 周 ·
           结余 {{ summary?.surplus_weeks ?? 0 }} 周 ·
@@ -140,6 +147,8 @@ const router = useRouter()
 const store = useWealthStore()
 const loading = ref(false)
 const detailVisible = ref(false)
+/** 顶部统计卡片（总收入/总支出/净结余/结余周占比）默认折叠，点标题栏「财务概览」按钮展开 */
+const showStats = ref(false)
 
 const summary = computed(() => store.summary)
 
@@ -315,6 +324,16 @@ onMounted(() => {
     font-weight: 600;
     color: var(--el-text-color-primary);
   }
+}
+
+.heatmap-range {
+  font-size: 12px;
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 4px;
+  padding: 1px 8px;
+  white-space: nowrap;
 }
 
 .heatmap-info {

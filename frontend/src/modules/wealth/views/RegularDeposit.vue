@@ -45,7 +45,7 @@
           <template #default="{ row }">{{ maskAmount(row.value, privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="利率" width="60" align="right" prop="rate">
-          <template #default="{ row }">{{ privacyStore.privacyMode ? '*.**%' : (row.rate ?? '-') + '%' }}</template>
+          <template #default="{ row }">{{ maskRate(row.rate, privacyStore.privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="期限" width="70" align="right" prop="term_days">
           <template #default="{ row }">{{ row.term_days }}天</template>
@@ -76,7 +76,7 @@
           </template>
         </el-table-column>
         <el-table-column label="备注" min-width="80" show-overflow-tooltip>
-          <template #default="{ row }">{{ privacyStore.privacyMode ? '***' : (row.remark || '-') }}</template>
+          <template #default="{ row }">{{ maskFreeText(row.remark, privacyStore.privacyMode) || '-' }}</template>
         </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
@@ -122,7 +122,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { maskName, maskAmount } from '@/shared/utils/privacy'
+import { maskName, maskAmount, maskRate, maskFreeText } from '@/shared/utils/privacy'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
 import { useRegularStore } from '../stores/regularStore'
 import RegularStatsCards from '../components/regular/RegularStatsCards.vue'

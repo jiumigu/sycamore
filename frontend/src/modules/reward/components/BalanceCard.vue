@@ -8,7 +8,7 @@
           </div>
           <div class="card-info">
             <div class="card-label">当前余额</div>
-            <div class="card-value">¥{{ formatMoney(pool.balance) }}</div>
+            <div class="card-value">¥{{ formatAmount(pool.balance) }}</div>
           </div>
         </div>
       </el-card>
@@ -21,7 +21,7 @@
           </div>
           <div class="card-info">
             <div class="card-label">累计获得</div>
-            <div class="card-value">¥{{ formatMoney(pool.total_earned) }}</div>
+            <div class="card-value">¥{{ formatAmount(pool.total_earned) }}</div>
           </div>
         </div>
       </el-card>
@@ -34,7 +34,7 @@
           </div>
           <div class="card-info">
             <div class="card-label">累计提取</div>
-            <div class="card-value">¥{{ formatMoney(pool.total_withdrawn) }}</div>
+            <div class="card-value">¥{{ formatAmount(pool.total_withdrawn) }}</div>
           </div>
         </div>
       </el-card>
@@ -45,14 +45,9 @@
 <script setup lang="ts">
 import type { RewardPool } from '../types/rewardTypes'
 import { Wallet, Star, SuccessFilled } from '@element-plus/icons-vue'
+import { formatAmount } from '@/shared/utils/format'
 
 defineProps<{ pool: RewardPool }>()
-
-function formatMoney(v: number | string | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
-  const n = typeof v === 'string' ? parseFloat(v) : v
-  return isNaN(n) ? '0.00' : n.toFixed(2)
-}
 </script>
 
 <style scoped lang="scss">

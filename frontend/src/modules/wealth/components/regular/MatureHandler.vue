@@ -9,9 +9,9 @@
       <!-- 存款信息 -->
       <el-descriptions :column="2" size="small" border class="info-table">
         <el-descriptions-item label="银行">{{ item.bankinfo || '未知' }}</el-descriptions-item>
-        <el-descriptions-item label="金额">{{ formatMoney(item.value) }}</el-descriptions-item>
+        <el-descriptions-item label="金额">{{ maskAmount(item.value, privacyStore.privacyMode) }}</el-descriptions-item>
         <el-descriptions-item label="利率">{{ item.rate ?? '-' }}%</el-descriptions-item>
-        <el-descriptions-item label="利息">{{ formatMoney(item.interest) }}</el-descriptions-item>
+        <el-descriptions-item label="利息">{{ maskAmount(item.interest, privacyStore.privacyMode) }}</el-descriptions-item>
         <el-descriptions-item label="存入">{{ item.begin_date }}</el-descriptions-item>
         <el-descriptions-item label="到期">{{ item.end_date }}</el-descriptions-item>
       </el-descriptions>
@@ -54,6 +54,10 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import type { RegularItem } from '../../types/wealthTypes'
+import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
+import { maskAmount } from '@/shared/utils/privacy'
+
+const privacyStore = usePrivacyStore()
 
 const props = defineProps<{
   visible: boolean
@@ -71,13 +75,6 @@ const renewForm = reactive({
   new_rate: null as number | null,
   new_end_date: '',
 })
-
-function formatMoney(v: number | null | undefined): string {
-  if (v == null) return '¥0'
-  const n = Math.round(v)
-  if (n >= 10000) return '¥' + (n / 10000).toFixed(1) + '万'
-  return '¥' + n.toLocaleString()
-}
 
 function handleSubmit() {
   const data: Record<string, unknown> = { action: action.value }

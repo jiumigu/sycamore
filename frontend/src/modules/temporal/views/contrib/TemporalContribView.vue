@@ -24,6 +24,8 @@
         :title="title"
         :unit-label="unitLabel"
         :positive-negative="posNeg"
+        :mode="mode"
+        :palette="mode === 'attribution' ? ATTRIBUTION_COLOR_MAP : undefined"
         @cell-click="onCellClick"
       />
       <el-empty v-else-if="!loading" description="暂无数据" />
@@ -41,30 +43,40 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Refresh } from '@element-plus/icons-vue'
 import ContributionGraph from '@/shared/components/ContributionGraph.vue'
 import DailyDetailDialog from '@/shared/components/DailyDetailDialog.vue'
 import { getTaskDailyDetail } from '@/modules/temporal/api/temporalApi'
 import * as temporalApi from '@/modules/temporal/api/temporalApi'
+import { ATTRIBUTION_COLOR_MAP } from '@/modules/temporal/types/temporalTypes'
 
 const title = '时间贡献图'
-const unitLabel = '小时'
 const posNeg = false
-const graphData = ref<Array<{ date: string; value: number }>>([])
+const graphData = ref<Array<{ date: string; value: number; attr?: string | null; breakdown?: Record<string, number> }>>([])
 const minYear = ref(2020)
 const maxYear = ref(new Date().getFullYear())
 const loading = ref(false)
 
+// ─── 视图口径 ───
+// value       = 量值热度（题面：记录数 / 小时 / 成长小时 / 深度工作 / 牛马工作）
+// attribution = 每天取 L1 归因中时长最多者，用该归因的固定语义色着色
 const METRICS = [
+  { value: 'dominant_attr', label: '主导归因', unit: '小时' },
   { value: 'record_count', label: '记录数', unit: '次' },
   { value: 'hours', label: '小时', unit: '小时' },
-  { value: 'toward', label: '投向小时', unit: '小时' },
+  { value: 'toward', label: '成长小时', unit: '小时' },
   { value: 'deepwork', label: '深度工作小时', unit: '小时' },
-  { value: 'sleep', label: '睡眠小时', unit: '小时' },
+  { value: 'work', label: '牛马工作', unit: '小时' },
 ]
-const metric = ref('record_count')
+const metric = ref('dominant_attr')
+
+const currentMetric = computed(() => METRICS.find((m) => m.value === metric.value) ?? METRICS[0])
+const mode = computed<'value' | 'attribution'>(() =>
+  metric.value === 'dominant_attr' ? 'attribution' : 'value'
+)
+const unitLabel = computed(() => currentMetric.value.unit)
 
 // ─── 每日明细弹窗 ───
 const detailVisible = ref(false)
@@ -74,6 +86,7 @@ const detailLoading = ref(false)
 const detailSummary = ref('')
 const detailColumns = [
   { prop: 'start_time', label: '开始', width: 130, formatter: (v: string) => v ? v.slice(0, 16) : '' },
+  { prop: 'end_time', label: '结束', width: 70, formatter: (v: string) => v ? v.slice(11, 16) : '' },
   { prop: 'task_name', label: '任务（L3）', minWidth: 200 },
   { prop: 'attribution', label: 'L1 归因', width: 90 },
   { prop: 'activity_type', label: 'L2 类型', width: 100 },
@@ -99,13 +112,15 @@ async function onCellClick(date: string) {
   }
 }
 
+// 缓存按 metric 分键：不同口径的数据结构不同（归因模式多 attr/breakdown），混用会串味
 const CACHE_KEY = 'contrib_cache_TemporalContribView'
+const cacheKey = () => `${CACHE_KEY}_${metric.value}`
 
 async function load(force = false) {
   loading.value = true
   try {
     if (!force) {
-      const cached = localStorage.getItem(CACHE_KEY)
+      const cached = localStorage.getItem(cacheKey())
       if (cached) {
         const parsed = JSON.parse(cached)
         if (Date.now() - parsed.ts < 30 * 60 * 1000) {
@@ -117,7 +132,7 @@ async function load(force = false) {
     }
     const res = await temporalApi.getTaskContrib({ metric: metric.value })
     applyData(res.data)
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), body: res.data }))
+    localStorage.setItem(cacheKey(), JSON.stringify({ ts: Date.now(), body: res.data }))
   } catch {
     ElMessage.error('加载失败')
   } finally {

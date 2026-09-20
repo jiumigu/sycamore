@@ -1,25 +1,102 @@
-"""现金盘点服务 — 资产全景、趋势、健康指标、对账"""
+"""现金盘点服务 — 资产全景、趋势、健康指标、对账
+
+口径（v3.58.19 财务规划口径纠偏，常量见 apps/wealth/constants.py）：
+    金融资产 = 活期账户 + 公积金            → summary.total（数值不变，仅前端标签归位）
+    总资产   = 金融资产 + 应收借出          → summary.total_assets
+    净资产   = 总资产 − 负债                → summary.net_worth
+比率类指标（负债率/活期占比/公积金占比）统一以**总资产**为分母，三者可比；
+应急金以「月数」判定，不再用绝对金额。
+"""
 
 from datetime import datetime
 
+from django.db import connection
 from django.db.models import Value
 from django.db.models.functions import Replace
 
+from apps.wealth.constants import (
+    EMERGENCY_MONTHS_TARGET,
+    EXPENSE_LOOKBACK_MONTHS,
+    LIQUID_ACCOUNT_FIELDS,
+)
 from apps.wealth.models import WealthCashFlow
 
 
+def sum_liquid_accounts(cf) -> float:
+    """活期类账户合计 — 应急金分子。
+
+    科目以 constants.LIQUID_ACCOUNT_FIELDS 为单一真源：
+    含银行卡活期（T+0 可取而原实现漏计），不含公积金与定期存款。
+    """
+    return sum(float(getattr(cf, f, None) or 0) for f in LIQUID_ACCOUNT_FIELDS)
+
+
+def get_recent_monthly_expense(user_id: int = 1,
+                               months: int = EXPENSE_LOOKBACK_MONTHS) -> float:
+    """近 N 个自然月的平均月支出 — 应急金月数的分母。
+
+    取数优先级：
+      ① wealth_bill_list 明细聚合：对近 N 个自然月中**有支出记录**的月份求均值，
+         除数取「有记录的月份数」而非固定 N —— 若除以 N，无记录月份会被当成
+         零支出，把月均拉低、月数虚高；
+      ② 明细查无数据时回落到 wealth_balance_list.outmoney 的最近 N 条；
+      ③ 两者皆无数据返回 0.0，调用方据此把月数类指标置为 None。
+
+    用账单自带的 year/month 列做月份过滤，不碰 date 字段 ——
+    wealth_bill_list.date 是 datetime 且受 USE_TZ 影响，按日期推导须用半开区间。
+    """
+    anchor = datetime.now()
+    year, month = anchor.year, anchor.month
+    ym_keys: list[int] = []
+    for _ in range(months):
+        ym_keys.append(year * 100 + month)
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+
+    placeholders = ','.join(['%s'] * len(ym_keys))
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT COALESCE(SUM(amount), 0)
+            FROM wealth_bill_list
+            WHERE user_id = %s AND transaction_type = '支出'
+              AND (`year` * 100 + `month`) IN ({placeholders})
+            GROUP BY `year`, `month`
+            """,
+            [user_id, *ym_keys],
+        )
+        rows = cursor.fetchall()
+
+    active = [float(r[0]) for r in rows if r and r[0]]
+    if active:
+        return round(sum(active) / len(active), 2)
+
+    from apps.wealth.models import WealthBalanceList
+
+    fallback = [
+        float(b.outmoney) for b in
+        WealthBalanceList.objects.exclude(outmoney__isnull=True).order_by('-yearmon')[:months]
+        if b.outmoney
+    ]
+    if fallback:
+        return round(sum(fallback) / len(fallback), 2)
+    return 0.0
+
+
 def get_cashflow_overview(user_id: int = 1) -> dict | None:
-    """获取最新资产全景"""
+    """获取最新资产全景（含按当前支出水平折算的应急金月数）"""
     latest = WealthCashFlow.objects.filter(btime__isnull=False).order_by('-btime').first()
     if not latest:
         latest = WealthCashFlow.objects.order_by('-baid').first()
     if not latest:
         return None
-    return _build_overview(latest)
+    return _build_overview(latest, get_recent_monthly_expense(user_id))
 
 
 def get_cashflow_by_yearmon(yearmon: str) -> dict | None:
-    """按年月获取资产快照"""
+    """按年月获取资产快照（历史回看，不折算月数）"""
     try:
         cf = WealthCashFlow.objects.get(yearmon=yearmon)
         return _build_overview(cf)
@@ -27,8 +104,11 @@ def get_cashflow_by_yearmon(yearmon: str) -> dict | None:
         return None
 
 
-def _build_overview(cf: WealthCashFlow) -> dict:
-    """构建资产全景响应"""
+def _build_overview(cf: WealthCashFlow, monthly_expense_avg: float = 0.0) -> dict:
+    """构建资产全景响应
+
+    monthly_expense_avg: 近 N 月平均月支出；传 0 表示无数据，月数类指标置 None。
+    """
     accounts = {
         'zplay': cf.zplay or 0,
         'wechat': cf.wechat or 0,
@@ -40,28 +120,31 @@ def _build_overview(cf: WealthCashFlow) -> dict:
         'accumulationfund': cf.accumulationfund or 0,
     }
 
-    flow_total = sum([
-        cf.zplay or 0, cf.wechat or 0, cf.cash or 0,
-        cf.jianbank or 0, cf.gongbank or 0,
-        cf.zhongbank or 0, cf.nongbank or 0,
-    ])
-    total_assets = flow_total + (cf.accumulationfund or 0)
-    borrow = cf.borrow or 0
-    lend = cf.lend or 0
-    realnum = total_assets - borrow + lend
+    flow_total = sum_liquid_accounts(cf)
+    accumulationfund = float(cf.accumulationfund or 0)
+    borrow = float(cf.borrow or 0)
+    lend = float(cf.lend or 0)
 
-    # 紧急备用金 = 现金类资产（支付宝+微信+现金）
-    emergency_fund = (cf.zplay or 0) + (cf.wechat or 0) + (cf.cash or 0)
+    financial_assets = flow_total + accumulationfund   # wealth_cash_flow.total 的既有口径
+    total_assets = financial_assets + lend             # 总资产：补回应收借出
+    net_worth = total_assets - borrow                  # 净资产（数值等于原 realnum）
 
-    # 负债率
+    # 应急金 = 活期类账户合计（含银行卡活期）；月数需月均支出方可折算
+    emergency_fund = flow_total
+    if monthly_expense_avg > 0:
+        emergency_months = round(emergency_fund / monthly_expense_avg, 1)
+        emergency_target_amount = round(monthly_expense_avg * EMERGENCY_MONTHS_TARGET, 2)
+        emergency_gap = round(max(emergency_target_amount - emergency_fund, 0), 2)
+    else:
+        emergency_months = None
+        emergency_target_amount = None
+        emergency_gap = None
+
+    # 三个占比指标统一以「总资产」为分母，保证互相可比
     debt_ratio = round(borrow / total_assets * 100, 1) if total_assets > 0 else 0
-
-    # 活期占比
-    liquidity = flow_total  # 所有非公积金都算活期
-    liquidity_ratio = round(liquidity / total_assets * 100, 1) if total_assets > 0 else 0
-
-    # 公积金占比
-    pf_ratio = round((cf.accumulationfund or 0) / total_assets * 100, 1) if total_assets > 0 else 0
+    debt_ratio_legacy = round(borrow / financial_assets * 100, 1) if financial_assets > 0 else 0
+    liquidity_ratio = round(flow_total / total_assets * 100, 1) if total_assets > 0 else 0
+    pf_ratio = round(accumulationfund / total_assets * 100, 1) if total_assets > 0 else 0
 
     return {
         'snapshot_date': str(cf.btime) if cf.btime else None,
@@ -69,47 +152,59 @@ def _build_overview(cf: WealthCashFlow) -> dict:
         'accounts': accounts,
         'summary': {
             'flow_total': round(flow_total, 2),
-            'total': round(total_assets, 2),
+            'total': round(financial_assets, 2),
+            'financial_assets': round(financial_assets, 2),
+            'total_assets': round(total_assets, 2),
+            'net_worth': round(net_worth, 2),
             'borrow': round(borrow, 2),
             'lend': round(lend, 2),
-            'realnum': round(realnum, 2),
+            'realnum': round(net_worth, 2),
         },
         'health_metrics': {
             'emergency_fund': round(emergency_fund, 2),
+            'emergency_fund_months': emergency_months,
+            'emergency_months_target': EMERGENCY_MONTHS_TARGET,
+            'emergency_target_amount': emergency_target_amount,
+            'emergency_gap': emergency_gap,
+            'monthly_expense_avg': round(monthly_expense_avg, 2),
             'liquidity_ratio': liquidity_ratio,
             'debt_ratio': debt_ratio,
+            'debt_ratio_legacy': debt_ratio_legacy,
             'provident_fund_ratio': pf_ratio,
         },
     }
 
 
 def get_asset_trend(user_id: int = 1, months: int = 12) -> list[dict]:
-    """获取资产趋势数据"""
+    """获取资产趋势数据（每月含流动性、金融资产、总资产、净资产）"""
     records = WealthCashFlow.objects.filter(
         yearmon__isnull=False
     ).order_by('-yearmon')[:months]
 
     trend = []
     for r in reversed(list(records)):
-        flow_total = sum([
-            r.zplay or 0, r.wechat or 0, r.cash or 0,
-            r.jianbank or 0, r.gongbank or 0,
-            r.zhongbank or 0, r.nongbank or 0,
-        ])
-        total_assets = flow_total + (r.accumulationfund or 0)
+        flow_total = sum_liquid_accounts(r)
+        accumulationfund = float(r.accumulationfund or 0)
+        borrow = float(r.borrow or 0)
+        lend = float(r.lend or 0)
+        financial_assets = flow_total + accumulationfund
+        total_assets = financial_assets + lend
         trend.append({
             'yearmon': r.yearmon,
             'flow_total': round(flow_total, 2),
-            'total': round(total_assets, 2),
-            'accumulationfund': round(r.accumulationfund or 0, 2),
+            'total': round(financial_assets, 2),
+            'financial_assets': round(financial_assets, 2),
+            'total_assets': round(total_assets, 2),
+            'net_worth': round(total_assets - borrow, 2),
+            'accumulationfund': round(accumulationfund, 2),
             'zplay': round(r.zplay or 0, 2),
             'wechat': round(r.wechat or 0, 2),
             'jianbank': round(r.jianbank or 0, 2),
             'gongbank': round(r.gongbank or 0, 2),
             'zhongbank': round(r.zhongbank or 0, 2),
             'nongbank': round(r.nongbank or 0, 2),
-            'borrow': round(r.borrow or 0, 2),
-            'lend': round(r.lend or 0, 2),
+            'borrow': round(borrow, 2),
+            'lend': round(lend, 2),
         })
     return trend
 
@@ -123,18 +218,22 @@ def get_snapshot_list(page: int = 1, page_size: int = 12) -> dict:
 
     result_items = []
     for item in items:
-        flow_total = sum([
-            item.zplay or 0, item.wechat or 0, item.cash or 0,
-            item.jianbank or 0, item.gongbank or 0,
-            item.zhongbank or 0, item.nongbank or 0,
-        ])
-        total_assets = flow_total + (item.accumulationfund or 0)
+        flow_total = sum_liquid_accounts(item)
+        accumulationfund = float(item.accumulationfund or 0)
+        borrow = float(item.borrow or 0)
+        lend = float(item.lend or 0)
+        financial_assets = flow_total + accumulationfund
+        total_assets = financial_assets + lend
+        net_worth = total_assets - borrow
         result_items.append({
             'baid': item.baid,
             'yearmon': item.yearmon,
             'btime': str(item.btime) if item.btime else None,
             'flow_total': round(flow_total, 2),
-            'total': round(total_assets, 2),
+            'total': round(financial_assets, 2),
+            'financial_assets': round(financial_assets, 2),
+            'total_assets': round(total_assets, 2),
+            'net_worth': round(net_worth, 2),
             'zplay': round(item.zplay or 0, 2),
             'wechat': round(item.wechat or 0, 2),
             'cash': round(item.cash or 0, 2),
@@ -142,10 +241,10 @@ def get_snapshot_list(page: int = 1, page_size: int = 12) -> dict:
             'gongbank': round(item.gongbank or 0, 2),
             'zhongbank': round(item.zhongbank or 0, 2),
             'nongbank': round(item.nongbank or 0, 2),
-            'accumulationfund': round(item.accumulationfund or 0, 2),
-            'realnum': round(item.realnum or 0, 2),
-            'borrow': round(item.borrow or 0, 2),
-            'lend': round(item.lend or 0, 2),
+            'accumulationfund': round(accumulationfund, 2),
+            'realnum': round(net_worth, 2),
+            'borrow': round(borrow, 2),
+            'lend': round(lend, 2),
             'remarks': item.remarks or '',
         })
 

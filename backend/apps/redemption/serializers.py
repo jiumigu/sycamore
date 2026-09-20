@@ -40,8 +40,8 @@ class WeekSnapshotSerializer(serializers.ModelSerializer):
     class Meta:
         model = RedemptionWeekSnapshot
         fields = [
-            'id', 'year', 'week', 'toward_hours', 'maintain_hours', 'external_hours',
-            'drain_hours', 'covered_hours', 'theoretical_hours', 'coverage_rate',
-            'toward_ratio', 'unit_cost', 'snapshot_at',
+            'id', 'year', 'week', 'toward_hours', 'relation_hours', 'maintain_hours',
+            'external_hours', 'drain_hours', 'covered_hours', 'theoretical_hours',
+            'coverage_rate', 'toward_ratio', 'unit_cost', 'snapshot_at',
         ]
         read_only_fields = ['id', 'snapshot_at']

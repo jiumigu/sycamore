@@ -7,6 +7,7 @@ import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { CITY_MAP_NAME, registerChinaCitiesMap, resolveRegionName, getProvinceBorderRings } from '../utils/chinaCitiesMap'
 import type { HeatmapItem, BubbleItem } from '../types/travelTypes'
+import { formatAmount } from '@/shared/utils/format'
 
 const props = defineProps<{
   heatmap: HeatmapItem[]
@@ -76,7 +77,7 @@ function initChart() {
           return `<strong>${d.name}</strong><br/>
             ${d.province ? `省份：${d.province}<br/>` : ''}
             访问次数：${d.count || 1} 次<br/>
-            ${d.value ? `花费：¥${d.value}<br/>` : ''}
+            ${d.value ? `花费：¥${formatAmount(d.value, 0)}<br/>` : ''}
             ${d.rating ? `满意度：${'⭐'.repeat(d.rating)}<br/>` : ''}
             ${years ? `年份：${years}` : ''}`
         }

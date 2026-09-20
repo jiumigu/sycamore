@@ -13,6 +13,8 @@ urlpatterns = [
     path('weekly_summary/<int:global_week_index>/', views.WeeklySummaryView.as_view(), name='weekly-summary'),
     path('scenario/current/', views.CurrentScenarioView.as_view(), name='current-scenario'),
     path('calculate_coverage/', views.CalculateCoverageView.as_view(), name='calculate-coverage'),
+    # 反算：本金 + 目标天数 → 每日可提取额（纯试算，不写库）
+    path('calculate_budget/', views.CalculateBudgetView.as_view(), name='calculate-budget'),
     path('summary/', views.LifeSummaryView.as_view(), name='life-summary'),
     path('bills/by_week/', views.BillsByWeekView.as_view(), name='bills-by-week'),
     path('calendar/init/', views.InitCalendarView.as_view(), name='init-calendar'),

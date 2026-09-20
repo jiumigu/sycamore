@@ -11,28 +11,28 @@
       <span class="source-part milestone">
         <span class="source-emoji">🎯</span>
         里程碑
-        <span class="source-amount">¥{{ formatMoney(sourceStats.milestone) }}</span>
+        <span class="source-amount">¥{{ formatAmount(sourceStats.milestone) }}</span>
         <span class="source-pct">({{ milestonePct }}%)</span>
       </span>
       <span class="source-divider">|</span>
       <span class="source-part sugar">
         <span class="source-emoji">🍰</span>
         小确幸
-        <span class="source-amount">¥{{ formatMoney(sourceStats.sugar) }}</span>
+        <span class="source-amount">¥{{ formatAmount(sourceStats.sugar) }}</span>
         <span class="source-pct">({{ sugarPct }}%)</span>
       </span>
       <span class="source-divider">|</span>
       <span class="source-part goal-complete">
         <span class="source-emoji">🎉</span>
         目标完成
-        <span class="source-amount">¥{{ formatMoney(sourceStats.goal_complete) }}</span>
+        <span class="source-amount">¥{{ formatAmount(sourceStats.goal_complete) }}</span>
         <span class="source-pct">({{ goalCompletePct }}%)</span>
       </span>
       <span class="source-divider">|</span>
       <span class="source-part inbox-complete">
         <span class="source-emoji">📥</span>
         收件箱
-        <span class="source-amount">¥{{ formatMoney(sourceStats.inbox_complete) }}</span>
+        <span class="source-amount">¥{{ formatAmount(sourceStats.inbox_complete) }}</span>
         <span class="source-pct">({{ inboxCompletePct }}%)</span>
       </span>
     </div>
@@ -48,13 +48,13 @@
             <el-tag v-else-if="tx.transaction_type === 'goal_complete'" type="danger" size="small">🎉 目标完成</el-tag>
             <span v-else class="tx-type">{{ tx.transaction_type_display || tx.transaction_type }}</span>
             <span class="tx-amount" :class="tx.amount >= 0 ? 'positive' : 'negative'">
-              {{ tx.amount >= 0 ? '+' : '' }}¥{{ formatMoney(tx.amount) }}
+              {{ formatSignedAmount(tx.amount, 2, true) }}
             </span>
           </div>
           <div class="tx-desc">{{ tx.description || '-' }}</div>
           <div class="tx-meta">
             <span class="tx-balance">
-              余额: ¥{{ formatMoney(tx.balance_before) }} → ¥{{ formatMoney(tx.balance_after) }}
+              余额: ¥{{ formatAmount(tx.balance_before) }} → ¥{{ formatAmount(tx.balance_after) }}
             </span>
             <span class="tx-time">{{ tx.created_at?.slice(0, 16) || '' }}</span>
           </div>
@@ -94,6 +94,7 @@ import { Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { RewardTransaction, RewardSourceStats } from '../types/rewardTypes'
 import { deleteTransaction } from '../api/rewardApi'
+import { formatAmount, formatSignedAmount } from '@/shared/utils/format'
 
 const props = defineProps<{
   transactions: RewardTransaction[]
@@ -133,7 +134,7 @@ const deletingId = ref<number | null>(null)
 async function handleDelete(tx: RewardTransaction) {
   try {
     await ElMessageBox.confirm(
-      `确定要删除这条记录吗？\n\n${tx.description || '-'}\n+¥${tx.amount}`,
+      `确定要删除这条记录吗？\n\n${tx.description || '-'}\n${formatSignedAmount(tx.amount)}`,
       '确认删除',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
     )
@@ -157,12 +158,6 @@ function sourceEmoji(tx: RewardTransaction): string {
   if (tx.source_type === 'inbox_complete') return '📥'
   if (tx.source_type === 'goal_complete') return '🎉'
   return '⭐'
-}
-
-function formatMoney(v: number | string | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
-  const n = typeof v === 'string' ? parseFloat(v) : v
-  return isNaN(n) ? '0.00' : n.toFixed(2)
 }
 
 function onSizeChange(size: number) {

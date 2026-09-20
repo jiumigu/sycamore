@@ -40,7 +40,7 @@
     <div class="milestone-section">
       <div class="milestone-section-header">
         <span class="milestone-section-title">🏁 里程碑（{{ stats?.completed_milestones ?? 0 }}/{{ stats?.total_milestones ?? 0 }}）</span>
-        <span v-if="uniformReward > 0" class="uniform-reward">💰 每项奖励 ¥{{ uniformReward }}</span>
+        <span v-if="uniformReward > 0" class="uniform-reward">💰 每项奖励 ¥{{ formatAmount(uniformReward) }}</span>
       </div>
       <div class="milestone-list-wrapper">
       <template v-for="item in foldedMilestones" :key="item.id">
@@ -151,6 +151,7 @@ import { Select, Calendar, ArrowDown } from '@element-plus/icons-vue'
 import { checkinAction, getCheckinStats, patchMilestone, toggleMilestone } from '../api/goalApi'
 import type { CheckinStats, CheckinMilestone } from '../types/goalTypes'
 import { getPresetByType } from '@/shared/api/coreApi'
+import { formatAmount } from '@/shared/utils/format'
 
 const props = defineProps<{
   goalId: number

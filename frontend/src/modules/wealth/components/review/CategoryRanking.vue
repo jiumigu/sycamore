@@ -6,7 +6,7 @@
           <div v-for="(item, i) in expenseData" :key="i" class="cat-ranking__item">
             <div class="cat-ranking__top">
               <span class="cat-ranking__name">{{ item.category }}</span>
-              <span class="cat-ranking__amt text-expense">￥{{ fmt(item.amount) }}</span>
+              <span class="cat-ranking__amt text-expense">¥{{ fmt(item.amount) }}</span>
             </div>
             <div class="cat-ranking__bar">
               <PercentageBar :percentage="item.percentage" color="#f5222d" />
@@ -21,7 +21,7 @@
           <div v-for="(item, i) in incomeData" :key="i" class="cat-ranking__item">
             <div class="cat-ranking__top">
               <span class="cat-ranking__name">{{ item.category }}</span>
-              <span class="cat-ranking__amt text-income">￥{{ fmt(item.amount) }}</span>
+              <span class="cat-ranking__amt text-income">¥{{ fmt(item.amount) }}</span>
             </div>
             <div class="cat-ranking__bar">
               <PercentageBar :percentage="item.percentage" color="#52c41a" />

@@ -36,7 +36,7 @@
       </el-col>
       <el-col :span="6">
         <el-card class="stat-card">
-          <div class="stat-label">赎回·投向占比</div>
+          <div class="stat-label">赎回·成长占比</div>
           <div class="stat-value">{{ towardRatio }}%</div>
         </el-card>
       </el-col>
@@ -86,16 +86,16 @@ const avgHours = computed(() => {
 const avgCompleteness = computed(() => {
   if (!weeks.value.length) return 0
   const avg = weeks.value.reduce((s, w) => s + w.completeness, 0) / weeks.value.length
-  return (avg * 100).toFixed(1)
+  return (avg * 100).toFixed(2)
 })
 
 const fourColor = computed(() => {
   const agg: Record<string, number> = {}
   weeks.value.forEach((w) => {
-    Object.entries(w.redemption_4color || {}).forEach(([k, v]) => { agg[k] = (agg[k] || 0) + v })
+    Object.entries(w.by_l1 || {}).forEach(([k, v]) => { agg[k] = (agg[k] || 0) + v })
   })
   const total = Object.values(agg).reduce((s, v) => s + v, 0) || 1
-  const order = ['投向', '维持', '外部', '流失']
+  const order = ['成长', '关系', '维持', '谋生', '流失']
   return order
     .filter((k) => k in agg)
     .map((k) => ({
@@ -104,7 +104,7 @@ const fourColor = computed(() => {
     }))
 })
 const towardRatio = computed(() => {
-  const t = fourColor.value.find((c) => c.key === '投向')
+  const t = fourColor.value.find((c) => c.key === '成长')
   return t ? t.pct : '0.0'
 })
 

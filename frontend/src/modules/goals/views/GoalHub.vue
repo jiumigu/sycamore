@@ -183,7 +183,7 @@
     <div v-if="milestones.length > 0" class="milestone-list">
       <div class="milestone-list-header">
         <span class="milestone-list-title">🏁 里程碑（{{ milestoneCompletedCount }}/{{ milestoneTotalCount }}）</span>
-        <span v-if="uniformReward > 0" class="uniform-reward">💰 每项奖励 ¥{{ uniformReward }}</span>
+        <span v-if="uniformReward > 0" class="uniform-reward">💰 每项奖励 ¥{{ formatAmount(uniformReward) }}</span>
       </div>
       <div v-for="m in milestones" :key="m.id" class="milestone-wrapper">
         <div class="milestone-item" :class="{ completed: m.status === 'completed' }">
@@ -377,6 +377,7 @@ import { Plus, Refresh, RefreshRight, Lightning, PieChart } from '@element-plus/
 import { useGoalStore } from '../stores/goalStore'
 import { useGoalBoardStore } from '../stores/goalBoardStore'
 import * as goalApi from '../api/goalApi'
+import { formatAmount } from '@/shared/utils/format'
 import { PRIORITY_OPTIONS } from '../types/goalTypes'
 import type { Goal, GoalStatus, Milestone } from '../types/goalTypes'
 import GoalCard from '../components/GoalCard.vue'

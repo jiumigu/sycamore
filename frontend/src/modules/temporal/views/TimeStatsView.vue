@@ -37,8 +37,16 @@
           <div class="stat-content">
             <div class="stat-icon" style="background: #e6f7ff"><el-icon color="#1890ff" :size="22"><Clock /></el-icon></div>
             <div class="stat-info">
-              <div class="stat-value">{{ store.overview?.total_hours ?? 0 }}</div>
-              <div class="stat-label">总时长（小时）</div>
+              <div class="stat-value stat-value--dual">
+                <span class="sv-main">{{ recordedHoursText }}</span>
+                <span class="sv-rest">
+                  <span class="sv-sep">/</span>
+                  <span class="sv-sub">{{ totalHoursText }}</span>
+                </span>
+              </div>
+              <el-tooltip placement="top" :content="`总时间 = 16h × 有记录天数（${store.completeness?.days_recorded ?? 0} 天）`">
+                <div class="stat-label">已记录 / 总时间（h）</div>
+              </el-tooltip>
             </div>
           </div>
         </el-card>
@@ -70,8 +78,10 @@
           <div class="stat-content">
             <div class="stat-icon" style="background: #f0f5ff"><el-icon color="#2f54eb" :size="22"><TrendCharts /></el-icon></div>
             <div class="stat-info">
-              <div class="stat-value">{{ (store.completeness?.completeness ?? 0) * 100 }}%</div>
-              <div class="stat-label">记录完整度（已归类 / 16h·天）</div>
+              <div class="stat-value">{{ completenessText }}</div>
+              <el-tooltip placement="top" content="已归类时长 ÷ 总时间（16h × 有记录天数）；未归类不参与">
+                <div class="stat-label">记录完整度</div>
+              </el-tooltip>
             </div>
           </div>
         </el-card>
@@ -83,13 +93,16 @@
       <el-col :span="12">
         <el-card class="chart-card">
           <template #header><span>🌞 时间结构（L1 归因 › L2 类型 › L3 任务）</span></template>
-          <SunburstChart :data="store.sunburst" :height="400" />
+          <SunburstChart :data="store.sunburst" :height="400" :empty-text="`${selectedYear} 年暂无记录`" />
         </el-card>
       </el-col>
       <el-col :span="12">
         <el-card class="chart-card">
           <template #header><span>📈 月度趋势（按 L1 归因）</span></template>
-          <div ref="trendRef" class="chart-box"></div>
+          <div class="chart-host">
+            <div ref="trendRef" class="chart-box"></div>
+            <div v-if="trendEmpty" class="chart-empty">{{ selectedYear }} 年暂无记录</div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -99,7 +112,7 @@
       <el-col :span="16">
         <el-card class="chart-card">
           <template #header><span>📅 近 12 周 168h 结构（按 L1 归因）</span></template>
-          <Weekly168Chart :data="store.weeklyStructure" :height="320" />
+          <Weekly168Chart :data="store.weeklyStructure" :height="320" :empty-text="`${selectedYear} 年暂无记录`" />
         </el-card>
       </el-col>
       <el-col :span="8">
@@ -113,7 +126,7 @@
               </div>
               <div class="rm-item">
                 <span class="rm-label">赎回池余额</span>
-                <span class="rm-value">¥{{ Math.round(redemption.pool?.balance ?? 0).toLocaleString() }}</span>
+                <span class="rm-value">¥{{ formatAmount(redemption.pool?.balance ?? 0, 0) }}</span>
               </div>
               <div class="rm-item">
                 <span class="rm-label">当前档位</span>
@@ -159,19 +172,15 @@
         <div class="import-rules">
           <h4>📋 导入规则</h4>
           <ul>
-            <li>同一天同一任务会自动合并，时长累加</li>
-            <li>已存在的记录会更新时长，不会重复</li>
+            <li>按 ATracker 原始记录逐条导入：同一天同一任务的多段记录会各占一行，时长不再合并</li>
+            <li>去重键 =「任务名称 + 开始时间」；重复导入不会产生重复数据，只更新有变化的行</li>
+            <li>每行的时长就是该条记录的时长，正常情况下与「结束 − 开始」一致</li>
             <li>任务自动映射到 L2 活动类型；未命中请到映射编辑器完善</li>
           </ul>
         </div>
 
         <div v-if="importResult" class="import-result">
-          <el-alert
-            :title="`导入完成：新增 ${importResult.inserted} 条，更新 ${importResult.updated} 条，跳过 ${importResult.skipped} 条` + (importResult.unclassified ? `；${importResult.unclassified} 个任务待归类` : '')"
-            type="success"
-            show-icon
-            closable
-          />
+          <el-alert :title="importSummary" type="success" show-icon closable />
         </div>
         <div v-if="importError" class="import-result">
           <el-alert :title="importError" type="error" show-icon closable />
@@ -198,6 +207,7 @@ import * as redemptionApi from '@/modules/redemption/api/redemptionApi'
 import * as echarts from 'echarts'
 import SunburstChart from '../components/SunburstChart.vue'
 import Weekly168Chart from '../components/Weekly168Chart.vue'
+import { formatAmount } from '@/shared/utils/format'
 
 const store = useTemporalStore()
 
@@ -210,20 +220,46 @@ const yearOptions = computed(() => {
   return years
 })
 
+// ─── 指标卡片：数值格式化（统一两位小数，避免浮点尾巴如 26.3400000000000004）───
+const recordedHoursText = computed(() => `${(store.overview?.total_hours ?? 0).toFixed(2)}h`)
+
+/** 总时间（小时）= 完整度分母 = 基数 × 有记录天数；优先用后端给的 denominator_hours（整数不留小数） */
+const totalHoursText = computed(() => {
+  const c = store.completeness
+  const denom = Number(c?.denominator_hours ?? (c?.days_recorded ?? 0) * (c?.denominator_hours_per_day ?? 16))
+  return `${Number.isInteger(denom) ? denom : denom.toFixed(2)}h`
+})
+
+/** 记录完整度：00.00% 两位小数 */
+const completenessText = computed(() => `${((store.completeness?.completeness ?? 0) * 100).toFixed(2)}%`)
+
 // ─── 图表 refs ───
 const trendRef = ref<HTMLElement>()
 let trendChart: echarts.ECharts | null = null
+const trendEmpty = ref(false)
 
 function attrColor(name: string | number) {
-  return { 投向: '#10B981', 维持: '#6366F1', 外部: '#0EA5E9', 流失: '#F87171' }[String(name)] || '#94A3B8'
+  return { 成长: '#10B981', 关系: '#A855F7', 维持: '#6366F1', 谋生: '#0EA5E9', 流失: '#F87171' }[String(name)] || '#94A3B8'
 }
 
 // ─── 导入 ───
 const importVisible = ref(false)
 const selectedFile = ref<File | null>(null)
 const importing = ref(false)
-const importResult = ref<{ inserted: number; updated: number; skipped: number; unclassified?: number } | null>(null)
+const importResult = ref<{ inserted: number; updated: number; skipped: number; deduplicated?: number; unclassified?: number } | null>(null)
 const importError = ref('')
+
+// 导入结果文案：把「全部跳过」这种情况讲清楚——它不是失败，而是这批记录库里已有一份
+const importSummary = computed(() => {
+  const r = importResult.value
+  if (!r) return ''
+  const dedup = r.deduplicated ? `，CSV 内重复去重 ${r.deduplicated} 条` : ''
+  const tail = r.unclassified ? `；${r.unclassified} 个任务待归类` : ''
+  if (!r.inserted && !r.updated && r.skipped) {
+    return `本次没有新增：CSV 里 ${r.skipped} 条记录库里都已有${dedup}（重复导入不会产生重复数据）${tail}`
+  }
+  return `导入完成：新增 ${r.inserted} 条，更新 ${r.updated} 条，跳过 ${r.skipped} 条${dedup}${tail}`
+})
 
 function resetImport() {
   selectedFile.value = null
@@ -237,7 +273,7 @@ function handleFileChange(file: any) {
 }
 
 async function handleImport() {
-  if (!selectedFile.value) return
+  if (!selectedFile.value || importing.value) return
   importing.value = true
   importError.value = ''
   importResult.value = null
@@ -248,7 +284,8 @@ async function handleImport() {
     } else {
       importResult.value = result
       await refreshData()
-      ElMessage.success(`导入完成：新增 ${result.inserted} 条，更新 ${result.updated} 条，跳过 ${result.skipped ?? 0} 条`)
+      ElMessage.success(`导入完成：新增 ${result.inserted} 条，更新 ${result.updated} 条，跳过 ${result.skipped ?? 0} 条`
+        + (result.deduplicated ? `，CSV 内重复去重 ${result.deduplicated} 条` : ''))
     }
   } catch (e: any) {
     importError.value = e?.response?.data?.error || '导入失败'
@@ -280,6 +317,15 @@ function initTrendChart() {
   if (!trendChart) trendChart = echarts.init(trendRef.value)
 
   const data = store.trendData || []
+  // 空数据必须显式清图：setOption 默认是 merge，`series: []` 这种空数组不会删掉上一次的柱子，
+  // 于是切到没有记录的年份时会残留旧数据（表现为「图表有柱子、卡片全是 0」）
+  if (!data.length) {
+    trendEmpty.value = true
+    trendChart.clear()
+    return
+  }
+  trendEmpty.value = false
+
   const allKeys = new Set<string>()
   data.forEach((d: any) => Object.keys(d).forEach((k) => { if (k !== 'period') allKeys.add(k) }))
   const keys = Array.from(allKeys).sort()
@@ -288,9 +334,18 @@ function initTrendChart() {
   trendChart.setOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     legend: { data: keys, bottom: 0, type: 'scroll', icon: 'roundRect', itemWidth: 10, itemHeight: 10 },
-    grid: { left: '3%', right: '4%', bottom: '22%', top: '5%', containLabel: true },
-    xAxis: { type: 'category', data: chartData.map((d: any) => d.period), axisLabel: { rotate: 30, fontSize: 10 } },
-    yAxis: { type: 'value', name: '小时' },
+    // top 留够：y 轴 name「小时」要显示在轴顶上方，top: '5%' 会把字号裁掉一半
+    grid: { left: '3%', right: '4%', bottom: '22%', top: 26, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: chartData.map((d: any) => d.period),
+      // 已按单年筛选，轴上只显示「M月」（tooltip 仍保留完整 YYYY-MM）
+      axisLabel: {
+        rotate: 0, fontSize: 10, hideOverlap: true,
+        formatter: (v: string) => `${parseInt(v.slice(5), 10)}月`,
+      },
+    },
+    yAxis: { type: 'value', name: '小时', nameGap: 14, nameTextStyle: { fontSize: 10, color: '#9CA3AF' } },
     series: keys.map((name) => ({
       name,
       type: 'bar' as const,
@@ -301,7 +356,7 @@ function initTrendChart() {
       label: { show: false },
       emphasis: { focus: 'series' as const },
     })),
-  })
+  }, true) // notMerge：换年份时整体替换，避免旧系列/旧图例残留
   trendChart.resize()
 }
 
@@ -347,11 +402,25 @@ onMounted(async () => { await refreshData() })
   }
 
   .stats-row { margin-bottom: 18px;
-    .stat-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-      .stat-content { display: flex; align-items: center; gap: 14px; padding: 6px 4px;
+    // 四张卡等高，避免其中一张文字折行时被拉高
+    .el-col { display: flex; }
+    .stat-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); width: 100%;
+      :deep(.el-card__body) { height: 100%; display: flex; align-items: center; }
+      .stat-content { display: flex; align-items: center; gap: 14px; padding: 6px 4px; width: 100%;
         .stat-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .stat-info {
+          min-width: 0;
           .stat-value { font-size: 22px; font-weight: 700; color: #1F2937; line-height: 1.3; }
+          // 「已记录 h / 总时间 h」双值排版：主值突出、总值次要
+          .stat-value--dual {
+            display: flex; align-items: baseline; gap: 3px; flex-wrap: wrap;
+            .sv-main { font-size: 15px; font-weight: 700; color: #1F2937; letter-spacing: -0.2px; white-space: nowrap; }
+            // 「/ 总时间」整组换行，不会出现 「/」孤零零留在行尾
+            .sv-rest { display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap;
+              .sv-sep { font-size: 13px; color: #C0C4CC; }
+              .sv-sub { font-size: 14px; font-weight: 600; color: #6B7280; letter-spacing: -0.2px; }
+            }
+          }
           .stat-label { font-size: 13px; color: #6B7280; }
         }
       }
@@ -363,7 +432,14 @@ onMounted(async () => { await refreshData() })
     .chart-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); width: 100%; display: flex; flex-direction: column;
       :deep(.el-card__header) { padding: 14px 20px; font-size: 14px; font-weight: 500; border-bottom: 1px solid #f2f2f2; }
       :deep(.el-card__body) { flex: 1; display: flex; padding: 16px; }
-      .chart-box { flex: 1; width: 100%; min-height: 280px; }
+      .chart-host {
+        position: relative; display: flex; flex: 1; width: 100%;
+        .chart-box { flex: 1; width: 100%; min-height: 280px; }
+        .chart-empty {
+          position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+          color: #9CA3AF; font-size: 13px; pointer-events: none;
+        }
+      }
     }
   }
 

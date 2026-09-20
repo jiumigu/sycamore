@@ -131,9 +131,9 @@ cd frontend && npm run preview      # 预览生产构建
 
 - **temporal** 合并了三个旧应用：oneday(日记) + times(时间统计) + atracker(活动追踪)
 - **nourishment** 是纯前端模块，聚合 book/dance/sugar 后端
-- **wealth 热力图**：61年×52周 = 3172 单元格，复用 `wealth_bill_list`，支持历史(红绿) + 推演(蓝) 双层叠加
+- **wealth 热力图**：数据层 61年×52周 = 3172 单元格（`wealth_life_week_calendar`，18~78 岁，`global_week_index` 原点锚定 18 岁），复用 `wealth_bill_list`，支持历史(红绿) + 推演(蓝) 双层叠加。**计量窗口 = 19~60 岁**（`wealth/constants.py` 的 `WINDOW_START_AGE / WINDOW_END_AGE / WINDOW_WEEKS=2184`）：展示（热力图行）、统计（`summary` 的已度过/收支）、推演（`calculate_coverage(max_age=WINDOW_END_AGE)`，含赎回期 `sync_to_scenario`）统一按此窗口；**数据层与索引原点不动**（18 岁是 `global_week_index` 原点，改则全表错位）
 - **wealth 月度日历**：6×7 CSS Grid + 农历/节气 + 7级颜色编码
-- **wealth 资金排程**：分配是计划（预留）不是记录（花费）——手头现金 → 硬性承诺 → 预留分配 → 自由支配，取代了已删除的持续资金池；硬性承诺聚合经 `wealth_bill_list` 原生 SQL
+- **wealth 现金流推演**：核心问题是「钱还能撑多久」而不是「钱怎么分配」——正算「给每日预算 → 算能撑多久」与反算「给本金 + 目标时长 → 算每日可提取额」共用同一套现金流假设（每日先扣款、再按日利率对余额复利），可闭环互验；输入即算、**零写库**（纯试算）
 - **reward 奖励池**：单例模式，通过 `RewardPoolService` 统一管理加减
 - **sugar→reward 同步**：sugar service 层直接调用 `RewardPoolService`，不经过 signal
 - **礼物自动检测**：`_check_gift_availability()` 在每次池变动后扫描 pending/waiting 状态切换

@@ -199,7 +199,7 @@ class WealthBillList(models.Model):
     necessity = models.CharField(max_length=10, blank=True, null=True, verbose_name='消费必要性(必要/可选/冲动)')
     period_tag = models.CharField(
         max_length=10, blank=True, null=True,
-        verbose_name='赎回归属(为自己/过渡/外部/不计入)',
+        verbose_name='赎回归属(为自己/过渡/为别人/不计入)',
     )
     project = models.CharField(max_length=100, blank=True, null=True, verbose_name='项目')
     account = models.CharField(max_length=50, blank=True, null=True, verbose_name='账户')

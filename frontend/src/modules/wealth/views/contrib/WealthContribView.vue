@@ -46,6 +46,7 @@ import ContributionGraph from '@/shared/components/ContributionGraph.vue'
 import DailyDetailDialog from '@/shared/components/DailyDetailDialog.vue'
 import { getBillDailyDetail } from '@/modules/wealth/api/wealthApi'
 import * as wealthApi from '@/modules/wealth/api/wealthApi'
+import { formatAmount } from '@/shared/utils/format'
 
 const title = '财富贡献图'
 const unitLabel = '元'
@@ -80,7 +81,7 @@ async function onCellClick(date: string) {
     const res = await getBillDailyDetail({ date })
     const data: any = res.data
     detailItems.value = data.items || []
-    detailSummary.value = data.items?.length ? `收入 ¥${data.income} · 支出 ¥${data.expense}` : ''
+    detailSummary.value = data.items?.length ? `收入 ¥${formatAmount(data.income)} · 支出 ¥${formatAmount(data.expense)}` : ''
   } catch {
     ElMessage.error('获取明细失败')
   } finally {

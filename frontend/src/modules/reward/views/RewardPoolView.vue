@@ -95,7 +95,7 @@
                 </el-tag>
               </div>
               <div class="drawer-gift-progress">
-                <span class="drawer-gift-price">¥{{ formatMoney(gift.expected_reward) }}</span>
+                <span class="drawer-gift-price">¥{{ formatAmount(gift.expected_reward) }}</span>
                 <el-progress
                   :percentage="Math.min(gift.progress, 100)"
                   :stroke-width="6"
@@ -147,6 +147,7 @@ import BalanceCard from '../components/BalanceCard.vue'
 import RewardTimeline from '../components/RewardTimeline.vue'
 import GiftForm from '../components/gift/GiftForm.vue'
 import GiftExchangeModal from '../components/gift/GiftExchangeModal.vue'
+import { formatAmount } from '@/shared/utils/format'
 
 const store = useRewardStore()
 
@@ -267,11 +268,6 @@ async function handleDelete(gift: GiftList) {
 }
 
 // 工具函数
-function formatMoney(v: number | string | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
-  const n = typeof v === 'string' ? parseFloat(v) : v
-  return isNaN(n) ? '0.00' : n.toFixed(2)
-}
 
 function categoryIcon(cat: string | null | undefined): string {
   const opt = GIFT_CATEGORY_OPTIONS.find(o => o.value === cat)

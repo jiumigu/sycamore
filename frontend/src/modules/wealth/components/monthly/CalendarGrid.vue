@@ -70,6 +70,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
+import { maskAmountCompact } from '@/shared/utils/privacy'
 import type { MonthlyDay } from '../../types/wealthTypes'
 import {
   getLunarInfo, isSameDay, isWeekStart as checkWeekStart,
@@ -81,7 +82,7 @@ const privacyStore = usePrivacyStore()
 function formatDaySummary(income: number, expense: number, privacy: boolean): string {
   let text = ''
   if (income > 0) {
-    text += privacy ? '+*,***' : `+${Math.round(income)}`
+    text += '+' + maskAmountCompact(income, privacy)
   }
   if (expense > 0) {
     text += `/-${Math.round(expense)}`

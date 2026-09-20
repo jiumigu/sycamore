@@ -109,7 +109,7 @@
             {{ tasteIcon(item.taste_level) }} {{ item.taste_level_display }}
           </p>
           <div class="food-card__meta">
-            <span v-if="item.price != null">💰 ¥{{ item.price }}</span>
+            <span v-if="item.price != null">💰 ¥{{ formatAmount(Number(item.price), 0) }}</span>
             <span v-if="item.want_visit_again">🔁 还想去</span>
           </div>
           <p v-if="item.notes" class="food-card__notes">{{ item.notes }}</p>
@@ -147,6 +147,7 @@ import { useFoodStore } from '../stores/foodStore'
 import { CATEGORY_OPTIONS, TASTE_LEVELS } from '../types/foodTypes'
 import type { FoodFormData, FoodRecord, FoodRecordList } from '../types/foodTypes'
 import * as foodApi from '../api/foodApi'
+import { formatAmount } from '@/shared/utils/format'
 import FoodStatsCards from '../components/stats/FoodStatsCards.vue'
 import FoodForm from '../components/FoodForm.vue'
 

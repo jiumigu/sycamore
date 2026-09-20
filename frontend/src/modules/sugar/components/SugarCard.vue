@@ -10,7 +10,7 @@
         <div class="card-top">
           <span class="card-time">{{ formatDate(record.time) }}</span>
           <span v-if="record.category_display" class="card-category">{{ record.category_display }}</span>
-          <span class="card-reward">+¥{{ formatMoney(record.reward_amount) }}</span>
+          <span class="card-reward">+¥{{ formatAmount(record.reward_amount) }}</span>
         </div>
         <h3 class="card-title">{{ record.title }}</h3>
         <div class="card-happiness" v-if="record.level_of_happiness">
@@ -56,6 +56,7 @@ import { ref, computed } from 'vue'
 import { Edit, Delete } from '@element-plus/icons-vue'
 import type { SugarRecord } from '../types/sugarTypes'
 import { REWARD_LABELS } from '../types/sugarTypes'
+import { formatAmount } from '@/shared/utils/format'
 
 const props = defineProps<{ record: SugarRecord }>()
 const emit = defineEmits<{ edit: [r: SugarRecord]; delete: [r: SugarRecord] }>()
@@ -88,12 +89,6 @@ const parsedTags = computed(() => {
 function formatDate(d: string) {
   if (!d) return ''
   return d.slice(0, 10)
-}
-
-function formatMoney(v: number | string | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
-  const n = typeof v === 'string' ? parseFloat(v) : v
-  return isNaN(n) ? '0.00' : n.toFixed(2)
 }
 </script>
 

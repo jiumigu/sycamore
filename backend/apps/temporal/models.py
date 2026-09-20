@@ -107,7 +107,7 @@ class WeeklyTimeCache(models.Model):
 class ActivityGroup(models.Model):
     """[已弃用 v3.57.0] 旧的「自建聚合分组」层。
 
-    L1 语义订正为「归因（投向/维持/外部/流失）」后此层取消。
+    L1 语义订正为「归因（成长/关系/维持/谋生/流失）」后此层取消。
     表 `temporal_activity_group` 保留不删（历史数据零损失），代码侧不再读写。
     """
 
@@ -154,9 +154,12 @@ class TaskMeta(models.Model):
         db_table = 'temporal_task_meta'
         verbose_name = '活动类型映射'
         verbose_name_plural = '活动类型映射'
+        # 显式写 name=：不再受 Django 自动命名规则变化影响（6.0 曾去掉升序 `+` 前缀位）。
+        # group 字段虽已弃用（代码不再读写、列保留不删），但其索引是外键约束的刚需——
+        # 在保留 group_id 列的前提下删掉也会被 InnoDB/Django 立即重建，故一并保留。
         indexes = [
-            models.Index(fields=['activity_type']),
-            models.Index(fields=['group']),
+            models.Index(fields=['activity_type'], name='temporal_ta_activit_b06509_idx'),
+            models.Index(fields=['group'], name='temporal_ta_group_i_78a288_idx'),
         ]
 
     def __str__(self):

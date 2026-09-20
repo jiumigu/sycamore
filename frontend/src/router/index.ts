@@ -154,7 +154,7 @@ const routes: RouteRecordRaw[] = [
         path: 'cashflow',
         name: 'wealth-cashflow',
         component: () => import('@/modules/wealth/views/CashFlowView.vue'),
-        meta: { title: '现金盘点' },
+        meta: { title: '资产盘点' },
       },
       {
         path: 'contrib',

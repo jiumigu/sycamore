@@ -113,3 +113,6 @@ backend/city_fix_admin_*.py
 backend/tmp_*.py
 backend/travel_fix_*.py
 backend/travel_import_*.py
+
+# 自用详细版变更日志（不提交）
+CHANGELOG.full.md
