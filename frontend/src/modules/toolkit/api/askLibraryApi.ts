@@ -80,6 +80,73 @@ export interface AskSummaryTopic {
   accepted: AskAcceptedItem[]
 }
 
+/** 回顾视图里的一个主题（主题级聚合，不含回答正文 —— 点进去再拉 detail） */
+export interface AskReviewTopicItem {
+  id: number
+  title: string
+  question: string
+  answer_count: number
+  accepted_count: number
+  noted_count: number
+  /** 采纳 + 有备注 的条数，即「已有结论的回答数」 */
+  concluded_count: number
+  /** 距该主题最后一次变动过了多少天 —— 零迁移下「最该回顾」的代理指标 */
+  days_idle: number
+  updated_at: string
+}
+
+export interface AskReviewGroup {
+  /** null = 未分类 */
+  scene_id: number | null
+  scene_name: string
+  topics: AskReviewTopicItem[]
+}
+
+export interface AskReviewStats {
+  topics: number
+  answers: number
+  /** 已标结论（采纳 或 写了备注）的回答数 */
+  marked: number
+  /** 还是「原料」、没标过结论的回答数 */
+  unmarked: number
+}
+
+export interface AskReviewData {
+  groups: AskReviewGroup[]
+  stats: AskReviewStats
+}
+
+/** 汇总总览「一条旧结论」卡的数据；`null` = 库里还没有任何结论 */
+export interface AskConclusionItem {
+  id: number
+  topic_id: number
+  topic_title: string
+  question: string
+  scene_name: string
+  ai: string
+  verdict: '' | '采纳' | '备用' | '不采用'
+  conclusion: string
+  /** `note` = 这句是**你自己写的备注**；`answer` = AI 回答的片段（卡片上要能说清） */
+  conclusion_source: 'note' | 'answer'
+  /**
+   * AI 回答的摘要（开头 120 字）。
+   * `note` 型下它是**判断依据** —— 你的结论可能只有几个字，没有这段就读不出当时在判断什么；
+   * ⚠️ `answer` 型下它与 `conclusion` 是**同一段文字**，渲染时别把两块都画出来。
+   */
+  ai_excerpt: string
+  /**
+   * `ai_excerpt` 是否被截断 —— **由后端判，前端不按长度推算**。
+   * 库里回答原文常在 1000~2700 字，卡上只放得下 120 字；不标出来就会被读成「AI 就说了这么点」。
+   */
+  ai_excerpt_truncated: boolean
+  /** AI 回答原文总字数（截断提示里念出来的那个数） */
+  answer_len: number
+  /** 池子里一共几条能进这张卡 —— 「换一条」总转回同两条时，界面上要能说出为什么 */
+  pool_size: number
+  asked_at: string
+  days_ago: number
+}
+
 /** 系统预设中的 AI 问答库标签（ask_tags） */
 export async function fetchAskTagPresets(): Promise<string[]> {
   try {
@@ -98,6 +165,30 @@ export function getAskTopics(params?: AskTopicQuery) {
 /** 采纳结论汇总：?scene=<id>|none|空=全部 → { topics: AskSummaryTopic[] } */
 export function getAskAcceptedSummary(scene?: string) {
   return request({ url: '/toolkit/ask-topics/summary/', method: 'get', params: scene ? { scene } : {} })
+}
+
+/**
+ * 回顾视图数据：按场景分组 + 组内「最久没动」排前（供「回顾」页**浏览**）。
+ *
+ * 与 `getAskAcceptedSummary` 的分工：
+ * - `getAskAcceptedSummary` = **导出用**：只吐采纳回答，产出物是 .md 文件
+ * - 本接口 = **浏览用**：含全部主题（包括一条结论都还没标的），
+ *   点进去才有东西可标 —— 这是「标记动作从录入时搬到回顾时」的落点
+ */
+export function getAskReview() {
+  return request({ url: '/toolkit/ask-topics/review/', method: 'get' })
+}
+
+/**
+ * 取一条「有结论的」问答（供汇总总览「一条旧结论」卡）。
+ *
+ * 「有结论」= 标了采纳 **或** 写了备注；没标记的是「原料」不是「结论」，不会被推。
+ * 后端在「最久没动的主题」前 5 条候选里随机挑一条，刷新即轮转（无需推送记录字段）。
+ * ⚠️ 库里还没有任何结论时返回 **200 + null**（不是 204）—— 调用方要能区分
+ * 「确实还没有结论」与「请求失败」，前者给引导文案，不能静默空白。
+ */
+export function getNextConclusion() {
+  return request({ url: '/toolkit/ask-topics/next-conclusion/', method: 'get' })
 }
 
 export function getAskTopic(id: number) {

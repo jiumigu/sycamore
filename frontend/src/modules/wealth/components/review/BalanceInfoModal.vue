@@ -29,18 +29,19 @@
           </el-form-item>
         </el-col>
       </el-row>
-      <el-row :gutter="12">
-        <el-col :span="12">
-          <el-form-item label="流水结余">
-            <el-input-number v-model="form.balance" :precision="2" style="width:100%" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="存款余额">
-            <el-input-number v-model="form.deposit" :precision="2" style="width:100%" />
-          </el-form-item>
-        </el-col>
-      </el-row>
+      <el-form-item label="每月余额">
+        <el-input-number v-model="form.balance" :precision="2" style="width:100%" />
+        <div style="font-size:12px;line-height:1.5;margin-top:4px;color:var(--el-text-color-secondary)">
+          一般等于「收入 − 支出」。留空按 0 记。
+        </div>
+      </el-form-item>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="存款余额不在这里录"
+        description="已统一到「资产盘点」：按科目盘一次，复盘列表就会自动引到那一期的净资产。"
+      />
       <el-form-item label="备注">
         <el-input v-model="form.notes" type="textarea" :rows="2" />
       </el-form-item>
@@ -63,7 +64,6 @@ const props = withDefaults(defineProps<{
     income?: number
     expense?: number
     balance?: number | null
-    deposit?: number | null
     notes?: string
   } | null
   saving?: boolean
@@ -76,17 +76,17 @@ const emit = defineEmits<{
     income: number
     expense: number
     balance: number | null
-    deposit: number | null
     notes: string
   }]
 }>()
 
+// 🔴 刻意**没有** `deposit`：「存款余额」已收口到「资产盘点」，
+//    这里再开一个输入框就等于恢复第二个录入口（2026-10-03 退役，见决策稿）。
 const form = reactive({
   yearmon: '',
   income: 0,
   expense: 0,
   balance: null as number | null,
-  deposit: null as number | null,
   notes: '',
 })
 
@@ -96,7 +96,6 @@ watch(() => props.data, (val) => {
     form.income = val.income ?? 0
     form.expense = val.expense ?? 0
     form.balance = val.balance ?? null
-    form.deposit = val.deposit ?? null
     form.notes = val.notes ?? ''
   }
 }, { immediate: true })

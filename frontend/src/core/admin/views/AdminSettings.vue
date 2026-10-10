@@ -49,6 +49,43 @@
 
     <el-card class="settings-card">
       <template #header>
+        <span>摘录金句池</span>
+      </template>
+
+      <el-form label-width="140px" label-position="left">
+        <el-form-item label="长度上限">
+          <el-input-number
+            v-model="poolMaxLen"
+            :min="poolRange[0]"
+            :max="poolRange[1]"
+            :step="50"
+            controls-position="right"
+          />
+          <span class="unit-hint">字</span>
+          <div class="form-hint">
+            「每日金句」卡（汇总总览与仪表盘）只从<b>不超过这个字数</b>的摘录里轮转取句。
+            超过上限的摘录<b>照样存在、照样能搜到</b>，只是不再上首页卡片 ——
+            在「摘录管理」里可以按「超长不上卡」把它们筛出来看。
+          </div>
+          <div class="form-hint">
+            当前共 {{ poolStats.total }} 条摘录：<b>{{ poolStats.in_pool }}</b> 条会进池，
+            <b>{{ poolStats.out_pool }}</b> 条因超长不上卡。
+          </div>
+        </el-form-item>
+
+        <el-form-item>
+          <el-button type="primary" :loading="poolSaving" @click="handlePoolSave">
+            保存配置
+          </el-button>
+          <el-button :loading="poolLoading" @click="fetchPoolStats">刷新预览</el-button>
+        </el-form-item>
+
+        <div v-if="poolSavedMsg" class="connection-status success">{{ poolSavedMsg }}</div>
+      </el-form>
+    </el-card>
+
+    <el-card class="settings-card">
+      <template #header>
         <span>Obsidian 集成配置</span>
       </template>
 
@@ -125,6 +162,15 @@ const obsidian = reactive({
   samples_folder: '05_人生样本(LifeSamples)',
 })
 
+// ─── 摘录金句池（v3.60.12）───
+// 区间与当前值都**由后端下发**，前端不写第二份阈值（同 RATIO_BANDS 的判据）
+const poolMaxLen = ref(500)
+const poolRange = ref<[number, number]>([50, 5000])
+const poolStats = reactive({ total: 0, in_pool: 0, out_pool: 0 })
+const poolSaving = ref(false)
+const poolLoading = ref(false)
+const poolSavedMsg = ref('')
+
 const saving = ref(false)
 const saved = ref(false)
 const obsidianSaving = ref(false)
@@ -135,6 +181,12 @@ async function fetchProfile() {
   try {
     const res = await getProfile()
     Object.assign(profile, res.data)
+    if (typeof res.data.quote_pool_max_len === 'number') {
+      poolMaxLen.value = res.data.quote_pool_max_len
+    }
+    if (Array.isArray(res.data.quote_pool_len_range) && res.data.quote_pool_len_range.length === 2) {
+      poolRange.value = res.data.quote_pool_len_range as [number, number]
+    }
   } catch {
     ElMessage.error('获取配置失败')
   }
@@ -190,6 +242,49 @@ async function handleObsidianSave() {
   }
 }
 
+/**
+ * 金句池分布（当前生效上限下，几条进池、几条超长）。
+ *
+ * ⚠️ 直接走 `request` 调 toolkit 的接口，**不 import 业务模块的 api** ——
+ * 这是系统设置页的既有约定（见 modules/lifesample/README.md 里对 AdminSettings 的说明）。
+ */
+async function fetchPoolStats() {
+  poolLoading.value = true
+  try {
+    const res = await request<{ total: number; in_pool: number; out_pool: number }>({
+      url: '/toolkit/quotes/stats/',
+      method: 'get',
+    })
+    Object.assign(poolStats, res.data)
+  } catch {
+    Object.assign(poolStats, { total: 0, in_pool: 0, out_pool: 0 })
+  } finally {
+    poolLoading.value = false
+  }
+}
+
+async function handlePoolSave() {
+  poolSaving.value = true
+  poolSavedMsg.value = ''
+  try {
+    await updateProfile({ quote_pool_max_len: poolMaxLen.value })
+    // 保存后立刻回读统计 —— 让「改完之后有几条会进池」当场可见，
+    // 而不是让用户自己回摘录管理里数（配置项最怕「改了不知道后果」）
+    await fetchPoolStats()
+    poolSavedMsg.value =
+      `已保存：上限 ${poolMaxLen.value} 字 → 现在 ${poolStats.in_pool} 条进池、` +
+      `${poolStats.out_pool} 条超长不上卡`
+    ElMessage.success('配置已保存')
+  } catch (e: unknown) {
+    // 越界时后端返回 400 与原因，直接念给用户；前端**不自己判区间**，避免两套阈值
+    const detail = (e as { response?: { data?: Record<string, string[]> } })?.response?.data
+    const msg = detail ? Object.values(detail).flat().join('；') : '保存失败'
+    ElMessage.error(msg)
+  } finally {
+    poolSaving.value = false
+  }
+}
+
 async function handleTestConnection() {
   scanning.value = true
   scanResult.value = null
@@ -238,6 +333,7 @@ function openObsidianFolder() {
 onMounted(() => {
   fetchProfile()
   fetchObsidianConfig()
+  fetchPoolStats()
 })
 </script>
 
@@ -266,6 +362,13 @@ onMounted(() => {
       color: var(--el-text-color-placeholder);
       margin-top: 4px;
       line-height: 1.4;
+    }
+
+    /* 「字」这个单位跟在 el-input-number 之后：给类名，不靠相邻间距拼 */
+    .unit-hint {
+      margin-left: 8px;
+      font-size: 13px;
+      color: var(--el-text-color-regular);
     }
 
     .connection-status {

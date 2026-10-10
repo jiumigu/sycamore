@@ -6,7 +6,7 @@
 | HealthRecord | health_step_info | 健康记录（managed=False，自动计算 total/years） |
 
 ## Services
-HealthStatsService 提供 8 方法：summary / milestones / daily_trend / calendar / timeline / type_stats / yearly_comparison
+HealthStatsService 提供 7 方法：summary / milestones / daily_trend / calendar / timeline / type_stats / yearly_comparison
 
 ## Constants
 - 目标：1 亿步 = 50 里程碑 × 200 万步
@@ -60,3 +60,28 @@ HealthStatsService 提供 8 方法：summary / milestones / daily_trend / calend
 | GET | /milestones/ | 月度里程碑列表 |
 | GET/PUT | /body-info/ | 身体信息获取/更新 |
 | GET | /adjustments/ | 目标调整流水 |
+
+## 好朋友跟踪 (menstrual)
+
+### Models
+| Model | Table | 用途 |
+|-------|-------|------|
+| MenstrualRecord | health_menstrual_record | 周期记录（开始/结束日期、持续天数、偏移量、周期跨度） |
+
+约束：`UniqueConstraint(user_id, start_date)`（同一天只能有一条）；索引在 `start_date`、`user_id`。
+
+### 口径
+- `duration_days` 可自动算（结束 − 开始），也可**手动覆盖**（提前结束时以实际为准）
+- `cycle_days` 是**本次记录的周期跨度**，与上一条的间隔不是一回事
+- `stats`（平均周期 / 平均偏移 / 下次预测）**统一按最近 12 个月**取窗口 —— 更早的周期会让预测被历史漂移带偏
+
+### API Endpoints
+
+前缀 `/api/health/menstrual/`
+
+| 方法 | 端点 | 用途 |
+|------|------|------|
+| GET/POST | / | 列表/创建（?year=&month= 筛选） |
+| GET/PUT/DELETE | /&lt;id&gt;/ | 详情/更新/删除 |
+| GET | /stats/ | 平均周期 / 平均偏移 / 下次预测 |
+| GET | /trend/ | 周期跨度趋势（全部记录正序） |

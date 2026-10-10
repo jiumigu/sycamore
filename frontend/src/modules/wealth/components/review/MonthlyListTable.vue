@@ -25,8 +25,22 @@
       <el-table-column prop="savings_rate" label="结余率" width="100" align="right">
         <template #default="{ row }">{{ row.savings_rate }}%</template>
       </el-table-column>
-      <el-table-column prop="deposit" label="存款余额" min-width="130" align="right">
-        <template #default="{ row }"><span class="money-value">¥{{ fmt(row.deposit) }}</span></template>
+      <el-table-column prop="deposit" min-width="168" align="right">
+        <template #header>
+          <span>存款余额</span>
+          <el-tooltip
+            placement="top"
+            content="优先取「资产盘点」该月的净资产；该月没盘过，才回落到历史手填值（标「手填」）"
+          >
+            <el-icon class="col-help"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </template>
+        <template #default="{ row }">
+          <span class="money-value">¥{{ fmt(row.deposit) }}</span>
+          <el-tag v-if="row.deposit_source === 'legacy'" size="small" type="info" class="src-tag">
+            手填
+          </el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="操作" width="80" fixed="right">
         <template #default="{ row }">
@@ -54,6 +68,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { formatAmount, formatSignedAmount } from '@/shared/utils/format'
 import type { MonthlyListItem } from '../../types/wealthTypes'
 
@@ -76,8 +91,15 @@ const emit = defineEmits<{
 
 const page = ref(props.page)
 
+/**
+ * 金额格式化。
+ *
+ * 🔴 `null` 一律显示占位 `—`，**不是 `0.00`** —— `Number(null) === 0`，
+ *    沿用旧写法会把「这个月没有余额数据」画成「余额为 0」。
+ *    数值型空值有第二种含义（无数据 / 真的是 0），占位的作用是**消歧**。
+ */
 function fmt(v: number | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
+  if (v === null || v === undefined) return '—'
   return formatAmount(v)
 }
 
@@ -94,6 +116,8 @@ function handleRowClick(row: MonthlyListItem) {
 .monthly-list__pagination { margin-top: 12px; display: flex; justify-content: center; }
 .monthly-list__empty { padding: 24px; text-align: center; color: var(--el-text-color-placeholder); font-size: 13px; }
 .money-value { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
+.col-help { margin-left: 2px; vertical-align: -2px; color: var(--el-text-color-placeholder); cursor: help; }
+.src-tag { margin-left: 6px; transform: scale(.85); }
 .text-income { color: #52c41a; }
 .text-expense { color: #f5222d; }
 </style>

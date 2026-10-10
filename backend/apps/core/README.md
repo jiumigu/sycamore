@@ -33,6 +33,22 @@ Django 项目通用基础设施，不归属任何业务模块。
 }
 ```
 
+## 跨模块配置项（统一挂 UserProfile）
+
+单人系统没有独立的配置表，**跨模块的用户配置一律挂在 `UserProfile`**（单例，`user_id=1`）。
+
+| 配置 | 字段 | 默认 | 读取方 | 写入方 |
+|---|---|---|---|---|
+| 金句池长度上限 | `quote_pool_max_len` | 500 | `toolkit` 的 `resolve_quote_pool_max_len()`（供 `QuoteViewSet.next` / `stats` / `?pool=` 用） | 系统设置页 `core/admin/views/AdminSettings.vue` |
+
+约定（三条，改配置项时都适用）：
+
+- 🔴 **默认值的单一真源是模型字段的 `default`**（`DEFAULT_QUOTE_POOL_MAX_LEN`）——
+  读取端在缺配置行时**回落到它**，不另写一个数字（否则改默认值时两处不一致，而界面上看不出来）。
+- 🔴 **合法区间也是单一真源**（`QUOTE_POOL_LEN_RANGE`），由
+  `GET /core/profile/` 的 `quote_pool_len_range` **下发给前端**，
+  前端不硬编码 min/max（同 `RATIO_BANDS` 的判据：阈值只该有一份，前端只负责显示）。
+- 🔴 越界值 **400 报错，不静默夹取** —— 悄悄改成边界值会让用户以为配置生效了。
 ## Privacy Mode
 
 单人系统的隐私脱敏体系，通过 `UserProfile` 模型控制全局开关。
@@ -41,7 +57,7 @@ Django 项目通用基础设施，不归属任何业务模块。
 
 | 文件 | 用途 |
 |------|------|
-| `models.py:UserProfile` | `user_id`(PK) + `privacy_mode`(BooleanField) + `logseq_path`(CharField)，单例模式 |
+| `models.py:UserProfile` | `user_id`(PK) + `privacy_mode`(BooleanField) + `logseq_path`(CharField) + `quote_pool_max_len`(PositiveIntegerField)，单例模式 |
 | `views.py:ProfileView` | `GET /api/core/profile/` 获取配置，`PATCH /api/core/profile/` 更新开关 |
 | `urls.py` | `path('profile/', ProfileView.as_view())` |
 

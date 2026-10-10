@@ -4,6 +4,10 @@
 | Model | Table | 用途 |
 |-------|-------|------|
 | SugarRecord | sugar_record | 小确幸记录（s_id PK, 快乐程度5-20, 奖励金额优先取前端传入值否则=快乐值, 同步标记, joy_type 五种分类） |
+| SugarTemplate | sugar_template | 小确幸模板（预置记录，一键套用） |
+| EnergyTemplate | sugar_energy_template | 能量清单模板（模板项 + 分值） |
+| EnergyLog | sugar_energy_log | 能量清单完成记录 |
+| EnergyDailyStats | sugar_energy_daily_stats | 每日能量统计（按日聚合，供趋势） |
 
 ## 快乐程度→奖励
 
@@ -33,6 +37,18 @@
 
 | 方法 | 端点 | 用途 |
 |------|------|------|
-| GET/POST | /sugar/ | 列表/创建 |
-| GET/PUT/DELETE | /sugar/<pk>/ | 详情/更新/删除 |
-| GET | /sugar/categories/ | 分类统计 |
+| GET/POST | /records/ | 小确幸列表/创建 |
+| GET/PUT/DELETE | /records/&lt;pk&gt;/ | 详情/更新/删除 |
+| GET | /records/joy_type_stats/ | 快乐类型统计 |
+| GET | /records/categories/ | 分类统计 |
+| GET | /categories/ | 分类统计（与上一条同实现，旧入口兼容） |
+| GET/POST | /templates/ | 小确幸模板列表/创建 |
+| GET/PUT/DELETE | /templates/&lt;pk&gt;/ | 模板详情/更新/删除 |
+| GET/POST | /energy/templates/ | 能量清单模板列表/创建 |
+| POST | /energy/complete/ | 完成一项能量清单 |
+| GET | /energy/stats/ | 能量统计 |
+| GET | /energy/history/ | 完成历史 |
+| GET | /energy/daily/ | 按日明细 |
+| GET | /energy/trend/ | 能量趋势 |
+
+⚠️ 记录端点的路径是 `/records/`，**不是** `/sugar/` —— viewset 注册名为 `records`（`urls.py:7`）。

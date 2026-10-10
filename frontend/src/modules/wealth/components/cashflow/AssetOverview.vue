@@ -12,7 +12,10 @@
         </div>
         <div class="asset-overview__items">
           <div class="asset-overview__item" v-for="item in assetItems" :key="item.key">
-            <span class="asset-overview__item-label">{{ item.label }}</span>
+            <el-tooltip v-if="item.hint" :content="item.hint" placement="top">
+              <span class="asset-overview__item-label is-hinted">{{ item.label }}</span>
+            </el-tooltip>
+            <span v-else class="asset-overview__item-label">{{ item.label }}</span>
             <span class="asset-overview__item-value">¥{{ fmt(item.value) }}</span>
           </div>
         </div>
@@ -44,10 +47,17 @@ const assetItems = computed(() => {
   if (!props.overview) return []
   const s = props.overview.summary
   return [
-    { key: 'financial_assets', label: '金融资产', value: s.financial_assets },
+    // 🔴 「金融资产」= 全部非自用资产合计（**含**应收借出）——
+    // 下面「应收借出」是它的明细拆解，不是并列的另一项，别把它们相加。
+    {
+      key: 'financial_assets',
+      label: '金融资产',
+      value: s.financial_assets,
+      hint: '全部非自用资产合计，已包含应收借出',
+    },
     { key: 'flow_total', label: '流动资金', value: s.flow_total },
     { key: 'accumulationfund', label: '公积金', value: props.overview.accounts.accumulationfund },
-    { key: 'lend', label: '应收借出', value: s.lend },
+    { key: 'lend', label: '应收借出', value: s.lend, hint: '上面「金融资产」的其中一部分' },
     { key: 'borrow', label: '负债', value: s.borrow },
   ]
 })
@@ -150,6 +160,10 @@ watch(() => props.overview, () => {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
+}
+.asset-overview__item-label.is-hinted {
+  border-bottom: 1px dashed var(--el-border-color);
+  cursor: help;
 }
 .asset-overview__item-label {
   color: var(--el-text-color-secondary);

@@ -7,6 +7,12 @@
         <p class="page-desc">按业务场景容器归档 AI 问答：多 AI 对照 + 多轮追问对话流，支持检索 / 打标 / 导出 md</p>
       </div>
       <div class="header-actions">
+        <!-- 回顾入口（v3.60.11）：从「存答案」转向「回看当时的判断」。
+             页内子路由 ⇒ 侧边栏「AI 问答库」保持高亮；不进菜单、不动既有按钮顺序。 -->
+        <el-button type="primary" @click="$router.push('/toolkit/ask-library/review')">
+          <el-icon><View /></el-icon>
+          回顾
+        </el-button>
         <el-dropdown trigger="click" @command="exportAcceptedSummary">
           <el-button type="primary" plain :icon="DocumentChecked">采纳汇总</el-button>
           <template #dropdown>
@@ -388,7 +394,7 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Search, Download, FolderOpened, DocumentChecked } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search, Download, FolderOpened, DocumentChecked, View } from '@element-plus/icons-vue'
 import AskAnswerNode from './AskAnswerNode.vue'
 import {
   getAskTopics, getAskTopic, createAskTopic, updateAskTopic, deleteAskTopic,

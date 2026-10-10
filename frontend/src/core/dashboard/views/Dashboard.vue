@@ -190,7 +190,10 @@
       </div>
     </el-card>
 
-    <!-- 每日金句 -->
+    <!-- 每日金句（v3.60.11 起取数改走 quotes/next/：长度不超上限的池 + 冷落优先，不再纯随机；
+         v3.60.12 起上限改为「系统管理 → 系统设置」里的配置项。
+         卡片**显示全文**（卡内滚动兜住长文），不再截断 ——
+         原来的段落分支（限 4 行 + 点击看全文）与 QuoteDetailDialog 已随之撤掉。 -->
     <el-card shadow="never" class="section-card">
       <template #header>
         <div class="card-header">
@@ -199,16 +202,8 @@
         </div>
       </template>
       <div class="quote-body" v-if="dailyQuote">
-        <!-- 短句类型：直接显示内容 -->
-        <div v-if="!dailyQuote.is_paragraph" class="quote-content">
+        <div class="quote-content">
           {{ dailyQuote.content }}
-        </div>
-        <!-- 段落类型：完整内容，限制 4 行 -->
-        <div v-else class="quote-paragraph" @click="showQuoteFull = true">
-          <div class="paragraph-content">
-            {{ dailyQuote.content }}
-          </div>
-          <div v-if="isContentLong" class="expand-hint">... 点击展开全文</div>
         </div>
         <div class="quote-meta">
           <span v-if="dailyQuote.author" class="quote-author">— {{ dailyQuote.author }}</span>
@@ -217,18 +212,11 @@
       </div>
       <el-empty v-else description="暂无金句" :image-size="60" />
     </el-card>
-    <el-dialog v-model="showQuoteFull" :title="dailyQuote?.short_title || '摘录详情'" width="600px" append-to-body>
-      <div class="full-content" style="white-space: pre-wrap; line-height: 1.8;">
-        {{ dailyQuote?.content }}
-      </div>
-      <div v-if="dailyQuote?.author" style="margin-top:12px;color:#999;">— {{ dailyQuote.author }}</div>
-      <div v-if="dailyQuote?.source" style="color:#999;">📎 {{ dailyQuote.source }}</div>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { getGoalList } from '@/modules/goals/api/goalApi'
@@ -239,7 +227,7 @@ import type { ReaderInteraction } from '@/modules/relation/types/relationshipTyp
 import { getYearlyOverview } from '@/modules/summary/api/summaryApi'
 import { getWeekCount, getWeekStats } from '@/modules/temporal/api/temporalApi'
 import { getRandomRetro } from '@/modules/summary/api/summaryApi'
-import { getRandomQuote } from '@/modules/toolkit/api/quoteApi'
+import { getNextQuote } from '@/modules/toolkit/api/quoteApi'
 import type { InboxItem } from '@/modules/inbox/types/inboxTypes'
 import type { Quote } from '@/modules/toolkit/types/quoteTypes'
 
@@ -283,8 +271,6 @@ const pendingItems = ref<InboxItem[]>([])
 const alerts = reactive<AlertItem[]>([])
 const retroItem = ref<RetroItem | null>(null)
 const dailyQuote = ref<Quote | null>(null)
-const showQuoteFull = ref(false)
-const isContentLong = computed(() => (dailyQuote.value?.content?.length || 0) > 200)
 
 // ─── 快速读者互动 ───
 const quickContent = ref('')
@@ -399,10 +385,16 @@ async function fetchRandomRetro() {
   }
 }
 
+/**
+ * 金句：走 `quotes/next/`（短句池 + 冷落优先），与汇总总览取同一份口径 ——
+ * 两处若各用各的接口，迟早会「同一张卡显示两类内容」而界面上看不出来。
+ * ⚠️ 池为空时后端返回 **204**，`res.data` 是空串（不是 null），要显式判类型。
+ */
 async function refreshQuote() {
   try {
-    const res = await getRandomQuote()
-    dailyQuote.value = res.data as Quote
+    const res = await getNextQuote()
+    const data = res.data
+    dailyQuote.value = data && typeof data === 'object' ? (data as Quote) : null
   } catch {
     dailyQuote.value = null
   }
@@ -728,39 +720,14 @@ onMounted(() => {
   text-align: right;
 }
 
-.quote-paragraph {
-  cursor: pointer;
-
-  .paragraph-content {
-    display: -webkit-box;
-    -webkit-line-clamp: 4;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1.6;
-    max-height: 6.4em;
-    font-size: 14px;
-    color: #555;
-    white-space: pre-wrap;
-  }
-
-  .expand-hint {
-    font-size: 12px;
-    color: #409eff;
-    margin-top: 4px;
-    cursor: pointer;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-}
-
 .quote-content {
   font-size: 15px;
   line-height: 1.6;
   color: #333;
   white-space: pre-wrap;
+  /* 同汇总总览：长度上限可配之后长摘录会全文上卡，卡内滚动兜住版面 */
+  max-height: 190px;
+  overflow-y: auto;
 }
 
 .quote-meta {

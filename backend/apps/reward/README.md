@@ -5,7 +5,7 @@
 |-------|-------|------|
 | RewardPool | reward_pool | 单例奖励池 |
 | RewardTransaction | reward_transaction | 奖励流水 |
-| GiftList | gift_list | 礼物清单 |
+| GiftList | reward_gift_list | 礼物清单 |
 
 ## 交易类型 (TRANSACTION_TYPES)
 
@@ -39,6 +39,7 @@
 |------|------|------|
 | GET | /pool/ | 奖励池概览 |
 | GET | /transactions/ | 流水列表（分页+筛选） |
+| DELETE | /transactions/&lt;id&gt;/ | 删除流水 |
 | GET | /stats/sources/ | 奖励来源统计 |
 | GET/POST | /gifts/ | 礼物列表/新建 |
 | GET | /gifts/stats/ | 礼物统计 |

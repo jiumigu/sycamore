@@ -7,6 +7,9 @@ from django.db import connection
 
 from apps.wealth.models import WealthBalanceList
 
+from .asset_service import net_worth_by_yearmon
+from .cashflow_service import norm_yearmon
+
 
 MONTHS_MAP = {
     1: '一月', 2: '二月', 3: '三月', 4: '四月',
@@ -16,23 +19,66 @@ MONTHS_MAP = {
 
 
 def _parse_balance_list(bi: WealthBalanceList) -> dict:
-    """将 WealthBalanceList 记录转为统一字段名"""
+    """将 WealthBalanceList 记录转为统一字段名 —— **只负责「流」**。
+
+    ⚠️ 存款 / 余额**不在这里出**：它们由 `_deposit_payload()` 统一裁决
+    （资产盘点优先、历史手填回落）。别再往这个 dict 里加 `deposit` ——
+    那样就绕过了唯一取数口，「来源」标注会跟着丢，前端只能按值猜。
+    """
     income_val = (bi.wageincome or 0) + (bi.otherincome or 0)
     expense_val = bi.outmoney or 0
     balance_val = round(income_val - expense_val, 2)
-    deposit_val = bi.total
-    deposit_balance_val = bi.balance
     savings_rate = round(balance_val / income_val * 100, 1) if income_val > 0 else 0
     return {
         'income': round(income_val, 2),
         'expense': round(expense_val, 2),
         'balance': round(balance_val, 2),
         'savings_rate': savings_rate,
-        'deposit': round(deposit_val, 2) if deposit_val else None,
-        'deposit_balance': round(deposit_balance_val, 2) if deposit_balance_val else None,
         'notes': bi.remarks or '',
         'from_balance_list': True,
     }
+
+
+def _asset_index(user_id: int) -> dict[str, dict]:
+    """资产盘点净值索引，**键已归一**为 `YYYY-MM`。
+
+    归一这一步不能省：两表理论上都存 `YYYY-MM`，但历史上出现过 `2026-6`
+    这类写法。不归一的后果是**静默回落到手填值** —— 界面看着正常，
+    只是那个月的余额换了来源，而你在界面上看不出来。
+    """
+    return {norm_yearmon(k): v for k, v in net_worth_by_yearmon(user_id).items()}
+
+
+def _deposit_payload(bi: WealthBalanceList | None, yearmon: str,
+                     asset_index: dict[str, dict]) -> dict:
+    """「存款余额」的**唯一取数口**（2026-10-03 收口）。
+
+    口径（推导见 `docs/wealth_balance_list-字段退役决策稿-20261003.md`）：
+
+    | 情形 | 取值 | `deposit_source` |
+    |---|---|---|
+    | 该月有资产盘点快照 | 该月**净资产** `net_worth` | `asset_snapshot` |
+    | 无快照、但有历史手填值 | `wealth_balance_list.total` | `legacy` |
+    | 两者都没有 | `None`（前端占位 `—`，**不是 0**） | `None` |
+
+    🔴 金额**和来源一起返回**：前端不许按值猜来源，也不许自己算净值。
+       `deposit_as_of` 是快照的盘点日期，用来在界面上说清
+       「这个数是哪一天盘出来的」。
+    """
+    snapshot = asset_index.get(norm_yearmon(yearmon))
+    if snapshot:
+        return {
+            'deposit': snapshot['net_worth'],
+            'deposit_source': 'asset_snapshot',
+            'deposit_as_of': snapshot['snapshot_date'],
+        }
+    if bi is not None and bi.total is not None:
+        return {
+            'deposit': round(float(bi.total), 2),
+            'deposit_source': 'legacy',
+            'deposit_as_of': None,
+        }
+    return {'deposit': None, 'deposit_source': None, 'deposit_as_of': None}
 
 
 def _aggregate_from_bills(user_id: int, year: int, month: int) -> dict:
@@ -67,30 +113,39 @@ def _aggregate_from_bills(user_id: int, year: int, month: int) -> dict:
     }
 
 
-def get_monthly_review(user_id: int, year: int, month: int) -> dict:
-    """获取指定月份的复盘汇总 — 优先使用 balance_list，否则从账单聚合"""
+def get_monthly_review(user_id: int, year: int, month: int,
+                       asset_index: dict[str, dict] | None = None) -> dict:
+    """获取指定月份的复盘汇总 — 优先使用 balance_list，否则从账单聚合
+
+    `asset_index` 是**可选**入参（`_asset_index()` 的返回值），传进来只为
+    **省查询**：批量场景（趋势 / 同比环比）一次算好、循环复用。
+    不传则按需取一次 —— 默认路径行为不变。
+    """
     yearmon = f"{year:04d}-{month:02d}"
     yearmon_alt = f"{year}-{month:02d}"  # 兼容不同分隔符
 
-    # 尝试从 balance_list 获取
-    from_db = None
+    # 尝试从 balance_list 获取（`bi` 必须在两个 except 之后仍然可用）
+    bi = None
     try:
         bi = WealthBalanceList.objects.get(yearmon=yearmon)
-        from_db = _parse_balance_list(bi)
     except WealthBalanceList.DoesNotExist:
         try:
             bi = WealthBalanceList.objects.get(yearmon=yearmon_alt)
-            from_db = _parse_balance_list(bi)
         except WealthBalanceList.DoesNotExist:
-            pass
+            bi = None
 
     # 从账单聚合
     bills = _aggregate_from_bills(user_id, year, month)
 
-    if from_db:
-        result = {**bills, **from_db}
+    if bi is not None:
+        result = {**bills, **_parse_balance_list(bi)}
     else:
-        result = {**bills, 'deposit': None, 'deposit_balance': None, 'notes': '', 'from_balance_list': False}
+        result = {**bills, 'notes': '', 'from_balance_list': False}
+
+    # 存款余额：资产盘点优先、历史手填回落（唯一取数口）
+    result.update(_deposit_payload(
+        bi, yearmon, asset_index if asset_index is not None else _asset_index(user_id)
+    ))
 
     # 环比计算
     mom = _calc_mom(user_id, year, month, result)
@@ -149,6 +204,7 @@ def _get_max_daily(user_id: int, year: int, month: int, tx_type: str) -> dict | 
 def get_trend_data(user_id: int, months: int = 12) -> list[dict]:
     """获取近N个月收支趋势数据"""
     today = datetime.now()
+    asset_index = _asset_index(user_id)   # 一次算好，循环里复用（否则 12 次往返）
     results = []
     for i in range(months - 1, -1, -1):
         m = today.month - i
@@ -157,7 +213,7 @@ def get_trend_data(user_id: int, months: int = 12) -> list[dict]:
             m += 12
             y -= 1
 
-        review = get_monthly_review(user_id, y, m)
+        review = get_monthly_review(user_id, y, m, asset_index)
         results.append({
             'yearmon': f"{y:04d}-{m:02d}",
             'income': review['income'],
@@ -210,12 +266,13 @@ def get_monthly_list(user_id: int, page: int = 1, page_size: int = 12) -> dict:
     total = bis.count()
     page_bis = bis[offset:offset + page_size]
 
+    asset_index = _asset_index(user_id)   # 整页一次，别在循环里逐条查
+
     items = []
     for bi in page_bis:
         income_val = (bi.wageincome or 0) + (bi.otherincome or 0)
         expense_val = bi.outmoney or 0
         balance_val = round(income_val - expense_val, 2)
-        deposit_val = bi.total
         savings_rate = round(balance_val / income_val * 100, 1) if income_val > 0 else 0
 
         items.append({
@@ -223,9 +280,9 @@ def get_monthly_list(user_id: int, page: int = 1, page_size: int = 12) -> dict:
             'income': round(income_val, 2),
             'expense': round(expense_val, 2),
             'balance': round(balance_val, 2),
-            'deposit': round(deposit_val, 2) if deposit_val else None,
             'savings_rate': savings_rate,
             'notes': bi.remarks or '',
+            **_deposit_payload(bi, bi.yearmon, asset_index),
         })
 
     return {
@@ -238,16 +295,18 @@ def get_monthly_list(user_id: int, page: int = 1, page_size: int = 12) -> dict:
 
 def get_compare_data(user_id: int, year: int, month: int) -> dict:
     """同比环比分析"""
-    current = get_monthly_review(user_id, year, month)
+    asset_index = _asset_index(user_id)   # 三处复用，别各查一遍
+    current = get_monthly_review(user_id, year, month, asset_index)
 
     prev_m = month - 1
     prev_y = year
     if prev_m == 0:
         prev_m = 12
         prev_y -= 1
-    prev_month = get_monthly_review(user_id, prev_y, prev_m)
+    prev_month = get_monthly_review(user_id, prev_y, prev_m, asset_index)
 
-    yoy = get_monthly_review(user_id, year - 1, month) if year - 1 >= 2000 else None
+    yoy = (get_monthly_review(user_id, year - 1, month, asset_index)
+           if year - 1 >= 2000 else None)
 
     def diff_pct(cur, prev_val):
         if prev_val and prev_val != 0:

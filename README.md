@@ -58,10 +58,10 @@ npm run dev
 sycamore/
 ├── backend/
 │   ├── sycamore/          # Django 项目配置（settings, urls）
-│   ├── apps/              # 所有 Django App，按生命维度划分
+│   ├── apps/              # 所有 Django App，按生命维度划分（19 个）
 │   │   ├── temporal/      # 时间感知（日记 + 时间统计 + 活动追踪）
 │   │   ├── health/        # 健康管理（1亿步目标）
-│   │   ├── wealth/        # 财务管理（热力图 + 月度日历）
+│   │   ├── wealth/        # 财务管理（热力图 + 月度日历 + 资产负债/比率/物耗盘点）
 │   │   ├── relation/      # 关系管理（能量分 + 质量诊断）
 │   │   ├── book/          # 书籍阅读
 │   │   ├── sugar/         # 小确幸（自动同步奖励池）
@@ -69,10 +69,14 @@ sycamore/
 │   │   ├── travel/        # 旅行记录
 │   │   ├── reward/        # 奖励池（单例模式）
 │   │   ├── goals/         # 目标管理（Goal → Milestone → Action）
-│   │   ├── dams/          # 数字资产管理（Celery 自动化）
+│   │   ├── redemption/    # 三年赎回期
+│   │   ├── lifesample/    # 人生样本
+│   │   ├── treasure/      # 好东西
+│   │   ├── food/          # 美食记录
+│   │   ├── dams/          # 数字资产管理
+│   │   ├── inbox/         # 收件箱（大脑的缓冲区，支持转为目标/能量）
 │   │   ├── toolkit/       # 工具集（可扩展工具箱）
 │   │   ├── summary/       # 跨模块进度聚合
-│   │   ├── inbox/         # 收件箱（大脑的缓冲区，支持转为目标/能量）
 │   │   └── core/          # 系统基础设施
 │   ├── manage.py
 │   └── requirements.txt
@@ -92,7 +96,7 @@ sycamore/
 |------|------|
 | 📅 时间感知 | 日记流、时间统计（含周度追踪）、活动追踪、日程视图 |
 | 🎯 目标管理 | Goal→Milestone→Action 三层模型、良品率、快速创建 |
-| 💰 财富管理 | 现金流热力图、月度日历、月度复盘、现金盘点、定期存款 |
+| 💰 财富管理 | 现金流热力图、月度日历、月度复盘、定期存款、资产盘点（科目主数据 / 资产负债表快照 / 负债与应收台账 / 分类规则 / 六项规划比率）、生存资源盘点（吃穿用数字还能撑多久） |
 | 👥 关系管理 | 联系人、读者群体、成长记录、月末盘点 |
 | 🏃 健康管理 | 步数追踪、体重管理、好朋友跟踪、身体健康自查 |
 | 📚 知识沉淀 | 书籍管理、摘录馆（名言/典故/故事） |
@@ -106,16 +110,21 @@ sycamore/
 
 **归档原则：数据、后端 API、路由全部保留，只收敛入口——可 100% 逆操作。**
 
+> **「已归档」是软偏好，不是硬编码。** 侧边栏 `LayoutSidebar.vue:107` 优先读用户偏好表（`menu_key → is_favorite`），**无记录时**才回落到 `frontend/src/shared/config/menuConfig.ts` 的 `defaultArchived`。所以上表只是**没被改过的初始态**。
+
 | 已归档模块 | 原入口 | 归档理由（数据量） |
 |-----------|--------|-------------------|
 | 个人良品率 | `/output` | 23 条 |
 | 数字资产 | `/dams` | 1 条 |
 | 美食地图 | `/food` | 1 条 |
-| 旅行计划 | `/travel/plans` | 1 条 |
 | 成长记录（冲突追踪） | `/relation/conflicts` | 3 条 |
-| 自由支配额度 | `/toolkit/*` | 侧边栏独立入口收敛，工具仍可在工具箱聚合页使用 |
+| 舞蹈记录 | `/dance` | 301 条 |
 
-**重新激活**：在 `frontend/src/shared/components/layout/LayoutSidebar.vue` 中把对应 `router-link` 从 `nav-group--archived` 分组移回原业务分组即可（样式同时去掉 `archived-item` / `archived-tag`）。
+> 「自由支配额度」（`/toolkit/free-spending`）**不属于归档机制**：它在 `menuConfig.ts` 里**根本没有独立侧边栏入口**（v3.53 工具箱瘦身时移除），因此**无法通过菜单管理重新激活**——只能从「工具箱」聚合页进入。后端与工具本身都在。
+
+> 旅行计划 `/travel/plans` **已重新启用**（v3.55+ 与旅行心愿单 / 路线推演 / 足迹并列为「旅行四件套」），不再属于归档分组。
+
+**重新激活**：进「菜单管理」页（`/admin/menus`，`core/admin/views/MenuManager.vue`）把该模块勾为常用即可，偏好落库后侧边栏即时归位——**无需改代码**。（改 `menuConfig.ts` 的 `defaultArchived` 只影响从没被设置过的模块。）
 
 ## 设计理念
 

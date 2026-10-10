@@ -10,13 +10,18 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from django.db.models import Case, Count, DateField, DecimalField, F, Q, Sum, Value, When
+from django.db.models import Case, Count, DateField, DecimalField, F, ProtectedError, Q, Sum, Value, When
 from django.db.models.functions import Cast
 
 # 账单侧赎回归属词表单一真源（与时间侧 L1 归因**同源不同轴**，见 constants 注释）
 from apps.temporal.constants import PERIOD_TAG_CHOICES
 
-from ..models import WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory, WealthBillList
+from ..models import (
+    WealthLifeWeekCalendar, WealthCurrentScenario, WealthScenarioHistory,
+    WealthBillList, WealthLiabilityDetail, WealthReceivableDetail,
+    WealthAssetAccount, WealthAssetSnapshot,
+    WealthClassifyRule,
+)
 from ..serializers import (
     WeekCalendarSerializer, CurrentScenarioSerializer, ScenarioHistorySerializer,
     CoverageInputSerializer, BudgetInputSerializer, LifeSummarySerializer,
@@ -25,16 +30,27 @@ from ..serializers import (
     MonthlyReviewSerializer, TrendDataSerializer, CategoryRankingSerializer,
     MonthlyListSerializer, CompareSerializer, BalanceInfoSerializer,
     CashFlowOverviewSerializer, AssetTrendItemSerializer,
-    SnapshotListSerializer, CashFlowSnapshotSerializer, ReconcileSerializer,
+    SnapshotListSerializer, CashFlowSnapshotSerializer,
     RegularListSerializer, RegularStatsSerializer, RegularFormSerializer,
     MatureProcessSerializer, ExpiringItemSerializer,
+    LiabilityItemSerializer, LiabilitySummarySerializer, LiabilityFormSerializer,
+    ReceivableItemSerializer, ReceivableSummarySerializer, ReceivableFormSerializer,
+    AssetAccountItemSerializer, AssetAccountSummarySerializer, AssetAccountFormSerializer,
+    SeedResultSerializer, AssetSnapshotRowSerializer, AssetSnapshotFormSerializer,
+    ClassifyRuleItemSerializer, ClassifyRuleFormSerializer, ClassifyRuleSummarySerializer,
+    SeedClassifyResultSerializer, ClassifyPreviewSerializer,
+    ClassifySummarySerializer, UnclassifiedCandidatesSerializer,
+    RatioMetaSerializer, RatioOverviewSerializer, RatioTrendSerializer,
 )
 from ..constants import (
     WINDOW_START_AGE, WINDOW_END_AGE, WINDOW_WEEKS,
     WINDOW_START_INDEX, WINDOW_END_INDEX,
+    CLASSIFY_CANDIDATE_LIMIT,
 )
 from ..services.calendar_init import init_week_calendar_for_user, update_lived_status
-from ..services.week_aggregator import aggregate_weekly_net_income, get_net_level
+from ..services.week_aggregator import (
+    aggregate_weekly_net_income, get_net_level, current_age_week,
+)
 from ..services.coverage_calculator import calculate_coverage, calculate_daily_budget
 from ..services.monthly_aggregator import (
     aggregate_monthly_days, get_daily_detail, calculate_monthly_summary,
@@ -45,8 +61,18 @@ from ..services.review_service import (
 )
 from ..services.cashflow_service import (
     get_cashflow_overview, get_asset_trend, get_snapshot_list,
-    reconcile, create_or_update_snapshot, copy_last_month,
+    create_or_update_snapshot, copy_last_month,
     get_cashflow_by_yearmon,
+)
+from ..services.debt_service import (
+    get_liability_list, get_liability_summary,
+    get_receivable_list, get_receivable_summary,
+)
+from ..services.asset_service import (
+    get_account_list, get_account_summary,
+    create_account, update_account, delete_account, seed_asset_accounts,
+    list_snapshots, get_snapshot_detail, get_snapshot_by_yearmon,
+    save_snapshot, delete_snapshot,
 )
 from ..services.regular_service import (
     get_stats, get_regular_list, get_regular_detail,
@@ -55,23 +81,29 @@ from ..services.regular_service import (
     update_all_status, get_available_banks, calculate_interest,
     FLAG_ONGOING, FLAG_MATURED, FLAG_WITHDRAWN,
 )
+from ..services.classify_service import (
+    get_rule_list, get_rule_summary,
+    create_rule, update_rule, delete_rule, seed_classify_rules,
+    preview_rule_impact,
+    classify_summary, get_unclassified_candidates, available_periods,
+)
+from ..services.ratio_service import (
+    get_ratio_overview, get_ratio_trend, available_anchor_months,
+    resolve_asset_position,
+)
+from ..services.ratio_grade import all_ratio_meta
 
 
 def calculate_current_age_week():
-    """计算当前周岁年龄和 ISO 周数"""
-    today = date.today()
-    birth_str = getattr(settings, 'WEALTH_BIRTH_DATE', '1994-10-01')
-    birth = date.fromisoformat(birth_str)
+    """当前年龄与周数 —— **读周历表**，不按出生日期现算。
 
-    age = today.year - birth.year
-    if (today.month, today.day) < (birth.month, birth.day):
-        age -= 1
-
-    return {
-        'current_age': age,
-        'current_week': today.isocalendar()[1],
-        'birth_date': birth.isoformat(),
-    }
+    旧实现用 `settings.WEALTH_BIRTH_DATE` + `today.isocalendar()[1]` 现算，
+    而周历表的 `age_year` 是按日历年年序编的、周数以「当年第一个周一」为第 1 周 ——
+    两把尺子在跨年处错开整整一年，推演起点因此落在历史终点之后 52 周，
+    热力图 31/32 岁之间出现一条缺口。真源与理由详见
+    `services/week_aggregator.current_age_week`。
+    """
+    return current_age_week()
 
 
 class CurrentAgeWeekView(APIView):
@@ -293,14 +325,29 @@ class LifeSummaryView(APIView):
 
 
 class BillsByWeekView(APIView):
-    """按周查询账单明细"""
+    """按周查询账单明细
+
+    ⚠️ 路径是 `bills/by_week/`，**不是** `bills/<pk>/` 下的子路径 ——
+    它靠 `urls.py` 里「静态路径在前、DRF 路由器兜底」的顺序才不会被详情路由抢走。
+    顺序一旦被改回去，这里会变成 404，而前端会把 404 显示成「本周无账单」。
+    （v3.60.16 的现场，用例见 tests/test_bills_by_week.py）
+    """
 
     def get(self, request):
-        week_index = request.query_params.get('week_index')
+        raw = request.query_params.get('week_index')
         user_id = request.query_params.get('user_id', 1)
 
-        if not week_index:
+        if not raw:
             return Response({'error': 'week_index is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 索引是**整数**：响应里的 `week_index` 与前端 `BillsByWeekResponse.week_index: number`
+        # 必须同为数字。之前直接把 query 里的字符串回传，声明与实际不符 —— 前端一旦用它
+        # 做比较就会静默不等（'713' !== 713）。
+        try:
+            week_index = int(raw)
+        except (TypeError, ValueError):
+            return Response({'error': 'week_index must be an integer'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         week = WealthLifeWeekCalendar.objects.filter(
             global_week_index=week_index, user_id=user_id
@@ -655,17 +702,6 @@ class SnapshotView(APIView):
             return Response({'error': 'record not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
-class ReconcileView(APIView):
-    """账面与实际对账"""
-
-    def get(self, request):
-        yearmon = request.query_params.get('yearmon')
-        user_id = request.query_params.get('user_id', 1)
-        data = reconcile(int(user_id), yearmon)
-        serializer = ReconcileSerializer(data)
-        return Response(serializer.data)
-
-
 class CopySnapshotView(APIView):
     """复制上月数据"""
 
@@ -936,7 +972,9 @@ class BillViewSet(viewsets.ModelViewSet):
     serializer_class = BillSerializer
     permission_classes = [AllowAny]
     filter_backends = [filters.OrderingFilter, filters.SearchFilter]
-    search_fields = ['notes', 'merchant', 'category']
+    # 子分类必须一起搜：列表里「分类」是大类（食品酒水），真正的消费细类（早午晚餐）
+    # 只在 subcategory 上；漏了它，用户搜一个真实存在的子分类会静默返回 0 条。
+    search_fields = ['notes', 'merchant', 'category', 'subcategory']
     ordering = ['-date']
 
     def get_queryset(self):
@@ -1129,3 +1167,475 @@ class BillViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user_id=1)
+
+
+# ══════════════════════════════════════════════════════════════
+# 负债明细 / 应收账龄（v3.58.20，P1-A）
+#
+# 两个 ViewSet 的 list 一律返回**裸数组**（显式 pagination_class = None）：
+# 前端按数组消费，被全局分页包成 {count, results} 会静默显示为空（项目硬坑③）。
+# 筛选参数只作用于列表；summary 恒为全量口径 —— 局部筛选下的汇总会误导。
+# ══════════════════════════════════════════════════════════════
+
+
+def _pick_item(items: list[dict], pk: int) -> dict:
+    """从服务层列表里取出指定 id 的项（新增/编辑后回传完整派生字段）"""
+    for item in items:
+        if item['id'] == pk:
+            return item
+    return {}
+
+
+class LiabilityViewSet(viewsets.ModelViewSet):
+    """负债逐笔台账 CRUD + 汇总 + 快照对账"""
+
+    queryset = WealthLiabilityDetail.objects.all()
+    serializer_class = LiabilityFormSerializer
+    permission_classes = [AllowAny]
+    pagination_class = None
+
+    def get_queryset(self):
+        return WealthLiabilityDetail.objects.filter(user_id=1)
+
+    def list(self, request, *args, **kwargs):
+        items = get_liability_list()
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            items = [i for i in items if i['status'] == status_filter]
+        category = request.query_params.get('category')
+        if category:
+            items = [i for i in items if i['category'] == category]
+        return Response(LiabilityItemSerializer(items, many=True).data)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = serializer.save(user_id=1)
+        return Response(
+            _pick_item(get_liability_list(), obj.id), status=status.HTTP_201_CREATED,
+        )
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=kwargs.pop('partial', False),
+        )
+        serializer.is_valid(raise_exception=True)
+        obj = serializer.save()
+        return Response(_pick_item(get_liability_list(), obj.id))
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        pk = instance.id
+        instance.delete()
+        return Response({'deleted': pk})
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """汇总：剩余本金 / 月供 / 加权平均利率 / 分类分布 / 与快照 borrow 对账差"""
+        return Response(LiabilitySummarySerializer(get_liability_summary()).data)
+
+
+class ReceivableViewSet(viewsets.ModelViewSet):
+    """应收借出逐笔台账 CRUD + 汇总 + 账龄分布"""
+
+    queryset = WealthReceivableDetail.objects.all()
+    serializer_class = ReceivableFormSerializer
+    permission_classes = [AllowAny]
+    pagination_class = None
+
+    def get_queryset(self):
+        return WealthReceivableDetail.objects.filter(user_id=1)
+
+    def list(self, request, *args, **kwargs):
+        items = get_receivable_list()
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            items = [i for i in items if i['status'] == status_filter]
+        bucket = request.query_params.get('aging_bucket')
+        if bucket:
+            items = [i for i in items if i['aging_bucket'] == bucket]
+        return Response(ReceivableItemSerializer(items, many=True).data)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = serializer.save(user_id=1)
+        return Response(
+            _pick_item(get_receivable_list(), obj.id), status=status.HTTP_201_CREATED,
+        )
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=kwargs.pop('partial', False),
+        )
+        serializer.is_valid(raise_exception=True)
+        obj = serializer.save()
+        return Response(_pick_item(get_receivable_list(), obj.id))
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        pk = instance.id
+        instance.delete()
+        return Response({'deleted': pk})
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """汇总：未收回 / 回收率 / 账龄分布 / 逾期 / 无息占比 / 与快照 lend 对账差"""
+        return Response(ReceivableSummarySerializer(get_receivable_summary()).data)
+
+
+# ══════════════════════════════════════════════════════════════
+# 资产科目主数据 / 资产快照（v3.58.21，P1-B）
+#
+# 两个端点的列表形态刻意不同，各有理由：
+#   · 科目 → **裸数组**（主数据，量小，前端整表渲染）
+#   · 快照 → **裸数组 + limit**（月度数据，两年 24 期；粒度上分页器只是噪声）
+# 两者都显式 pagination_class = None —— 被 DRF 全局分页包成 {count, results}
+# 时前端按数组消费会**静默显示为空**（项目硬坑③）。
+#
+# 写入一律走服务层（asset_service），视图只做协议转换：
+# 校验失败的服务层异常在这里统一转成 400，不泄漏成 500。
+# ══════════════════════════════════════════════════════════════
+
+
+class AssetAccountViewSet(viewsets.ModelViewSet):
+    """资产科目主数据 CRUD + 结构汇总 + 初始化种子科目"""
+
+    queryset = WealthAssetAccount.objects.all()
+    serializer_class = AssetAccountFormSerializer
+    permission_classes = [AllowAny]
+    pagination_class = None
+
+    def get_queryset(self):
+        return WealthAssetAccount.objects.filter(user_id=1)
+
+    def get_serializer_context(self):
+        """把 user_id 交给序列化器 —— validate_code 的唯一性校验需要它"""
+        context = super().get_serializer_context()
+        context['user_id'] = 1
+        return context
+
+    def list(self, request, *args, **kwargs):
+        include_inactive = str(
+            request.query_params.get('include_inactive', '')
+        ).lower() in ('1', 'true', 'yes')
+        rows = get_account_list(include_inactive=include_inactive)
+        return Response(AssetAccountItemSerializer(rows, many=True).data)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        row = create_account(serializer.validated_data)
+        return Response(AssetAccountItemSerializer(row).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=kwargs.pop('partial', False),
+        )
+        serializer.is_valid(raise_exception=True)
+        row = update_account(instance.id, serializer.validated_data)
+        return Response(AssetAccountItemSerializer(row).data)
+
+    def destroy(self, request, *args, **kwargs):
+        """删除科目 —— 被历史快照引用时转为 400 并引导改「停用」。
+
+        不能让 ProtectedError 冒成 500：那是可预期的业务约束，
+        且用户需要一句能照做的提示，而不是一个堆栈。
+        """
+        instance = self.get_object()
+        try:
+            pk = delete_account(instance.id)
+        except ProtectedError:
+            return Response(
+                {'detail': '该科目已被历史快照引用，不能删除；请改为「停用」（is_active=false）'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({'deleted': pk})
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """科目结构汇总：各类别科目数、流动性科目数、计表 / 不计表科目数"""
+        return Response(AssetAccountSummarySerializer(get_account_summary()).data)
+
+    @action(detail=False, methods=['post'])
+    def seed(self, request):
+        """从旧表列定义生成种子科目（幂等）。
+
+        overwrite=false（默认）：只补缺失的，不动用户已改过的科目。
+        """
+        overwrite = str(request.data.get('overwrite', '')).lower() in ('1', 'true', 'yes')
+        result = seed_asset_accounts(overwrite=overwrite)
+        return Response(SeedResultSerializer(result).data)
+
+
+class AssetSnapshotViewSet(viewsets.ViewSet):
+    """资产快照：按 yearmon 幂等保存（明细行全删重建）+ 与旧口径双跑校验"""
+
+    permission_classes = [AllowAny]
+
+    def list(self, request):
+        raw_limit = request.query_params.get('limit') or 24
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = 24
+        year = request.query_params.get('year') or None
+        rows = list_snapshots(limit=limit, year=year)
+        return Response(AssetSnapshotRowSerializer(rows, many=True).data)
+
+    def create(self, request):
+        serializer = AssetSnapshotFormSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            row = save_snapshot(serializer.validated_data)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(AssetSnapshotRowSerializer(row).data, status=status.HTTP_201_CREATED)
+
+    def retrieve(self, request, pk=None):
+        row = get_snapshot_detail(int(pk))
+        if not row:
+            return Response({'detail': '快照不存在'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(AssetSnapshotRowSerializer(row).data)
+
+    def update(self, request, *args, **kwargs):
+        """更新一期快照。
+
+        **不允许改年月**：年月是这一期快照的身份，改年月等于换一期，
+        语义上应删除重建。放行「改名」会让明细行跟着悄悄搬到另一期，
+        历史账面出现无法解释的迁移 —— 宁可报错也不做这种魔法。
+        """
+        snapshot = WealthAssetSnapshot.objects.filter(id=kwargs.get('pk'), user_id=1).first()
+        if not snapshot:
+            return Response({'detail': '快照不存在'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = AssetSnapshotFormSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+        if payload['yearmon'] != snapshot.yearmon:
+            return Response(
+                {'detail': f'不能修改快照年月（当前 {snapshot.yearmon}）；'
+                           '如需换期请删除后重建'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            row = save_snapshot(payload)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(AssetSnapshotRowSerializer(row).data)
+
+    def destroy(self, request, *args, **kwargs):
+        snapshot = WealthAssetSnapshot.objects.filter(id=kwargs.get('pk'), user_id=1).first()
+        if not snapshot:
+            return Response({'detail': '快照不存在'}, status=status.HTTP_404_NOT_FOUND)
+        pk = delete_snapshot(snapshot.id)
+        return Response({'deleted': pk})
+
+    @action(detail=False, methods=['get'])
+    def by_yearmon(self, request):
+        """按年月取一期（含明细行）—— 编辑弹窗回填用"""
+        yearmon = request.query_params.get('yearmon')
+        if not yearmon:
+            return Response({'detail': '缺少 yearmon 参数'}, status=status.HTTP_400_BAD_REQUEST)
+        row = get_snapshot_by_yearmon(yearmon)
+        if not row:
+            return Response({'detail': '快照不存在'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(AssetSnapshotRowSerializer(row).data)
+
+
+# ══════════════════════════════════════════════════════════════
+# 账单项分类规则 / 归类结果（v3.58.22，P1-C）
+#
+# 分成两个 ViewSet 不是形式主义，而是因为它们是两类东西：
+#   · 分类规则 —— 主数据，可增删改，裸数组；
+#   · 归类结果 —— **派生结果，只读、实时算、无主键**。
+# 把结果挂到规则 ViewSet 的 detail 路由上会误导人以为结果可以「保存」。
+#
+# 两个列表端点都显式 pagination_class = None —— 被 DRF 全局分页包成
+# {count, results} 时前端按数组消费会**静默显示为空**（项目硬坑③）。
+#
+# 写入一律走服务层（classify_service），视图只做协议转换：
+# 校验失败的服务层异常在这里转 400，不泄漏成 500。
+# ══════════════════════════════════════════════════════════════
+
+
+class ClassifyRuleViewSet(viewsets.ModelViewSet):
+    """账单项分类规则：CRUD + 结构汇总 + 初始化种子 + 影响预览"""
+
+    queryset = WealthClassifyRule.objects.all()
+    serializer_class = ClassifyRuleFormSerializer
+    permission_classes = [AllowAny]
+    pagination_class = None
+
+    def get_queryset(self):
+        return WealthClassifyRule.objects.filter(user_id=1)
+
+    def get_serializer_context(self):
+        """把 user_id 交给序列化器 —— 手写的唯一性校验需要它"""
+        context = super().get_serializer_context()
+        context['user_id'] = 1
+        return context
+
+    def list(self, request, *args, **kwargs):
+        include_inactive = str(
+            request.query_params.get('include_inactive', '')
+        ).lower() in ('1', 'true', 'yes')
+        rows = get_rule_list(include_inactive=include_inactive)
+        return Response(ClassifyRuleItemSerializer(rows, many=True).data)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        row = create_rule(serializer.validated_data)
+        return Response(ClassifyRuleItemSerializer(row).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=kwargs.pop('partial', False),
+        )
+        serializer.is_valid(raise_exception=True)
+        row = update_rule(instance.id, serializer.validated_data)
+        return Response(ClassifyRuleItemSerializer(row).data)
+
+    def destroy(self, request, *args, **kwargs):
+        """删除规则。
+
+        ⚠️ 这里**刻意没有** PROTECT 型保护（与资产科目不同）：分类结果不落库，
+           删规则不破坏任何历史记录，只改变当前视角。
+           但「往回看历史报表数字变了」仍会让人困惑，故响应里明确提示
+           可改用「停用」—— 停用同样能追溯原因，且可一键恢复。
+        """
+        instance = self.get_object()
+        pk = delete_rule(instance.id)
+        return Response({
+            'deleted': pk,
+            'hint': '规则已删除；往期报表的分类结果会随之重算。'
+                    '若只是想暂时不生效，建议改为「停用」。',
+        })
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """规则结构汇总：各匹配字段的规则数、各维度覆盖条数、默认优先级"""
+        return Response(ClassifyRuleSummarySerializer(get_rule_summary()).data)
+
+    @action(detail=False, methods=['post'])
+    def seed(self, request):
+        """按真实分类归纳的种子规则初始化（幂等）"""
+        overwrite = str(request.data.get('overwrite', '')).lower() in ('1', 'true', 'yes')
+        return Response(SeedClassifyResultSerializer(seed_classify_rules(overwrite=overwrite)).data)
+
+    @action(detail=False, methods=['post'])
+    def preview(self, request):
+        """候选规则影响预览（**不写库**）：命中多少、会改动多少、前后标签对照"""
+        yearmon = request.data.get('yearmon') or request.query_params.get('yearmon')
+        try:
+            result = preview_rule_impact(request.data, yearmon=yearmon)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ClassifyPreviewSerializer(result).data)
+
+    @action(detail=False, methods=['get'])
+    def periods(self, request):
+        """有账单数据的年月列表（倒序裸数组）—— 前端选择期下拉用"""
+        return Response(available_periods())
+
+
+class ClassifyResultViewSet(viewsets.ViewSet):
+    """归类结果（只读）：某期三维度汇总 + 覆盖率 + 未归类候选"""
+
+    permission_classes = [AllowAny]
+    pagination_class = None
+
+    def list(self, request):
+        """GET /classify/results/?yearmon=YYYY-MM（不传 = 全周期）"""
+        yearmon = request.query_params.get('yearmon') or None
+        return Response(ClassifySummarySerializer(classify_summary(yearmon)).data)
+
+    @action(detail=False, methods=['get'])
+    def unclassified(self, request):
+        """未归类候选清单 —— 回答「下一条规则该建在哪儿」"""
+        yearmon = request.query_params.get('yearmon') or None
+        raw_limit = request.query_params.get('limit')
+        limit = CLASSIFY_CANDIDATE_LIMIT
+        if raw_limit:
+            try:
+                limit = max(1, int(raw_limit))
+            except (TypeError, ValueError):
+                limit = CLASSIFY_CANDIDATE_LIMIT
+        rows = get_unclassified_candidates(yearmon=yearmon, limit=limit)
+        return Response(UnclassifiedCandidatesSerializer(rows).data)
+
+
+# ══════════════════════════════════════════════════════════════
+# 比率体系（v3.58.23，P2-A）
+#
+# 只读 ViewSet：比率是**派生结果**，没有主键、不可写、实时算 ——
+# 挂成 ModelViewSet 会误导人以为结果可以「保存」。
+# 判定区间与级别全部后端算好（含 bands 本身），视图不做任何除法或比较，
+# 只做协议转换。
+# ══════════════════════════════════════════════════════════════
+
+
+class RatioViewSet(viewsets.ViewSet):
+    """财务规划比率：总览 + 月度趋势 + 可选锚定月"""
+
+    permission_classes = [AllowAny]
+    # 显式关闭分页：被 DRF 全局分页包成 {count, results} 时，
+    # 前端按数组消费会**静默显示为空**（项目硬坑③）。
+    pagination_class = None
+
+    def list(self, request):
+        """GET /ratios/?yearmon=YYYY-MM —— 六项比率总览（不传 = 最新一期）"""
+        anchor = request.query_params.get('yearmon') or None
+        data = get_ratio_overview(anchor_yearmon=anchor)
+        return Response(RatioOverviewSerializer(data).data)
+
+    @action(detail=False, methods=['get'])
+    def trend(self, request):
+        """GET /ratios/trend/?months=12 —— 逐月比率序列（值已算好）"""
+        raw = request.query_params.get('months')
+        try:
+            months = max(1, min(int(raw), 36)) if raw else 12
+        except (TypeError, ValueError):
+            months = 12
+        return Response(RatioTrendSerializer(get_ratio_trend(months=months)).data)
+
+    @action(detail=False, methods=['get'])
+    def anchors(self, request):
+        """GET /ratios/anchors/ —— 可作为锚定月的年月（倒序裸数组）
+
+        候选来自**资产快照的期别**而非账单期别：锚定月决定的是「看哪一期」，
+        选一个没有快照的月份只会得到一屏「数据不足」。
+        """
+        return Response(available_anchor_months())
+
+    @action(detail=False, methods=['get'])
+    def asset_position(self, request):
+        """GET /ratios/asset-position/?yearmon=YYYY-MM —— 单期资产位置
+
+        `carry_forward` 默认开：本月未盘点时取上一期，并回 `carried=True`。
+        关掉时按期精确命中，没有就返回 404 语义的 200 + available=False ——
+        「这一期没有盘点」不是错误，是可预期状态，不该用 404 表达。
+        """
+        yearmon = request.query_params.get('yearmon') or None
+        carry = str(request.query_params.get('carry_forward', '1')).lower() not in (
+            '0', 'false', 'no',
+        )
+        return Response(resolve_asset_position(yearmon, carry_forward=carry))
+
+    @action(detail=False, methods=['get'])
+    def meta(self, request):
+        """GET /ratios/meta/ —— 九项指标的**口径元信息**（裸数组）
+
+        公式 / 口径说明 / 判定区间都从这里来，前端据此画气泡提示，
+        **不另写一份口径文案** —— 两处文案迟早不一致，而且没人会发现。
+
+        ⚠️ 覆盖九项而非六项：资产健康指标卡上的活期占比 / 负债率 /
+           公积金占比也在判定线总表里，卡片的气泡提示要取它们。
+        返回裸数组（同 anchors）：被全局分页包成 `{count, results}`
+        时前端按数组消费会**静默变空**。
+        """
+        return Response(RatioMetaSerializer(all_ratio_meta(), many=True).data)

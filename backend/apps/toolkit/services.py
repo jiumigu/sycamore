@@ -1,6 +1,10 @@
 """工具箱业务逻辑"""
 
+from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
+from statistics import median
+
+from django.utils import timezone
 
 from .models import CareerEnergyAudit, ElectricityRecord
 
@@ -324,6 +328,120 @@ def collect_health_alerts(data: dict) -> list[str]:
 
 # ─── 用电记录 ────────────────────────────────────
 
+MONTHS_WINDOW = 12          # 月度卡片窗口：最近 N 个自然月
+PERT_MIN_SAMPLES = 3        # PERT 三点估算的最少样本月数（低于此不给数值）
+_Q1 = Decimal('0.1')
+_Q2 = Decimal('0.01')
+
+
+def _q(value: Decimal, exp: Decimal) -> float:
+    """量化成 float（派生值直接下发，前端按数字消费）"""
+    return float(value.quantize(exp, rounding=ROUND_HALF_UP))
+
+
+def _shift_month(key: tuple[int, int], delta: int) -> tuple[int, int]:
+    """(year, month) 平移 delta 个月（delta 可负）"""
+    idx = key[0] * 12 + (key[1] - 1) + delta
+    return idx // 12, idx % 12 + 1
+
+
+def build_monthly_usage(records) -> dict:
+    """按自然月聚合，算每月的用电量（纯函数，不碰库）
+
+    口径：**本月最后一条读数 − 上月最后一条读数**（电表读数法的标准做法，与电费单一致）。
+    首月没有上月基准，退化为「本月初条读数」，并标记 `base_source='own_first'` 让人看得见。
+
+    ⚠️ 不复用记录上的 `month_usage` 字段：那个字段在本月没有上月记录时会拿本月首条
+    当基准，月初不是 1 号就会低估；两者语义不同，不能互相顶替。
+
+    Returns:
+        {(year, month): {usage, days, daily_avg, records,
+                         base_date, base_source, end_date, single}}
+        `usage=None` 表示**算不出**（该月只有一条记录，起止同点），不是 0。
+    """
+    by_month: dict[tuple[int, int], list] = defaultdict(list)
+    for r in sorted(records, key=lambda x: (x.record_date, x.id or 0)):
+        by_month[(r.record_date.year, r.record_date.month)].append(r)
+
+    out: dict[tuple[int, int], dict] = {}
+    prev_last = None
+    for key in sorted(by_month):
+        items = by_month[key]
+        last = items[-1]
+        if prev_last is None:
+            base, base_source = items[0], 'own_first'
+        else:
+            base, base_source = prev_last, 'prev_month'
+
+        entry = {
+            'records': len(items),
+            'base_date': base.record_date,
+            'base_source': base_source,
+            'end_date': last.record_date,
+            'usage': None,
+            'days': None,
+            'daily_avg': None,
+            'single': False,
+        }
+        if base.pk != last.pk:      # 起止同点 ⇒ 只有读数、没有用电量
+            usage = Decimal(str(last.meter_reading)) - Decimal(str(base.meter_reading))
+            days = (last.record_date - base.record_date).days
+            entry['usage'] = _q(usage, _Q1)
+            entry['days'] = days
+            entry['daily_avg'] = _q(usage / days, _Q2) if days else None
+        else:
+            entry['single'] = True
+        out[key] = entry
+        prev_last = last
+    return out
+
+
+def pert_estimate(samples: list[float]) -> dict:
+    """PERT 三点估算（纯函数）
+
+    O/M/P 取历史样本的 **最小 / 中位数 / 最大**；
+    期望值 `E = (O + 4M + P) / 6`，标准差 `σ = (P − O) / 6`。
+
+    ⚠️ 这里算出的是**期望值**（加权平均），不是「最可能值」（那是 M 本身）——
+    卡片上要标清楚，否则日后会被读成两种意思。
+
+    样本不足 `PERT_MIN_SAMPLES` 时**一个数都不给**，只回进度与 issues：
+    2 个点算出来的区间看着很窄，实际只是样本不够，给人「模型很自信」的错觉。
+    """
+    n = len(samples)
+    res = {
+        'samples': n, 'required': PERT_MIN_SAMPLES, 'ready': False,
+        'optimistic': None, 'most_likely': None, 'pessimistic': None,
+        'expected': None, 'sigma': None, 'low': None, 'high': None,
+        'mean': None, 'issues': [],
+    }
+    if n:
+        total = sum(Decimal(str(s)) for s in samples)
+        res['mean'] = _q(total / n, _Q2)
+
+    if n < PERT_MIN_SAMPLES:
+        res['issues'].append(
+            f'样本仅 {n} 个完整月，PERT 三点估算需 ≥{PERT_MIN_SAMPLES} 个')
+        return res
+
+    o, p = min(samples), max(samples)
+    m = float(median(samples))
+    e = (o + 4 * m + p) / 6
+    sigma = (p - o) / 6
+    res.update({
+        'ready': True,
+        'optimistic': _q(Decimal(str(o)), _Q1),
+        'most_likely': _q(Decimal(str(m)), _Q1),
+        'pessimistic': _q(Decimal(str(p)), _Q1),
+        'expected': _q(Decimal(str(e)), _Q1),
+        'sigma': _q(Decimal(str(sigma)), _Q2),
+        'low': _q(Decimal(str(e - sigma)), _Q1),
+        'high': _q(Decimal(str(e + sigma)), _Q1),
+    })
+    if o == p:
+        res['issues'].append('样本各月用电量完全相同，区间宽度为 0 —— 这是样本无差异，不是真实波动小')
+    return res
+
 
 class ElectricityService:
     """用电记录计算"""
@@ -378,3 +496,91 @@ class ElectricityService:
         """按日期顺序重算全部记录（删除记录后保证后续记录联动）"""
         for record in ElectricityRecord.objects.filter(user_id=user_id).order_by('record_date'):
             ElectricityService.calculate_on_create(record)
+
+    @staticmethod
+    def overview(user_id: int = 1, months: int = MONTHS_WINDOW, today=None) -> dict:
+        """月度用电量序列 + PERT 估算 + 统计卡数据（**全部实时算，不落库**）
+
+        - 窗口：最近 `months` 个自然月（含当月）；**无记录的月 `usage=None`，不是 0**
+        - PERT 样本：窗口内**已结束**的月（排除进行中的当月）且用电量可算
+        - `latest`：给统计卡用（最新读数 / 本月累计 / 日均 / 总记录数），
+          与分页解耦 —— 历史表分页后前端拿不到全量，统计卡不能再从列表取
+
+        判据：月度电量与 PERT 都是「以后重算得出同样结果」的派生值 ⇒ **不落库**。
+        """
+        today = today or timezone.localdate()
+        cur = (today.year, today.month)
+        records = list(ElectricityRecord.objects.filter(user_id=user_id))
+        computed = build_monthly_usage(records)
+
+        series, samples, excluded = [], [], []
+        for i in range(months - 1, -1, -1):
+            key = _shift_month(cur, -i)
+            item = computed.get(key)
+            row = {
+                'month': f'{key[0]:04d}-{key[1]:02d}',
+                'usage': None, 'days': None, 'daily_avg': None, 'records': 0,
+                'base_date': None, 'base_source': None, 'end_date': None,
+                'partial': key == cur, 'in_pert_sample': False,
+            }
+            if item:
+                row.update({
+                    'usage': item['usage'], 'days': item['days'],
+                    'daily_avg': item['daily_avg'], 'records': item['records'],
+                    'base_date': item['base_date'].isoformat(),
+                    'base_source': item['base_source'],
+                    'end_date': item['end_date'].isoformat(),
+                })
+            if item and item['usage'] is not None:
+                if key < cur:
+                    row['in_pert_sample'] = True
+                    samples.append(item['usage'])
+                else:
+                    excluded.append(row['month'])
+            series.append(row)
+
+        pert = pert_estimate(samples)
+        if excluded:
+            pert['issues'].append(f'{excluded[-1]} 尚未结束，不计入样本')
+
+        latest = None
+        if records:
+            rec = max(records, key=lambda r: (r.record_date, r.id or 0))
+            latest = {
+                'id': rec.id,
+                'record_date': rec.record_date.isoformat(),
+                'meter_reading': float(rec.meter_reading),
+                'interval_usage': float(rec.interval_usage) if rec.interval_usage is not None else None,
+                'interval_days': rec.interval_days,
+                'daily_avg': float(rec.daily_avg) if rec.daily_avg is not None else None,
+                'month_usage': float(rec.month_usage) if rec.month_usage is not None else None,
+            }
+
+        return {
+            'months': series,
+            'pert': pert,
+            'latest': latest,
+            'total_records': len(records),
+        }
+
+
+def resolve_quote_pool_max_len() -> int:
+    """「每日金句」池的长度上限（读取用户在「系统设置」里的配置）。
+
+    v3.60.12 之前这是 `QuoteViewSet` 上的一个硬编码常量（200），用户既看不见也改不了；
+    现在改为 `UserProfile.quote_pool_max_len`，在系统设置里可调。
+
+    ⚠️ 默认值**不在这里写第二份** —— 回落到 `UserProfile` 字段的 `default`，
+    保证「模型定义」是唯一真源（改默认值只需改一处）。
+    ⚠️ 用 `filter().first()` 而不是 `get_or_create`：本函数服务于**只读**接口，
+    不该因为「读一次配置」就往库里插一行。
+    ⚠️ 配到超大值时不做二次夹取：区间校验在序列化器那一层（`QUOTE_POOL_LEN_RANGE`），
+    这里只负责把「当前生效值」取出来。
+    """
+    # 函数内导入：core 是上游 app，模块级导入会让 toolkit 的加载顺序变敏感
+    from apps.core.models import UserProfile
+
+    profile = UserProfile.objects.filter(user_id=1).only('quote_pool_max_len').first()
+    if profile is not None:
+        return profile.quote_pool_max_len
+    return UserProfile._meta.get_field('quote_pool_max_len').default

@@ -127,7 +127,9 @@
       :data="store.selectedWeekData"
       :bills="store.selectedWeekBills"
       :loading="store.weekDetailLoading"
+      :error="store.weekDetailError"
       @close="handleDetailClose"
+      @retry="handleDetailRetry"
     />
   </div>
 </template>
@@ -193,6 +195,12 @@ async function handleCalculate(params: {
 function handleWeekSelect(weekIndex: number) {
   store.selectWeek(weekIndex)
   detailVisible.value = true
+}
+
+/** 明细加载失败后的重试：同一格原样再取一次（弹窗不关，避免用户重新找那一格） */
+function handleDetailRetry() {
+  const index = store.selectedWeekIndex
+  if (index !== null) store.selectWeek(index)
 }
 
 function handleDetailClose() {

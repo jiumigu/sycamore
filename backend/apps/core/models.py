@@ -27,12 +27,30 @@ class SystemPreset(models.Model):
         return f'[{self.preset_type}] {len(self.values)} 项'
 
 
+# ─── 金句池长度上限（v3.60.12：由硬编码常量改为可配置项） ───
+# 「每日金句」卡只从「不超过这个字数」的摘录里取 —— 太长的整段文字推上卡片读不完。
+# ⚠️ 默认值的**单一真源就在这里**：toolkit 侧读取配置时若没有 UserProfile 行，
+#    回落到本字段的 default，读取端不写第二份默认值。
+# ⚠️ 旧值 200 偏短（开发库实测：69 条里 ≤200 只有 43 条 = 62%，≤500 有 52 条 = 75%）。
+# ⚠️ 超限只是**不进池** —— 摘录本身照样存着、照样能搜到，不删任何数据。
+DEFAULT_QUOTE_POOL_MAX_LEN = 500
+
+# 配置的合法区间：下限防「池子空掉」，上限防「卡片变成整篇文章」。
+# 前端输入框与后端序列化器**都**引用这一份，避免两处各写一个数字。
+QUOTE_POOL_LEN_RANGE = (50, 5000)
+
+
 class UserProfile(models.Model):
     """用户配置（单用户系统，user_id=1）"""
 
     user_id = models.IntegerField(default=1, unique=True, verbose_name='用户ID')
     privacy_mode = models.BooleanField(default=False, verbose_name='脱敏模式')
     logseq_path = models.CharField(max_length=500, blank=True, default='', verbose_name='Logseq 日记目录')
+    quote_pool_max_len = models.PositiveIntegerField(
+        default=DEFAULT_QUOTE_POOL_MAX_LEN,
+        verbose_name='金句池长度上限',
+        help_text='超过这个字数的摘录不会出现在「每日金句」卡上（仍保留在摘录管理中）',
+    )
 
     class Meta:
         db_table = 'core_user_profile'

@@ -1,5 +1,7 @@
 import json
 import os
+import random
+import re
 import time
 import uuid
 
@@ -9,7 +11,8 @@ from decimal import Decimal
 
 from django.db import models
 from django.conf import settings
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
+from django.db.models.functions import Length
 from django.utils import timezone
 
 from rest_framework import status, views, viewsets
@@ -42,10 +45,21 @@ from .serializers import (
     ToolInfoSerializer,
     TravelRoutePresetSerializer,
 )
-from .services import ElectricityService, calculate_health_score, collect_health_alerts, update_career_audit_decision
+from .services import (
+    ElectricityService,
+    calculate_health_score,
+    collect_health_alerts,
+    resolve_quote_pool_max_len,
+    update_career_audit_decision,
+)
 
 # 周期 → 天数换算：daily=1天、monthly=30天、yearly=365天
 PERIOD_DAYS = {'daily': 1, 'monthly': 30, 'yearly': 365}
+
+# 「一条旧结论」卡上 AI 回答摘要的截断长度（v3.60.13）。
+# 单独提出来是因为**截断与否要能被判定** —— 下发给前端的 `ai_excerpt_truncated`
+# 与它必须同一个来源；散在返回体里写两遍 `120` 迟早只改一处。
+CONCLUSION_EXCERPT_LEN = 120
 
 
 class CityCoordinateViewSet(viewsets.ReadOnlyModelViewSet):
@@ -480,7 +494,29 @@ class QuoteViewSet(viewsets.ModelViewSet):
         para = self.request.query_params.get('is_paragraph')
         if para is not None and para != '':
             qs = qs.filter(is_paragraph=para.lower() in ('true', '1'))
+        # 金句池状态筛选（v3.60.12）：`?pool=in|out`
+        # 用户诉求「摘录管理里面的都要被看见」⇒ 被长度挡在池外的那些必须**筛得出来**，
+        # 否则它们混在列表里，只有翻到才看得见，等于没有出口。
+        pool = self.request.query_params.get('pool', '').strip()
+        if pool in ('in', 'out'):
+            # annotate 名用 `pool_len`，刻意避开序列化器里同名的 `content_len`
+            # （那个是 Python 侧算的展示字段，与 ORM annotation 无关，同名容易读串）
+            qs = qs.annotate(pool_len=Length('content'))
+            if pool == 'in':
+                qs = qs.filter(pool_len__lte=resolve_quote_pool_max_len())
+            else:
+                qs = qs.filter(pool_len__gt=resolve_quote_pool_max_len())
         return qs
+
+    def get_serializer_context(self):
+        """把「当前生效的池上限」注入序列化器 context。
+
+        ⚠️ 一次请求只读一次配置 —— 列表页 20 条如果每条各查一次，就是 20 次多余查询，
+        且同一页里理论上可能读到两个不同的上限（配置刚好在翻页间隙被改）。
+        """
+        ctx = super().get_serializer_context()
+        ctx['pool_max_len'] = resolve_quote_pool_max_len()
+        return ctx
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -488,11 +524,20 @@ class QuoteViewSet(viewsets.ModelViewSet):
         total = qs.count()
         paragraphs = qs.filter(is_paragraph=True).count()
         total_reviews = qs.aggregate(total=models.Sum('review_count'))['total'] or 0
+        # 金句池分布（v3.60.12）：与 `next/` 用的是同一把尺子（长度 ≤ 上限），
+        # 前端统计卡直接念这两个数，不再让用户自己猜「谁上得了卡」。
+        max_len = resolve_quote_pool_max_len()
+        in_pool = qs.annotate(
+            pool_len=Length('content')
+        ).filter(pool_len__lte=max_len).count()
         return Response({
             'total': total,
             'paragraphs': paragraphs,
             'shorts': total - paragraphs,
             'total_reviews': total_reviews,
+            'pool_max_len': max_len,
+            'in_pool': in_pool,
+            'out_pool': total - in_pool,
         })
 
     @action(detail=False, methods=['get'])
@@ -508,7 +553,53 @@ class QuoteViewSet(viewsets.ModelViewSet):
         # 每次随机查看增加回顾次数
         Quote.objects.filter(id=quote.id).update(review_count=models.F('review_count') + 1)
         quote.refresh_from_db()
-        return Response(QuoteSerializer(quote).data)
+        return Response(self.get_serializer(quote).data)
+
+    # 金句池的长度上限**不再是本类的常量**（v3.60.12 起改为可配置项）：
+    # 真源是 `UserProfile.quote_pool_max_len`，在「系统管理 → 系统设置」里可调，
+    # 缺省值同样来自模型字段的 default。本方法只负责读「当前生效值」。
+    # 判据仍是**长度**，不是 `is_paragraph`：
+    # 开发库实测（2026-09-30，69 条）——「段落型」14 条**全部 >200 字**、平均 1267 字，
+    # 与「长文」完全重合；而长度才是真正决定「一眼能不能读完」的东西。
+    # ⚠️ 若把 `is_paragraph=False` 也写进条件，将来一条 150 字的短段落会被误挡在池外。
+    # ⚠️ 超长只是**不进池** —— 摘录本身照样存着、照样能搜到，不删任何数据。
+
+    @action(detail=False, methods=['get'])
+    def next(self, request):
+        """取一条「金句」：短句池 + 冷落优先（首页金句卡，汇总总览与仪表盘共用）。
+
+        与 `random/` 的分工：
+        - `random/` = **全池等概率随机**（`order_by('?')`），长文也在池里。
+          它的两个毛病：① 69 条纯随机 ⇒ 长尾条目几乎轮不到；
+          ② 1600 字的整段问答也会被抽中，而卡片只截 200 字 ⇒ 显示成读不完的断句。
+        - `next/` = 只从**长度不超上限的池**取（上限可配），排序 = `review_count` 升序
+          （**被推得最少的先推**）→ 同档内收藏优先 → 随机抖动。
+
+        ⚠️ 上限的取值来自用户配置，前端卡片会显式判断「是否超限」，
+        所以这里**不再给第二份默认值** —— 一律走 `resolve_quote_pool_max_len()`。
+
+        ⚠️ 本接口下 `review_count` 的语义是「**被推送次数**」（轮转依据），
+        不是「用户主动回顾次数」。将来若需要真正的时间维度，再加 `last_reviewed_at`。
+        """
+        pool = Quote.objects.annotate(
+            content_len=Length('content')
+        ).filter(
+            content_len__lte=resolve_quote_pool_max_len(),
+        ).exclude(
+            content__icontains='幸福未被发现，就叫做普通的一天'
+        ).exclude(
+            short_title__icontains='幸福未被发现，就叫做普通的一天'
+        )
+        # 冷落优先 ⇒ 同档内收藏优先 ⇒ 随机抖动。
+        # 收藏只做「同档插队」而非绝对置顶：否则那条收藏会被反复推到，而其余永远轮不到。
+        quote = pool.order_by('review_count', '-is_favorite', '?').first()
+        if not quote:
+            return Response(None, status=204)
+        Quote.objects.filter(id=quote.id).update(review_count=models.F('review_count') + 1)
+        quote.refresh_from_db()
+        # 走 self.get_serializer：它带上了 context 里的 `pool_max_len`，
+        # 卡片才能拿到 `in_golden_pool`（直接 new 一个序列化器实例会丢掉 context）
+        return Response(self.get_serializer(quote).data)
 
 
 class HealthSelfCheckViewSet(viewsets.ModelViewSet):
@@ -643,7 +734,15 @@ class ElectricityRecordViewSet(viewsets.ModelViewSet):
     serializer_class = ElectricityRecordSerializer
 
     def get_queryset(self):
-        return ElectricityRecord.objects.filter(user_id=1)
+        qs = ElectricityRecord.objects.filter(user_id=1)
+        month = self.request.query_params.get('month') or ''
+        if re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month):
+            year, mon = int(month[:4]), int(month[5:7])
+            # 半开区间（不用 record_date__month，USE_TZ 下的老坑）
+            start = date(year, mon, 1)
+            nxt = date(year + mon // 12, mon % 12 + 1, 1)
+            qs = qs.filter(record_date__gte=start, record_date__lt=nxt)
+        return qs
 
     def perform_create(self, serializer):
         record = serializer.save(user_id=1)
@@ -652,6 +751,20 @@ class ElectricityRecordViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         instance.delete()
         ElectricityService.recalculate_all(user_id=1)
+
+    @action(detail=False, methods=['get'], url_path='overview')
+    def overview(self, request):
+        """月度用电量 + PERT 估算 + 统计卡数据
+
+        返回 **dict**（不分页；`months` 是其中嵌套的数组）。
+        `?months=` 限定窗口长度，夹在 3~36 之间，默认 12。
+        """
+        try:
+            months = int(request.query_params.get('months', 12))
+        except (TypeError, ValueError):
+            months = 12
+        months = max(3, min(months, 36))
+        return Response(ElectricityService.overview(user_id=1, months=months))
 
 
 TENDENCY_LABELS = {
@@ -1048,6 +1161,123 @@ class AskTopicViewSet(viewsets.ModelViewSet):
                 } for a in sorted(accepted, key=lambda x: x.asked_at)],
             })
         return Response({'topics': result})
+
+    @action(detail=False, methods=['get'], url_path='review')
+    def review(self, request):
+        """回顾视图数据（供「AI 问答库 · 回顾」页**浏览**，不是导出）。
+
+        与 `summary/` 的分工：
+        - `summary/` = **导出用**：只吐采纳回答、无时间维度，产出物是磁盘上的 .md
+        - `review/`  = **浏览用**：含全部主题（包括一条结论都还没标的），
+          按场景分组、带「冷落天数」，让人**点进去就有东西可标**
+
+        排序依据是 `topic.updated_at`（最久没动的排前）—— 这是零迁移下
+        「最该回顾」的可算代理：主题一旦被编辑或新增回答，它就自然排到后面。
+        """
+        now = timezone.now()
+        topics = list(
+            AskTopic.objects
+            .select_related('scene')
+            .annotate(
+                answer_count=Count('answers', distinct=True),
+                accepted_count=Count('answers', filter=Q(answers__verdict='采纳'), distinct=True),
+                noted_count=Count('answers', filter=Q(answers__note__gt=''), distinct=True),
+            )
+            .order_by('updated_at', 'id')
+        )
+        groups: dict = {}
+        for t in topics:
+            key = str(t.scene_id) if t.scene_id else 'none'
+            bucket = groups.setdefault(key, {
+                'scene_id': t.scene_id,
+                'scene_name': t.scene.name if t.scene_id else '未分类',
+                'topics': [],
+            })
+            bucket['topics'].append({
+                'id': t.id,
+                'title': t.title or t.question[:40],
+                'question': t.question,
+                'answer_count': t.answer_count,
+                'accepted_count': t.accepted_count,
+                'noted_count': t.noted_count,
+                'concluded_count': t.accepted_count + t.noted_count,
+                'days_idle': max(0, (now - t.updated_at).days),
+                'updated_at': t.updated_at,
+            })
+        totals = AskAnswer.objects.aggregate(
+            answers=Count('id'),
+            marked=Count('id', filter=Q(verdict='采纳') | Q(note__gt='')),
+        )
+        return Response({
+            'groups': list(groups.values()),
+            'stats': {
+                'topics': len(topics),
+                'answers': totals['answers'] or 0,
+                'marked': totals['marked'] or 0,
+                'unmarked': (totals['answers'] or 0) - (totals['marked'] or 0),
+            },
+        })
+
+    @action(detail=False, methods=['get'], url_path='next-conclusion')
+    def next_conclusion(self, request):
+        """取一条「有结论的」问答，供汇总总览的「一条旧结论」卡。
+
+        「有结论」= 标了 ✅采纳 **或** 写了备注 —— 只有这种才值得被推到首页。
+        没标记的那批是「当下的原料」，不是「结论」，推上去只会变成噪音。
+
+        取数：从「最久没动的主题」里取前 5 条候选，再随机挑一条。
+        **不需要任何推送记录字段**，每次刷新会在这批最冷的候选之间轮转。
+
+        库里还没有任何结论时返回 `null`（**200 + null**，不是 204）——
+        前端要能区分「确实还没有结论」与「请求失败」，并给出引导文案，
+        不能让卡片静默空白（那会读作「功能坏了」）。
+
+        ── 卡片上的信息密度（v3.60.13）────────────────────────────
+        起因：卡片原先只渲染「问题 + 结论」两个字段，而 `ai` 型的结论恒为前 120 字、
+        `note` 型的结论往往只有几个字（实测库里那一条 4 个字：「不够清晰」）——
+        判断的**依据**一个字都不在卡上，于是「15 天前」看着像一句没头没尾的批注。
+
+        - `ai_excerpt` = AI 回答的前 `CONCLUSION_EXCERPT_LEN` 字，**恒下发**。
+          `'note'` 型下它就是**判断依据**（否则卡上只剩你自己那四个字）；
+          ⚠️ `'answer'` 型下它与 `conclusion` **是同一段文字**（后者是它的回退来源），
+          前端别把「依据」与「结论」两块都画出来 —— 会读成 AI 说了两遍。
+        - `ai_excerpt_truncated` / `answer_len`：**截断与否由后端判**，前端不按长度推算。
+          实测池中回答原文 1045 ~ 2696 字，而卡上只放得下 120 字 ——
+          界面上不标出来，1871 字的回答就会被读成「AI 就说了这么一点」。
+        - `pool_size`：池子里一共几条。实测库里只有 2 条能进池 ⇒
+          「🔄 换一条」转两下就回到原处，而界面上说不出为什么 —— 把数字念出来。
+        """
+        concluded = AskAnswer.objects.filter(Q(verdict='采纳') | Q(note__gt=''))
+        pool = list(
+            concluded
+            .select_related('topic', 'topic__scene')
+            .order_by('topic__updated_at', '-asked_at')[:5]
+        )
+        if not pool:
+            return Response(None)
+        a = random.choice(pool)
+        topic = a.topic
+        note = (a.note or '').strip()
+        ai_excerpt = a.answer[:CONCLUSION_EXCERPT_LEN]
+        return Response({
+            'id': a.id,
+            'topic_id': topic.id,
+            'topic_title': topic.title or topic.question[:40],
+            'question': a.question or topic.question,
+            'scene_name': topic.scene.name if topic.scene_id else '',
+            'ai': a.ai,
+            'verdict': a.verdict,
+            'conclusion': note or ai_excerpt,
+            # 来源要下发：卡片上得能说清「这句是你自己写的」还是「AI 回答的片段」，
+            # 否则同一张卡在两种情况下读起来是两回事。
+            'conclusion_source': 'note' if note else 'answer',
+            'ai_excerpt': ai_excerpt,
+            'ai_excerpt_truncated': len(a.answer) > CONCLUSION_EXCERPT_LEN,
+            'answer_len': len(a.answer),
+            'pool_size': concluded.count(),
+            'asked_at': a.asked_at,
+            'days_ago': max(0, (timezone.now() - a.asked_at).days),
+        })
 
 
 class AskSceneViewSet(viewsets.ModelViewSet):

@@ -150,6 +150,11 @@ export function getElectricityRecords(params?: Record<string, unknown>) {
   return request({ url: '/toolkit/electricity-records/', method: 'get', params })
 }
 
+/** 月度用电量 + PERT 估算 + 统计卡数据（一次取全，不分页） */
+export function getElectricityOverview(params?: Record<string, unknown>) {
+  return request({ url: '/toolkit/electricity-records/overview/', method: 'get', params })
+}
+
 export function createElectricityRecord(data: Record<string, unknown>) {
   return request({ url: '/toolkit/electricity-records/', method: 'post', data })
 }

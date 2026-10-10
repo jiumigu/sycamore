@@ -11,7 +11,14 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import MenuGroup, MenuPreference, Notification, SystemPreset, UserProfile
+from .models import (
+    QUOTE_POOL_LEN_RANGE,
+    MenuGroup,
+    MenuPreference,
+    Notification,
+    SystemPreset,
+    UserProfile,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -119,10 +126,30 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    # 合法区间由后端**下发**而不是前端各写一份数字：
+    # 项目既有教训（`RATIO_BANDS`）是「阈值只该有一份，前端只负责显示」。
+    quote_pool_len_range = serializers.SerializerMethodField()
+
     class Meta:
         model = UserProfile
-        fields = ['user_id', 'privacy_mode', 'logseq_path']
+        fields = [
+            'user_id', 'privacy_mode', 'logseq_path',
+            'quote_pool_max_len', 'quote_pool_len_range',
+        ]
 
+    def get_quote_pool_len_range(self, obj) -> list:
+        return list(QUOTE_POOL_LEN_RANGE)
+
+    def validate_quote_pool_max_len(self, value):
+        """区间校验走模型侧的单一真源常量，前端输入框引用同一份（由接口下发）。
+
+        ⚠️ 只在后端挡住越界值是不够的（前端输入框也可能被绕过），
+        但也**不做静默夹取** —— 静默改成别的数，用户会以为配置生效了。
+        """
+        low, high = QUOTE_POOL_LEN_RANGE
+        if not (low <= value <= high):
+            raise serializers.ValidationError(f'长度上限需在 {low} ~ {high} 字之间')
+        return value
 
 class ProfileView(APIView):
     """用户配置（单用户系统，固定 user_id=1）"""

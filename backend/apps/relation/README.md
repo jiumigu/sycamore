@@ -3,8 +3,8 @@
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
-| Relationship | relationship | 关系档案（managed=False） |
-| Interaction | interaction | 互动记录（managed=False） |
+| Relationship | relationship_relationship | 关系档案（managed=False） |
+| Interaction | relationship_interaction | 互动记录（managed=False） |
 | ReaderGroup | relation_reader_group | 读者群体 |
 | ReaderInteraction | relation_reader_interaction | 读者互动记录（含 6 种互动类型 + 能量分 + 互动日期） |
 | ConflictEvent | relation_conflict_event | 冲突事件（情绪等级 1-5、解决状态、关联人、备注、事件时间） |
@@ -30,6 +30,8 @@ Interaction post_save/post_delete → 触发质量更新
 |------|------|------|
 | GET/POST | /relationships/ | 列表/创建 |
 | GET/PUT/DELETE | /relationships/&lt;id&gt;/ | 详情/更新/删除 |
+| GET | /relationships/stats/ | 关系档案统计 |
+| GET | /relationships/met_places/ | 相遇地点分布 |
 | GET | /interactions/ | 互动列表（?relationship_id=） |
 | POST | /interactions/ | 创建互动 |
 | GET/PUT/DELETE | /interactions/&lt;id&gt;/ | 详情/更新/删除 |
@@ -38,6 +40,7 @@ Interaction post_save/post_delete → 触发质量更新
 | GET | /stats/energy_trend/ | 能量趋势 |
 | GET | /stats/interaction_frequency/ | 互动频率 |
 | GET | /stats/due_reminders/ | 待跟进提醒 |
+| GET | /stats/location_stats/ | 地点统计 |
 | GET/POST | /conflicts/ | 冲突事件列表（?contact=&status=&start_date=&end_date= 筛选）/ 创建 |
 | GET/PUT/DELETE | /conflicts/&lt;id&gt;/ | 冲突事件详情/更新/删除 |
 | GET | /conflicts/stats/ | 冲突统计（总次数/未解决数/按联系人汇总/情绪平均值/月度趋势） |

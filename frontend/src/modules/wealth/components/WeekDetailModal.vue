@@ -31,8 +31,25 @@
 
       <!-- 账单列表 -->
       <div class="detail__section-title">账单明细</div>
-      <el-table :data="bills" size="small" stripe max-height="360px" v-if="bills.length > 0">
-        <el-table-column prop="date" label="日期" width="100" />
+
+      <!-- 🔴 「取不到」与「这一周没有账单」必须分开说。
+           上面那三个数是周历表聚合出来的（已经在库里），下面是明细没取到 ——
+           以前失败被静默当成空数组，于是上面写着 +12,754.00、下面写着「无账单记录」。 -->
+      <div v-if="error" class="detail__error">
+        <el-alert :title="error" type="warning" :closable="false" show-icon>
+          <template #default>
+            <div class="detail__error-body">
+              <span>上方收支数字来自周历聚合，与明细是两条取数链路；本次是明细没取到。</span>
+              <el-button link type="primary" size="small" @click="emit('retry')">重试</el-button>
+            </div>
+          </template>
+        </el-alert>
+      </div>
+
+      <el-table v-else-if="bills.length > 0" :data="bills" size="small" stripe max-height="360px">
+        <el-table-column label="日期" width="100">
+          <template #default="{ row }">{{ fmtDay(row.date) }}</template>
+        </el-table-column>
         <el-table-column prop="category" label="分类" width="80" />
         <el-table-column prop="subcategory" label="子分类" width="80" />
         <el-table-column label="类型" width="60">
@@ -72,6 +89,7 @@ const privacyStore = usePrivacyStore()
 
 const emit = defineEmits<{
   close: []
+  retry: []
 }>()
 
 const props = defineProps<{
@@ -79,6 +97,8 @@ const props = defineProps<{
   data: WeekCalendarEntry | null
   bills: BillItem[]
   loading: boolean
+  /** 明细加载失败的提示；null = 正常（此时 `bills` 为空才表示「这一周真的没有账单」） */
+  error?: string | null
 }>()
 
 const dialogTitle = computed(() => {
@@ -88,6 +108,16 @@ const dialogTitle = computed(() => {
 
 function fmt(val: number): string {
   return formatAmount(val)
+}
+
+/**
+ * 明细里的 `date` 是**带时分秒的 datetime**（`2026-09-21T07:57:02`），
+ * 而这一列（100px）只放得下日期。
+ * ⚠️ 用字符串切片、不 `new Date()` —— 后者是第二把尺子（时区一改就静默差几小时）；
+ * 格式不符就返回空串，不显示切坏的乱码。
+ */
+function fmtDay(val: string | null): string {
+  return typeof val === 'string' && val.length >= 10 ? val.slice(0, 10) : ''
 }
 
 function handleClose() {
@@ -128,5 +158,12 @@ function handleClose() {
   margin-bottom: 8px;
   padding-bottom: 4px;
   border-bottom: 1px solid #eee;
+}
+
+.detail__error-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 </style>

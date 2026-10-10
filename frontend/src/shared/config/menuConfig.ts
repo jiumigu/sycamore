@@ -54,6 +54,12 @@ export const allMenuItems: MenuItem[] = [
 
   // ── 财富管理 ──
   { key: 'wealth', path: '/wealth', label: '财务管理', icon: 'Money', group: 'wealth' },
+  // 生存资源盘点（v3.59.0）：盘的是「物」（吃/穿/用/数字），与「资产盘点」（盘钱）刻意分开
+  { key: 'wealth_survival', path: '/wealth/survival', label: '生存资源盘点', icon: 'Box', group: 'wealth' },
+  // 物件资产（v3.60.0）：盘的是「耐用品」（会折旧会报废，答案是年与元）。
+  // ⚠️ 与「生存资源盘点」（消耗物，答案是天）是两条路径，别合并 ——
+  //    判据一句话：纸巾会被用完 → 生存资源；冰箱会被用坏 → 物件资产。
+  { key: 'wealth_property', path: '/wealth/property', label: '物件资产', icon: 'Suitcase', group: 'wealth' },
 
   // ── 连接与足迹 ──
   // 旅行四件套：心愿（想去）→ 路线推演（怎么走）→ 计划（哪天去/预算）→ 足迹（去过并沉淀）

@@ -166,8 +166,8 @@
         </span>
       </div>
 
-      <!-- 进度条 -->
-      <div class="control-card__progress">
+      <!-- 进度条：整块依赖后端下发的「已度过」基数，取不到就不渲染 -->
+      <div v-if="passedWeeks !== null" class="control-card__progress">
         <div class="control-card__progress-info">
           <span>已度过 {{ passedWeeks }} 周 ({{ basePercent }}%)</span>
           <span v-if="reachedWindowEnd">+ 覆盖至 {{ WINDOW_END_AGE }} 岁</span>
@@ -409,14 +409,16 @@ const exhaustDateText = computed(() => {
   return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月`
 })
 
-// 动态加载当前年龄和周数
+// 当前位置（年龄 / 周数 / 已度过周数）来自后端读周历表的结果 —— 三者在同一个响应里，
+// 保证「面板显示的起点」与「页头的已度过周数」讲的永远是同一件事。
 onMounted(async () => {
   try {
     const res = await getCurrentAgeWeek()
     form.current_age = res.data.current_age
     form.current_week = res.data.current_week
+    livedWeeks.value = res.data.lived_weeks
   } catch {
-    // 接口不可用时保持默认值
+    // 接口不可用时保持默认值，且进度块不渲染（见 livedWeeks 的说明）
   }
 })
 
@@ -429,17 +431,21 @@ const WINDOW_END_AGE = 60
 const WINDOW_WEEKS = 2184 // 42 年 × 52 周
 
 /**
- * 窗口内**已度过**周数。`week` 是当前所处周（进行中），故减 1 只数已过的完整周，
- * 与后端 `summary.lived_weeks`（同样的已度过口径，当前 661 周）对齐，避免同页两个数字打架。
+ * 已度过周数 —— **后端下发**（`/age-week/` 的 `lived_weeks`，与页头 `summary.lived_weeks` 同源同值）。
+ *
+ * 🔴 不要改回「(当前年龄 − 19) × 52 + 当前周数」这类本地推算：
+ *    那个位置本身来自另一个来源，与后端在跨年处会差出 1～52 周，
+ *    于是进度条与页头各说各话（v3.60.15 前的现场：面板 716 周 vs 页头 664 周）。
+ *    未取到时保持 null ⇒ 进度块整块不渲染 —— 宁可不显示，
+ *    也不显示一个「看着合理」的错数（错的数比缺的数更难发现）。
  */
-const passedWeeks = computed(() => {
-  const age = form.current_age || WINDOW_START_AGE
-  const week = form.current_week || 1
-  return Math.max(0, (age - WINDOW_START_AGE) * 52 + (week - 1))
-})
+const livedWeeks = ref<number | null>(null)
+
+const passedWeeks = computed(() => livedWeeks.value)
 
 const basePercent = computed(() => {
-  return Math.round(passedWeeks.value / WINDOW_WEEKS * 100)
+  if (livedWeeks.value === null) return 0
+  return Math.round(livedWeeks.value / WINDOW_WEEKS * 100)
 })
 
 /** 跑满窗口仍未耗尽（也含「无需净消耗」）→ 视为覆盖至 60 岁 */
@@ -452,7 +458,7 @@ const coveragePercent = computed(() => {
     // null 有两种情形：无需消耗（跑满窗口）→ 100%；首周即耗尽 → 0%
     return reachedWindowEnd.value ? 100 : 0
   }
-  return Math.min(100, Math.round((passedWeeks.value + r.support_weeks) / WINDOW_WEEKS * 100))
+  return Math.min(100, Math.round(((passedWeeks.value ?? 0) + r.support_weeks) / WINDOW_WEEKS * 100))
 })
 
 // 「可支撑」周数换算为月 / 年（一年 = 52.14 周，一月 = 4.345 周）

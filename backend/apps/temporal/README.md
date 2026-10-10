@@ -5,10 +5,12 @@
 | 命令 | 用途 |
 |------|------|
 | `migrate_atracker` | 旧表数据迁移（逐条，去重键 `(task_name, start_time)`） |
+| `migrate_oneday` | 旧日记表迁移 |
 | `migrate_temporal_categories` | 按 v0.3 新映射重跑历史 L2 类型 |
 | `generate_daily_log` | 每日自动生成默认日记 |
 | `refresh_weekly_cache` | 刷新周度固化表 |
 | `**import_worklog**` | **工作日志 Excel → 「牛马工作」时间记录（v3.58.7）** |
+| `**reconstruct_worktime**` | **月度加班台账 → 逐日时间记录（反推，v3.60.8）** |
 
 ### `import_worklog`（v3.58.7）
 
@@ -48,11 +50,55 @@ python manage.py import_worklog <xlsx 路径> --apply    # 落库
 
 解析层 `worklog_parser.py` 是**纯函数、不碰 DB**：`read_worklog_rows(path)` 读表、`build_plan(rows)` 判定。xlsx 用**标准库** `zipfile + ElementTree` 直解（venv 无 openpyxl，也不打算加）。**一律按列位置解析、绝不按表头名**——sheet 名与年份不符、表头多处损坏、2026 中间嵌第二套表头、备注列三套位置，详见模块头。
 
+### `reconstruct_worktime`（v3.60.8）
+
+```bash
+python manage.py reconstruct_worktime <xlsx 路径>            # 干跑，只读不写（默认）
+python manage.py reconstruct_worktime <xlsx 路径> --apply    # 落库
+```
+
+用于**只有每月加班总时长、没有逐日明细**的台账（Sheet1 = `YYYY-M` → 加班小时）：把月度总量按规则摊回每一天。
+纯函数层在 `overtime_recon.py`（含 3 条硬断言：逐月总量守恒 / 请假日无加班 / 全天假无记录）。
+
+| 参数 | 说明 |
+|------|------|
+| `--apply` | 真正写入（默认只干跑） |
+| `--task-name` | 目标任务名，默认 `牛马工作` |
+| `--batch` | `import_batch` 批次号，默认 `overtime_recon_2020_2022` |
+| `--date-from` / `--date-to` | 只处理某区间（默认 `2020-04-01` ~ `2022-12-31`） |
+| `--limit N` | 只新增前 N 条（冒烟） |
+| `--report out.csv` | 明细导出（UTF-8 BOM） |
+
+**口径**（完整规则见 `overtime_recon.py` 模块头）：正常上班 `09:00–18:00`（9.0h，不扣午休）；
+工作日加班 `2.5–3h/天`；周末加班 `10:00` 起、单日上限 9h；半天假记 `13:30–18:00`；时段粒度 5 分钟。
+法定节假日与调休补班日按国务院办公厅通知原文内置；**请假日一律移出加班候选集**、该月加班重新摊。
+
+**三情形**（设某月台账加班 H 分钟、加班候选日 C 天 = 工作日 − 请假日）：
+
+| 情形 | 触发 | 做法 |
+|---|---|---|
+| 溢出去周末 | `H > C×3h` | 候选日按「一半 3h / 一半 2.5h **交错**」铺满，余量去周末 |
+| 全部候选日加班 | `C×2h ≤ H ≤ C×3h` | 每天 `H/C` |
+| 部分候选日加班 | `H < C×2h` | `n = round(H/2.5)` 天等间隔散布，每天 `H/n` |
+
+> ⚠️ **判定阈值不跟着铺法下调**：把溢出阈值降到 `C×2.75h` 会把「仅微超」的月份也卷进来，
+> 产出**小到落不成 5 分钟粒度**的周末余量。余量摊不开时，宁可让它留在第二情形被平滑吸收。
+
+> ⚠️ **产物是推定值**：月度总量、上下班时间、请假记录是真实的；**哪一天加班、加多久是摊出来的**
+> （原始数据里没有这个信息）。生成规则**确定性**（同样输入永远同样输出），整批带批次号。
+> **幂等键带 `import_batch`** —— 区间内已有别的来源记录（如 `worklog` 导入的）不影响本批次生成。
+
+> ⚠️ **写库前必备份**；回滚 `DELETE ... WHERE import_batch='<批次号>'`（**按项目铁律由用户本人执行**）。
+
+
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
-| TemporalTask | temporal_time_atracker_tasks_list | 活动追踪任务（managed=False） |
+| TemporalTask | temporal_time_atracker_tasks_list | 活动追踪任务（**managed=False 外部表，绝不加列**） |
 | OneDayPage | temporal_oneday_page_list | 日记记录（managed=False） |
+| WeeklyTimeCache | temporal_weekly_time_cache | 周度固化表（供周度追踪 / 周结构图，由 `refresh_weekly_cache` 或刷新接口重建） |
+| TaskMeta | temporal_task_meta | 任务元数据（`activity_type` = v0.3 的 **L2 类型**，9 类预设 + 未归类） |
+| ActivityGroup | temporal_activity_group | ⚠️ **已废弃** —— v0.3 起取消该层，表与 `TaskMeta.group` 列**保留不删**，代码不再读写 |
 
 ## Services
 - TemporalStatsService：分类统计 / 平衡轮 / 排名
@@ -60,8 +106,20 @@ python manage.py import_worklog <xlsx 路径> --apply    # 落库
 - OneDayPageService：日记统计服务
 - DailyLogAutoService：每日自动生成默认日记（当天无任何日记时创建"幸福未被发现，就叫做普通的一天"），兜底入口在 OneDayPageViewSet.list()，管理命令为 `generate_daily_log`
 
+## 三层分类模型（v0.3，勿改回颠倒层级）
+
+```
+L1 归因  五词：成长 / 关系 / 维持 / 谋生 / 流失   （真源 temporal/constants.py）
+L2 类型  TaskMeta.activity_type，9 类预设 + 未归类
+L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
+```
+
+- ⚠️ **ActivityGroup 层已取消**，不要再引入中间层。叠加归因覆盖靠 `attr_rule`，不靠 group。
+- ⚠️ `default_attribution` 是**落库值**：改 `TASK_TO_L2` **不会**回头改已存在的行，须另跑数据迁移（`migrate_temporal_categories`）。
+
 ## Constants
 4 类任务分类：生产与创造 / 维护与秩序 / 滋养与成长 / 连接与记录，含颜色和图标
+L1 归因五词与顺序见 `temporal/constants.py` 的 `ATTRIBUTION_CHOICES` / `ATTRIBUTION_ORDER` / `ATTRIBUTION_COUNTED`。
 
 ## API Endpoints
 
@@ -80,6 +138,14 @@ python manage.py import_worklog <xlsx 路径> --apply    # 落库
 | GET | /tasks/calendar/ | 日历热力图 |
 | GET | /tasks/contrib/ | 贡献图（`?metric=record_count\|hours\|toward\|deepwork\|work\|dominant_attr`；`work`=按 L3 任务名「牛马工作」聚合，v3.58.14 起替代原 `sleep`） |
 | POST | /tasks/import_csv/ | CSV 导入 |
+| GET | /tasks/daily_detail/ | 单日任务明细（?date=） |
+| GET | /tasks/distribution/ | 时长分布 |
+| GET | /tasks/meta/ | 任务元数据（**分类台账**主体，非「未归类池」） |
+| GET | /tasks/meta_ledger/ | 分类台账（编辑 / 撤销覆盖的入口） |
+| GET | /tasks/unclassified/ | 未归类任务（**只是 meta 的筛选态**） |
+| POST | /tasks/batch_set_meta/ | 批量设置 L2 类型 |
+| GET | /tasks/sunburst/ | 结构图（三层同心 pie 数据） |
+| GET | /tasks/completeness/ | 记录完整度（分母默认 16h/天） |
 
 **写入口径（v3.58.6，手工新增 / 编辑）**：**不要传 `duration_hours`** —— 起止时间都给时，
 后端按「结束 − 开始」算出时长，并派生 `year/mon/day/week/quarter`（这几列是 `read_only`，
@@ -102,7 +168,17 @@ CSV 导入复用同一函数但**不传 `end`**（保留 ATracker 自带时长�
 | GET | /oneday/stats/ | 统计信息 |
 | GET | /oneday/yearly_heatmap/ | 年度热力图 |
 | GET | /oneday/week_count/ | 本周日记篇数 |
+| GET | /oneday/daily_detail/ | 单日日记明细（?date=） |
+| GET | /oneday/contrib/ | 日记贡献图 |
+| GET | /oneday/week_stats/ | 周统计 |
 | DELETE | /oneday/bulk_delete/ | 批量删除 |
+
+### 周度追踪
+| 方法 | 端点 | 用途 |
+|------|------|------|
+| GET | /weekly-tracking/ | 周度追踪（?week_start=） |
+| POST | /weekly-tracking/refresh/ | 重建周度固化表 |
+| GET | /weekly-structure/ | 周结构图 |
 
 ### Logseq
 | 方法 | 端点 | 用途 |

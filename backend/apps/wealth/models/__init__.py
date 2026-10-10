@@ -6,8 +6,35 @@ from .wealth_models import (
     WealthBalanceList,
     WealthRegularList,
     WealthBillList,
+    WealthLiabilityDetail,
+    WealthReceivableDetail,
+    WealthAssetAccount,
+    WealthAssetSnapshot,
+    WealthAssetSnapshotItem,
+    WealthClassifyRule,
 )
-
+# 生存资源盘点（v3.59.0，P3-A 一期）—— 物资侧，与上面的金融资产体系刻意分开命名
+from .survival_models import (
+    SurvivalCategory,
+    SurvivalUnit,
+    SurvivalItem,
+    SurvivalEssential,
+    SurvivalRecipe,
+    SurvivalRecipeLine,
+    SurvivalCombo,
+    SurvivalComboItem,
+    SurvivalRecipeComboLine,
+    SurvivalSnapshot,
+    SurvivalSnapshotCategory,
+    SurvivalStocktake,
+    SurvivalStocktakeLine,
+    SurvivalFlow,
+)
+# 物件资产（v3.60.0）—— 耐用品台账：会折旧会报废，答案是「年」与「元」
+from .property_models import (
+    WealthPropertyCategory,
+    WealthProperty,
+)
 __all__ = [
     'WealthLifeWeekCalendar',
     'WealthCurrentScenario',
@@ -16,4 +43,26 @@ __all__ = [
     'WealthBalanceList',
     'WealthRegularList',
     'WealthBillList',
+    'WealthLiabilityDetail',
+    'WealthReceivableDetail',
+    'WealthAssetAccount',
+    'WealthAssetSnapshot',
+    'WealthAssetSnapshotItem',
+    'WealthClassifyRule',
+    'SurvivalCategory',
+    'SurvivalUnit',
+    'SurvivalItem',
+    'SurvivalEssential',
+    'SurvivalRecipe',
+    'SurvivalRecipeLine',
+    'SurvivalCombo',
+    'SurvivalComboItem',
+    'SurvivalRecipeComboLine',
+    'SurvivalSnapshot',
+    'SurvivalSnapshotCategory',
+    'SurvivalStocktake',
+    'SurvivalStocktakeLine',
+    'SurvivalFlow',
+    'WealthPropertyCategory',
+    'WealthProperty',
 ]

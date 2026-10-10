@@ -14,13 +14,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.wealth.constants import EMERGENCY_MONTHS_TARGET
+from apps.wealth.constants import EMERGENCY_MONTHS_TARGET, PERT_MIN_MONTHS
 from apps.wealth.models import WealthBillList
 from apps.wealth.serializers.wealth_serializers import CashFlowOverviewSerializer
 from apps.wealth.services.cashflow_service import (
     _build_overview,
-    get_recent_monthly_expense,
     sum_liquid_accounts,
+)
+from apps.wealth.services.expense_estimate import (
+    get_monthly_expense_estimate,
+    window_ym_keys,
 )
 
 
@@ -35,6 +38,24 @@ def _cf(**kw) -> SimpleNamespace:
     )
     base.update(kw)
     return SimpleNamespace(**base)
+
+
+def _est(value=None) -> dict:
+    """构造一份**形状完整**的估算结果 —— 只关心分母数值的用例用它。
+
+    ⚠️ 形状必须与 `expense_estimate.get_monthly_expense_estimate` 一致：
+       序列化器会把缺字段当成契约破裂直接抛 KeyError，
+       「少写两个键」在这里不是省事、是让测试挂在一个跟意图无关的地方。
+    ⚠️ 不传 value 表示「分母算不出来」，此时三个派生字段都应为 None。
+    """
+    return {
+        'value': value,
+        'optimistic': None, 'likely': None, 'pessimistic': None,
+        'mean': None, 'median': None,
+        'months_with_records': 0, 'months_required': PERT_MIN_MONTHS,
+        'window_months': 12, 'anchor_yearmon': '2026-09',
+        'ym_keys': [], 'detail': [], 'reason': None,
+    }
 
 
 def _month_key(anchor: datetime, back: int) -> tuple[int, int]:
@@ -110,7 +131,7 @@ class TestEmergencyFundMonths:
 
     def test_months_and_target_gap(self):
         cf = _cf(zplay=10000, wechat=5000, cash=1000, jianbank=14000)
-        h = _build_overview(cf, monthly_expense_avg=5000)['health_metrics']
+        h = _build_overview(cf, _est(5000))['health_metrics']
 
         assert h['emergency_fund'] == 30000          # 含银行卡活期（原实现只算 16000）
         assert h['emergency_fund_months'] == 6.0
@@ -124,8 +145,8 @@ class TestEmergencyFundMonths:
         原实现用绝对阈值 5000/10000 判定，两种情况都会显示为「好」。
         """
         cf = _cf(cash=15000)
-        low = _build_overview(cf, monthly_expense_avg=5000)['health_metrics']
-        high = _build_overview(cf, monthly_expense_avg=30000)['health_metrics']
+        low = _build_overview(cf, _est(5000))['health_metrics']
+        high = _build_overview(cf, _est(30000))['health_metrics']
 
         assert low['emergency_fund_months'] == 3.0
         assert high['emergency_fund_months'] == 0.5
@@ -146,8 +167,7 @@ class TestSerializerFieldAlignment:
     """服务层字段与序列化器必须逐一对齐，防止改名后静默丢字段"""
 
     def test_overview_serializes_new_fields(self):
-        data = _build_overview(_cf(jianbank=1000, lend=100, borrow=50),
-                               monthly_expense_avg=100)
+        data = _build_overview(_cf(jianbank=1000, lend=100, borrow=50), _est(100))
         out = CashFlowOverviewSerializer(data).data
 
         assert out['summary']['net_worth'] == 1050.0
@@ -156,39 +176,128 @@ class TestSerializerFieldAlignment:
         assert out['health_metrics']['debt_ratio_legacy'] == round(50 / 1000 * 100, 1)
 
 
+class TestWindowKeys:
+    """估算窗口 = 锚定月**之前**的 N 个完整月（v3.58.24）"""
+
+    def test_window_excludes_anchor_month(self):
+        """不含锚定月 —— 盘点当月往往才过几天，算进来会把基准拉低"""
+        assert window_ym_keys(202609, 3) == [202608, 202607, 202606]
+
+    def test_window_crosses_year_boundary(self):
+        assert window_ym_keys(202601, 3) == [202512, 202511, 202510]
+
+    def test_window_length(self):
+        assert len(window_ym_keys(202609, 12)) == 12
+        assert window_ym_keys(202609, 12)[-1] == 202509
+
+
 @pytest.mark.django_db
-class TestRecentMonthlyExpense:
-    """月均支出取数：除以「有记录的月份数」，而非固定回看月数"""
+class TestMonthlyExpenseEstimate:
+    """应急金分母 —— 近 12 个完整月支出的三点估算（PERT）
+
+    为什么值得这么多用例：这是除法的**分母**。分母错一点，
+    「还能撑几个月」就错一截，而且错的方向常常偏乐观（分母偏小 ⇒ 月数虚高）。
+    """
 
     TEST_USER = 9999
 
-    def _bill(self, year: int, month: int, amount: float) -> WealthBillList:
+    def _bill(self, year: int, month: int, amount: float,
+              ttype: str = '支出') -> WealthBillList:
         now = datetime.now()
         return WealthBillList.objects.create(
-            transaction_type='支出', date=datetime(year, month, 10, 10, 0),
-            amount=amount, category='餐饮', merchant='口径测试', user_id=self.TEST_USER,
-            year=year, month=month, day=10, created_at=now, updated_at=now,
+            transaction_type=ttype, date=datetime(year, month, 10, 10, 0),
+            amount=amount, category='餐饮', merchant='口径测试',
+            user_id=self.TEST_USER, year=year, month=month, day=10,
+            created_at=now, updated_at=now,
         )
 
-    def test_averages_only_months_with_records(self):
-        """当月 1200、两月前 800、一月前无记录 → 均值取 1000，而非 2000/3"""
-        anchor = datetime.now()
-        y0, m0 = _month_key(anchor, 0)
-        y2, m2 = _month_key(anchor, 2)
-        self._bill(y0, m0, 1200)
-        self._bill(y2, m2, 800)
+    def _months_back(self, back: int) -> tuple[int, int]:
+        """自当前月往前 back 个月的 (年, 月)；back=0 即当月"""
+        return _month_key(datetime.now(), back)
 
-        assert get_recent_monthly_expense(self.TEST_USER, months=3) == 1000.0
+    def test_three_point_estimate(self):
+        """O=100 / M=200 / P=600 → E = (100 + 4×200 + 600) ÷ 6 = 250
 
-    def test_income_records_are_excluded(self):
-        anchor = datetime.now()
-        y0, m0 = _month_key(anchor, 0)
-        now = datetime.now()
-        WealthBillList.objects.create(
-            transaction_type='收入', date=datetime(y0, m0, 5, 10, 0),
-            amount=99999, category='工资', user_id=self.TEST_USER,
-            year=y0, month=m0, day=5, created_at=now, updated_at=now,
-        )
-        self._bill(y0, m0, 600)
+        注意 E(250) 与算术平均(300) **不相等** —— 这条断言就是在守
+        「分母确实是三点估算，不是简单平均」。
+        """
+        for back, amount in ((1, 100), (2, 200), (3, 600)):
+            y, m = self._months_back(back)
+            self._bill(y, m, amount)
 
-        assert get_recent_monthly_expense(self.TEST_USER, months=3) == 600.0
+        r = get_monthly_expense_estimate(self.TEST_USER)
+
+        assert r['optimistic'] == 100.0
+        assert r['likely'] == 200.0          # 中位数
+        assert r['pessimistic'] == 600.0
+        assert r['mean'] == 300.0            # 算术平均：仅作对照，不参与估算
+        assert r['value'] == 250.0
+        assert r['months_with_records'] == 3
+        assert r['reason'] is None
+
+    def test_anchor_month_expense_excluded_from_sample(self):
+        """盘点当月的支出**不进样本**
+
+        造一笔当月大额支出：窗口若含当月，P 会被顶到 99999。
+        用 P 断言而不是「样本月数」，是因为「少一个月」还能用别的理由解释，
+        「P 变了」只有窗口边界这一个解释。
+        """
+        for back in (1, 2, 3):
+            y, m = self._months_back(back)
+            self._bill(y, m, 1000)
+        y0, m0 = self._months_back(0)
+        self._bill(y0, m0, 99999)
+
+        r = get_monthly_expense_estimate(self.TEST_USER)
+
+        assert r['pessimistic'] == 1000.0
+        assert r['months_with_records'] == 3
+        assert r['value'] == 1000.0
+
+    def test_below_min_months_is_none_not_zero(self):
+        """有记录的月份不足门槛 → value 为 None，**不是 0**
+
+        0 会推出「月支出为零 ⇒ 应急金月数无穷」，与「数据不足」正好相反。
+        """
+        for back in (1, 2):
+            y, m = self._months_back(back)
+            self._bill(y, m, 5000)
+
+        r = get_monthly_expense_estimate(self.TEST_USER)
+
+        assert r['value'] is None
+        assert r['optimistic'] is None
+        assert r['likely'] is None
+        assert r['pessimistic'] is None
+        assert r['months_with_records'] == 2
+        assert r['months_required'] == PERT_MIN_MONTHS
+        assert r['reason']
+
+    def test_income_is_not_in_sample(self):
+        """收入不进样本 —— 混进来会把分母抬高、把月数压低（假的安全感）"""
+        for back in (1, 2, 3):
+            y, m = self._months_back(back)
+            self._bill(y, m, 600)
+            self._bill(y, m, 99999, ttype='收入')
+
+        r = get_monthly_expense_estimate(self.TEST_USER)
+
+        assert r['pessimistic'] == 600.0
+        assert r['value'] == 600.0
+
+    def test_months_with_zero_expense_are_not_samples(self):
+        """「没记支出」的月份不进样本，也不会被当成零支出月份
+
+        若把无记录月份按 0 计入，O 会变成 0、E 被拉低到 (0+4M+P)/6，
+        月数随之虚高 —— 这是**往乐观方向错**。
+        """
+        for back in (1, 2, 3):
+            y, m = self._months_back(back)
+            self._bill(y, m, 1000)
+        # back=4 那个月完全不记 ── 它必须既不计入样本、也不贡献 0
+
+        r = get_monthly_expense_estimate(self.TEST_USER)
+
+        assert r['months_with_records'] == 3
+        assert r['optimistic'] == 1000.0
+        assert r['value'] == 1000.0

@@ -24,30 +24,33 @@ Sycamore 个人人生管理系统前端，基于 Vue 3 + TypeScript + Vite 7。
 ```
 frontend/
 ├── src/
-│   ├── modules/          # 业务模块，按生命维度划分
+│   ├── modules/          # 业务模块，按生命维度划分（19 个）
 │   │   ├── book/         # 书籍阅读
-│   │   ├── dams/         # 数字资产管理
+│   │   ├── dams/         # 数字资产管理（已归档）
 │   │   ├── dance/        # 舞蹈记录（已归档）
-│   │   ├── food/         # 美食地图
+│   │   ├── food/         # 美食地图（已归档）
 │   │   ├── goals/        # 目标管理
-│   │   ├── health/       # 健康管理（步数、体重、里程碑）
+│   │   ├── health/       # 健康管理（步数、体重、好朋友跟踪）
 │   │   ├── inbox/        # 收件箱
-│   │   ├── nourishment/  # 纯前端聚合模块
-│   │   ├── projects/     # 项目管理
+│   │   ├── lifesample/   # 人生样本
+│   │   ├── output/       # 个人良品率（已归档）
+│   │   ├── redemption/   # 三年赎回期
 │   │   ├── relation/     # 关系管理（含读者群体）
 │   │   ├── reward/       # 奖励池 & 礼物清单
-│   │   ├── sugar/        # 小确幸
-│   │   ├── summary/      # 综合进度看板
-│   │   ├── temporal/     # 时间感知（日记 + 时间统计）
+│   │   ├── sugar/        # 小确幸 + 能量清单
+│   │   ├── summary/      # 综合进度看板 + 个人画像
+│   │   ├── temporal/     # 时间感知（日记 + 时间统计 + 活动追踪）
 │   │   ├── toolkit/      # 工具箱
-│   │   ├── travel/       # 旅行记录 + 旅行计划
-│   │   └── wealth/       # 财务管理
+│   │   ├── travel/       # 旅行四件套（心愿 / 计划 / 路线推演 / 足迹）
+│   │   ├── treasure/     # 好东西（好恶物双面档案）
+│   │   └── wealth/       # 财务管理（热力图 / 月度日历 / 资产盘点 / 生存资源盘点 / 比率）
 │   ├── core/             # 系统基础设施
+│   │   ├── admin/        # 后台管理（菜单管理 / 系统预设）
 │   │   ├── analysis/     # 分析统计
 │   │   ├── auth/         # 登录认证
 │   │   ├── dashboard/    # 仪表盘
 │   │   ├── notifications/# 通知
-│   │   └── theme/        # 主题
+│   │   └── privacy/      # 隐私脱敏
 │   ├── shared/           # 跨模块共享
 │   │   ├── components/   # 布局/UI/图表/表单组件
 │   │   ├── composables/  # 可组合函数

@@ -6,15 +6,21 @@
           <el-radio :value="false">短句</el-radio>
           <el-radio :value="true">段落</el-radio>
         </el-radio-group>
+        <span class="hint">
+          仅作分类标注 —— 「每日金句」卡按<b>长度</b>判定能不能上卡，与类型无关
+        </span>
       </el-form-item>
 
       <el-form-item label="内容" required>
         <el-input v-model="form.content" type="textarea" :rows="4" placeholder="名言/段落内容" />
+        <div class="length-hint" :class="{ 'is-over': isOverPoolLimit }">{{ poolHint }}</div>
       </el-form-item>
 
       <el-form-item v-if="form.is_paragraph" label="缩减标题">
-        <el-input v-model="form.short_title" placeholder="段落太长时显示此标题，点击展开全文" maxlength="100" show-word-limit />
-        <span class="hint">仪表盘卡片中显示此标题</span>
+        <el-input v-model="form.short_title" placeholder="给自己的检索标注（可留空）" maxlength="100" show-word-limit />
+        <span class="hint">
+          仅作你自己的标注 —— 首页金句卡现在显示全文，不再用它做折叠标题
+        </span>
       </el-form-item>
 
       <el-form-item label="作者/出处">
@@ -66,12 +72,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { LANGUAGE_OPTIONS } from '../types/quoteTypes'
 import type { Quote, QuoteFormData } from '../types/quoteTypes'
 import { createQuote, updateQuote } from '../api/quoteApi'
 import { getPresetByType } from '@/shared/api/coreApi'
+import { getProfile } from '@/core/privacy/api/privacyApi'
 
 const props = defineProps<{
   visible: boolean
@@ -104,6 +111,44 @@ const form = reactive<QuoteFormData>({
   tags: '',
 })
 
+// ─── 金句池长度提示（v3.60.12）───
+// 上限来自「系统管理 → 系统设置」里的配置。`null` = 还没读到 ⇒ **不提示长短**，
+// 而不是拿一个写死的数字冒充当前配置。
+const poolMaxLen = ref<number | null>(null)
+
+/** 与后端池子同口径：MySQL `CHAR_LENGTH(content)` == Python `len(content)` == 这里的 .length */
+const contentLen = computed(() => form.content.length)
+
+const isOverPoolLimit = computed(
+  () => poolMaxLen.value !== null && contentLen.value > poolMaxLen.value,
+)
+
+/**
+ * 长度提示：**只提示，不阻止保存**。
+ *
+ * 用户原话是「长度应该在录入时进行提示」—— 门槛本身没问题，问题是以前它
+ * 既不显示也不能改，写的时候根本不知道这条摘录将来会不会被首页卡片抽到。
+ */
+const poolHint = computed(() => {
+  if (poolMaxLen.value === null) return `共 ${contentLen.value} 字`
+  const limit = poolMaxLen.value
+  if (contentLen.value === 0) return `共 0 字 · 上限 ${limit} 字`
+  if (isOverPoolLimit.value) {
+    return `共 ${contentLen.value} 字 · 超过上限 ${limit} 字，不会出现在「每日金句」卡上（仍会存进摘录）`
+  }
+  return `共 ${contentLen.value} 字 · 在「每日金句」的取句范围内（上限 ${limit} 字）`
+})
+
+async function loadPoolConfig() {
+  try {
+    const res = await getProfile()
+    const v = res.data.quote_pool_max_len
+    poolMaxLen.value = typeof v === 'number' ? v : null
+  } catch {
+    poolMaxLen.value = null // 读不到就不提示，别编一个数字
+  }
+}
+
 function togglePresetTag(tag: string) {
   const idx = tagList.value.indexOf(tag)
   if (idx > -1) {
@@ -130,6 +175,7 @@ watch(() => props.visible, (v) => {
   dialogVisible.value = v
   if (v) {
     editing.value = !!props.quote
+    loadPoolConfig()
     if (props.quote) {
       form.content = props.quote.content
       form.author = props.quote.author
@@ -199,6 +245,9 @@ async function handleSubmit() {
 
 <style scoped>
 .hint { font-size: 11px; color: var(--el-text-color-secondary); margin-top: 4px; display: block; }
+.length-hint { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; line-height: 1.5; }
+/* 超限用暖色提醒，但**不标红** —— 这不是错误，只是不会有首页卡片的机会 */
+.length-hint.is-over { color: #E6A23C; }
 .tags-wrapper {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
 }

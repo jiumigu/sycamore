@@ -1,7 +1,122 @@
 <template>
   <div class="summary-dashboard" v-loading="store.loading">
-    <!-- 季度决策卡片 -->
-    <QuarterlyDecisionCards />
+    <!-- 季度决策工作台已从页面撤下（2026-09-23）：
+         三张洞察卡片（未达标 / 环比 / 最需关注）只复述数据、不产生决策信息，
+         位置让给每日金句。组件、store 方法、后端接口全部原样保留，
+         要接回只需取消下面这行注释。 -->
+    <!-- <QuarterlyDecisionCards /> -->
+
+    <!-- 两个回顾出口并排（v3.60.11）：
+         金句 = 摘录里「被推得最少」的一句（长度不超上限、冷落优先而非纯随机；
+         上限是「系统管理 → 系统设置 → 摘录金句池」里的配置项，v3.60.12 起可调）；
+         旧结论 = 问答库里标过采纳 / 写过备注的一条判断。
+         在此之前只有金句有出口、问答库没有，于是内容被手动拷贝到摘录一侧 —— 这里把两条出口对齐。 -->
+    <div class="recall-row">
+      <el-card shadow="hover" class="chart-card recall-card">
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">📖 每日金句</span>
+            <el-button size="small" text @click="refreshQuote">🔄 换一句</el-button>
+          </div>
+        </template>
+        <div class="quote-card-body" v-if="dailyQuote">
+          <div class="quote-content">{{ dailyQuote.content }}</div>
+          <div class="quote-author" v-if="dailyQuote.author">— {{ dailyQuote.author }}</div>
+          <el-tag size="small">{{ dailyQuote.language }}</el-tag>
+        </div>
+        <div v-else class="recall-empty">
+          还没有能上卡的摘录 —— 去
+          <el-button link type="primary" @click="$router.push('/toolkit/quotes')">摘录管理</el-button>
+          加一条，或到「系统设置 → 摘录金句池」把长度上限调大。
+        </div>
+      </el-card>
+
+      <el-card
+        shadow="hover"
+        class="chart-card recall-card"
+        :class="{ 'is-clickable': !!conclusion }"
+        @click="openConclusion"
+      >
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">🧠 一条旧结论</span>
+            <div class="recall-actions">
+              <!-- 出口（v3.60.13）：这张卡原先只能看、不能点 ——
+                   卡上只有结论摘要，判断依据与完整回答都在问答库里，却没有任何路径过去。 -->
+              <el-button v-if="conclusion" size="small" text type="primary" @click.stop="openConclusion">
+                看全文 →
+              </el-button>
+              <el-button size="small" text @click.stop="refreshConclusion">🔄 换一条</el-button>
+            </div>
+          </div>
+        </template>
+
+        <div class="quote-card-body" v-if="conclusion">
+          <!-- 出处：后端一直在下发 `scene_name` / `topic_title`，卡片从未渲染过 ——
+               实测这两项 100% 有值（11/11 主题有标题、有场景），等于白扔。 -->
+          <div class="conclusion-src">
+            <span class="src-scene">🗂 {{ conclusion.scene_name || '未分类' }}</span>
+            <template v-if="conclusion.topic_title">
+              <span class="src-sep">·</span>
+              <span class="src-topic">{{ conclusion.topic_title }}</span>
+            </template>
+          </div>
+          <div class="conclusion-q">{{ conclusion.question }}</div>
+
+          <!-- 判断依据：`note` 型下你的结论可能只有几个字（实测那条 4 个字：「不够清晰」），
+               没有这段 AI 回答就完全读不出「当时在判断什么」。
+               `answer` 型下 `conclusion` 本身就是这段（后端 docstring 已说明）⇒ 不重复渲染。 -->
+          <div v-if="conclusion.conclusion_source === 'note'" class="conclusion-block">
+            <div class="block-label">🤖 {{ conclusion.ai }} 当时的回答</div>
+            <div class="block-text">{{ conclusion.ai_excerpt }}</div>
+            <div v-if="conclusion.ai_excerpt_truncated" class="block-more">
+              原文共 {{ conclusion.answer_len }} 字，这里只放了开头 —— 点开看全文
+            </div>
+          </div>
+
+          <div
+            class="conclusion-block"
+            :class="{ 'is-your-note': conclusion.conclusion_source === 'note' }"
+          >
+            <div class="block-label">
+              {{ conclusion.conclusion_source === 'note' ? '✍️ 你的结论' : `🤖 ${conclusion.ai} 回答的开头` }}
+            </div>
+            <div class="block-text">{{ conclusion.conclusion }}</div>
+            <div
+              v-if="conclusion.conclusion_source === 'answer' && conclusion.ai_excerpt_truncated"
+              class="block-more"
+            >
+              原文共 {{ conclusion.answer_len }} 字，这里只放了开头 —— 点开看全文
+            </div>
+          </div>
+
+          <div class="conclusion-meta">
+            <el-tag size="small" :type="conclusion.conclusion_source === 'note' ? 'success' : 'info'">
+              {{ conclusion.conclusion_source === 'note' ? '你写的结论' : 'AI 回答片段' }}
+            </el-tag>
+            <!-- 「不采用」这类标记打的是**当时那条 AI 回答**，不是卡上这句结论；
+                 不解释会被读成「都标不采用了怎么还推给我」 -->
+            <el-tooltip v-if="conclusion.verdict" :content="VERDICT_TIP" placement="top">
+              <el-tag size="small">{{ conclusion.verdict }}</el-tag>
+            </el-tooltip>
+            <span class="conclusion-days">{{ askedDate }} · {{ conclusion.days_ago }} 天前</span>
+          </div>
+
+          <!-- 池子太瘦：「换一条」转两下就回原处，界面上得说出为什么（实测库里只有 2 条能进池） -->
+          <div v-if="conclusion.pool_size <= 3" class="pool-thin">
+            池中只有 <b>{{ conclusion.pool_size }}</b> 条能上这张卡 —— 「换一条」很快会转回来。去
+            <el-button link type="primary" @click.stop="$router.push('/toolkit/ask-library/review')">
+              回顾
+            </el-button>
+            给更多回答补一句结论。
+          </div>
+        </div>
+        <div v-else class="recall-empty">
+          问答库里还没有标过结论 —— 标「采纳」或写一句备注，它就会出现在这里。去
+          <el-button link type="primary" @click.stop="$router.push('/toolkit/ask-library/review')">回顾一条</el-button>
+        </div>
+      </el-card>
+    </div>
 
     <!-- 页面标题 -->
     <div class="page-header">
@@ -140,30 +255,6 @@
       </el-table>
     </el-card>
 
-    <!-- 每日金句 -->
-    <el-card shadow="hover" class="chart-card full-card">
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">📖 每日金句</span>
-          <el-button size="small" text @click="refreshQuote">🔄 换一句</el-button>
-        </div>
-      </template>
-      <div class="quote-card-body" v-if="dailyQuote">
-        <div v-if="dailyQuote.is_paragraph" class="quote-title" @click="showQuoteFull = true">
-          {{ dailyQuote.short_title || dailyQuote.content.slice(0, 50) + '...' }}
-        </div>
-        <div v-else class="quote-content">{{ dailyQuote.content }}</div>
-        <div class="quote-author" v-if="dailyQuote.author">— {{ dailyQuote.author }}</div>
-        <el-tag size="small">{{ dailyQuote.language }}</el-tag>
-      </div>
-      <div v-else class="chart-empty">暂无金句</div>
-    </el-card>
-    <el-dialog v-model="showQuoteFull" title="金句详情" width="500px">
-      <div class="full-quote-content">{{ dailyQuote?.content }}</div>
-      <div v-if="dailyQuote?.author" class="full-quote-author">— {{ dailyQuote.author }}</div>
-      <div v-if="dailyQuote?.source" class="full-quote-source">📎 {{ dailyQuote.source }}</div>
-    </el-dialog>
-
     <!-- 月度详情弹窗 -->
     <!-- 年度明细弹窗 -->
     <el-dialog v-model="showYearModal" title="📆 年度明细" width="960" append-to-body>
@@ -191,6 +282,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import { Refresh, Setting } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getRadarConfig, saveRadarConfig as apiSaveRadarConfig, getRadarConfigHistory, getYearlyDetail } from '../api/summaryApi'
@@ -203,10 +295,13 @@ import RadarChart from '../components/RadarChart.vue'
 import TrendChart from '../components/TrendChart.vue'
 import MonthlyModal from '../components/MonthlyModal.vue'
 import BodyMindChart from '../components/BodyMindChart.vue'
-import { getRandomQuote } from '@/modules/toolkit/api/quoteApi'
+import { getNextQuote } from '@/modules/toolkit/api/quoteApi'
+import { getNextConclusion } from '@/modules/toolkit/api/askLibraryApi'
+import type { AskConclusionItem } from '@/modules/toolkit/api/askLibraryApi'
 import type { Quote } from '@/modules/toolkit/types/quoteTypes'
 
 const store = useSummaryStore()
+const router = useRouter()
 const currentYear = computed(() => store.currentYear)
 const overview = computed(() => store.overview)
 const showMonthModal = ref(false)
@@ -242,7 +337,7 @@ async function openYearDetail() {
   }
 }
 const dailyQuote = ref<Quote | null>(null)
-const showQuoteFull = ref(false)
+const conclusion = ref<AskConclusionItem | null>(null)
 
 // ─── 七维平衡封顶配置 ───
 const CONFIG_ITEMS = [
@@ -292,13 +387,61 @@ async function saveRadarConfig() {
   }
 }
 
+/**
+ * 金句：改走 `next/`（短句池 + 冷落优先），不再走 `random/`。
+ *
+ * ⚠️ 池为空时后端返回 **204**，此时 `res.data` 是空串 `''`（不是 null）——
+ * 直接赋值会让 `v-if="dailyQuote"` 判真、把空串当成一条金句渲染出来。所以这里显式判类型。
+ */
 async function refreshQuote() {
   try {
-    const res = await getRandomQuote()
-    dailyQuote.value = res.data as Quote
+    const res = await getNextQuote()
+    const data = res.data
+    dailyQuote.value = data && typeof data === 'object' ? (data as Quote) : null
   } catch {
     dailyQuote.value = null
   }
+}
+
+/**
+ * 一条旧结论：问答库里「标过采纳 / 写过备注」的一条回答。
+ * 库里还没有任何结论时后端返回 **200 + null**（这不是错误），照实显示引导文案。
+ */
+async function refreshConclusion() {
+  try {
+    const res = await getNextConclusion()
+    conclusion.value = (res.data as AskConclusionItem) ?? null
+  } catch {
+    conclusion.value = null
+  }
+}
+
+/**
+ * 「不采用」这类标记打的是**当时那条 AI 回答**，不是卡上这句结论 ——
+ * 卡上不解释，会被读成「都标不采用了怎么还推给我」。
+ */
+const VERDICT_TIP = '这条标记打在当时那条 AI 回答上，不是打在你写的结论上'
+
+/** `asked_at` 是带时区的 ISO 串：直接切片取日期，不 `new Date()`（避免两把尺子） */
+const askedDate = computed(() => {
+  const iso = conclusion.value?.asked_at || ''
+  return iso.length >= 10 ? iso.slice(0, 10) : ''
+})
+
+/**
+ * 打开这条结论的全文：落到问答库「回顾」页，并把抽屉定位到**这一条回答**。
+ *
+ * 卡上只放得下摘要（实测库里的 AI 回答 1045~2696 字），判断依据与全文都在那边。
+ * 带上 `answer` 而不只是 `topic`：一个主题下常挂多条回答，
+ * 只给主题的话用户还得自己在一串回答里找——那等于没解决「点不开」。
+ */
+function openConclusion() {
+  const c = conclusion.value
+  if (!c) return
+  router.push({
+    path: '/toolkit/ask-library/review',
+    query: { topic: String(c.topic_id), answer: String(c.id) },
+  })
 }
 
 const monthTableData = computed(() => {
@@ -321,6 +464,7 @@ function handleRowClick(row: { month: number }) {
 onMounted(() => {
   store.fetchAll()
   refreshQuote()
+  refreshConclusion()
 })
 </script>
 
@@ -433,43 +577,125 @@ onMounted(() => {
   font-weight: 600;
 }
 
+/* 两个回顾出口并排（金句 / 一条旧结论）—— 窄屏自动堆叠 */
+.recall-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.recall-row .recall-card {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-bottom: 0;
+}
+@media (max-width: 900px) {
+  .recall-row { flex-direction: column; }
+  .recall-row .recall-card { margin-bottom: 16px; }
+}
+.recall-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #9CA3AF;
+}
+/* ─── 一条旧结论（v3.60.13）：卡上要能读出「当时在判断什么」 ───
+   本样式块是纯 CSS（无 lang="scss"），只能用扁平选择器，别写嵌套。 */
+.recall-card.is-clickable { cursor: pointer; }
+.recall-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* 出处行：场景 · 主题。主题可能很长 ⇒ 省略号收尾，不换行把卡撑高 */
+.conclusion-src {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: #9CA3AF;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.conclusion-src .src-scene,
+.conclusion-src .src-sep { flex: none; }
+.conclusion-src .src-topic { overflow: hidden; text-overflow: ellipsis; }
+.conclusion-q {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.conclusion-block {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+/* 你自己写的那句是这张卡的主角，给一层可辨识的底色 */
+.conclusion-block.is-your-note { background: var(--el-color-success-light-9); }
+.conclusion-block .block-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #6B7280;
+}
+.conclusion-block .block-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #1F2937;
+  white-space: pre-wrap;
+  /* 卡内滚动，不把卡撑高 —— 这里是两列并排，一张卡变高会带着整行一起变高 */
+  max-height: 96px;
+  overflow-y: auto;
+}
+.conclusion-block .block-more {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #9CA3AF;
+}
+/* 池子太瘦：「换一条」转两下就回原处，界面上得说出为什么 */
+.pool-thin {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+  font-size: 12px;
+  line-height: 1.8;
+  color: #9CA3AF;
+}
+.pool-thin b { color: #D97706; }
+.conclusion-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.conclusion-days {
+  font-size: 12px;
+  color: #9CA3AF;
+}
+
 .quote-card-body {
   padding: 8px 0;
-}
-.quote-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--el-color-primary);
-  cursor: pointer;
-  line-height: 1.5;
 }
 .quote-content {
   font-size: 14px;
   color: #1F2937;
   line-height: 1.6;
   white-space: pre-wrap;
+  /* 长度上限放开成可配置后（v3.60.12），长摘录会**全文**上卡 ——
+     卡内滚动而不是把卡片撑高：这里是两列并排布局，一张卡变高会带着整行一起变高，
+     旁边那张就被拉出一片空白。约 8 行的可视高度，超出自己滚。 */
+  max-height: 180px;
+  overflow-y: auto;
 }
 .quote-author {
   margin-top: 6px;
   font-size: 13px;
   color: #6B7280;
   font-style: italic;
-}
-.full-quote-content {
-  font-size: 16px;
-  line-height: 1.8;
-  white-space: pre-wrap;
-  margin-bottom: 12px;
-}
-.full-quote-author {
-  font-size: 14px;
-  color: #6B7280;
-  font-style: italic;
-  margin-bottom: 4px;
-}
-.full-quote-source {
-  font-size: 13px;
-  color: #9CA3AF;
 }
 .header-actions {
   display: flex;

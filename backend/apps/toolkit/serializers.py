@@ -70,10 +70,36 @@ class CareerEnergyAuditSerializer(serializers.ModelSerializer):
 
 
 class QuoteSerializer(serializers.ModelSerializer):
+    """摘录
+
+    `content_len` / `in_golden_pool` 由**后端算好下发**，前端只查表、不自己比长度 ——
+    判断依据必须与池子取数用的是同一把尺子（`长度 ≤ 上限`），
+    否则会出现「界面说会进卡、实际取不到」，而界面上完全看不出来。
+    """
+
+    content_len = serializers.SerializerMethodField()
+    in_golden_pool = serializers.SerializerMethodField()
+
     class Meta:
         model = Quote
         fields = '__all__'
         read_only_fields = ['review_count', 'created_at']
+
+    def get_content_len(self, obj) -> int:
+        """正文字数（与池子筛选用的 `Length()` 同为「字符数」口径）。"""
+        return len(obj.content or '')
+
+    def get_in_golden_pool(self, obj):
+        """是否在「每日金句」的可取范围内。
+
+        ⚠️ 上限由视图层通过 context 注入（一次请求只读一次配置）。
+        ⚠️ 拿不到上限时返回 **None** 而不是 False —— 「不知道」与「不进池」
+        在界面上该显示成不同的东西（同 `null ≠ 0` 的判据）。
+        """
+        max_len = self.context.get('pool_max_len')
+        if max_len is None:
+            return None
+        return len(obj.content or '') <= max_len
 
 
 class DecisionTrackerSerializer(serializers.ModelSerializer):

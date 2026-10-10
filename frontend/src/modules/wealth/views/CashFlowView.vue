@@ -7,7 +7,7 @@
         <el-tag type="warning" class="module-tag">资产负债表口径</el-tag>
       </div>
       <div class="header-actions">
-        <el-button type="primary" @click="openNewDialog">
+        <el-button type="primary" @click="handleNewSnapshot">
           <el-icon><Plus /></el-icon>
           新增盘点
         </el-button>
@@ -18,6 +18,10 @@
         <el-button @click="switchToReview">
           <el-icon><DataAnalysis /></el-icon>
           月度复盘
+        </el-button>
+        <el-button @click="openConfig">
+          <el-icon><Setting /></el-icon>
+          口径配置
         </el-button>
         <el-button @click="handleRefresh">
           <el-icon><Refresh /></el-icon>
@@ -37,6 +41,7 @@
         <el-card shadow="never" class="equal-height-card">
           <HealthMetrics
             :metrics="store.overview?.health_metrics ?? null"
+            :ratio-meta="ratioStore.metaByKey"
           />
         </el-card>
       </el-col>
@@ -51,170 +56,143 @@
       />
     </el-card>
 
-    <!-- 盘点历史列表 -->
+    <!-- 资产快照（按科目）—— 全页唯一的录入入口与历史列表 -->
     <el-card shadow="never" class="section-card">
-      <SnapshotHistory
-        :items="store.snapshotList?.items ?? []"
-        :total="store.snapshotList?.total ?? 0"
-        :loading="store.listLoading"
-        @edit="handleEditSnapshot"
-        @delete="handleDeleteSnapshot"
-        @page-change="handleSnapshotPageChange"
-      />
+      <AssetSnapshotPanel ref="snapshotPanelRef" />
     </el-card>
 
-    <!-- 新增/编辑弹窗 -->
-    <el-dialog
-      v-model="showFormDialog"
-      :title="editingId ? '编辑盘点' : '新增盘点'"
-      width="600px"
-      :close-on-click-modal="false"
+    <!-- 负债明细台账（逐笔） -->
+    <el-card shadow="never" class="section-card">
+      <LiabilityPanel />
+    </el-card>
+
+    <!-- 应收借出台账（逐笔 · 账龄） -->
+    <el-card shadow="never" class="section-card">
+      <ReceivablePanel />
+    </el-card>
+
+    <!-- 财务规划比率（六项；判定区间由后端下发） -->
+    <el-card shadow="never" class="section-card">
+      <RatioPanel />
+    </el-card>
+
+    <!--
+      口径配置抽屉（v3.60.6）。
+
+      「资产科目主数据」与「账单项分类规则」都是**配置项** —— 建库时配一次、
+      之后偶尔增删科目或补一条规则。本页的日常动线是「看数 + 记账」，
+      两块配置直挂主区，等于每次翻账都要先滚过它们。
+
+      故收进页头右侧这个按钮：默认不渲染（destroy-on-close），点开才挂载。
+      ⚠️ 入口可以藏，**引导文案必须跟着改** —— AssetSnapshotPanel 的两处
+      空状态提示原先写「先在『资产科目主数据』里……」，已同步指向这里。
+
+      size 用 CSS min()：宽屏 1200px、窄屏 94%。抽屉内两张表都有 fixed 列，
+      窄了会挤，所以不取百分比定值。
+    -->
+    <el-drawer
+      v-model="configDrawer"
+      size="min(1200px, 94%)"
+      destroy-on-close
+      @close="handleConfigClose"
     >
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="年月">
-          <el-date-picker v-model="form.yearmon" type="month" value-format="YYYY-MM" style="width:100%" />
-        </el-form-item>
-
-        <el-form-item label="盘点日期">
-          <el-date-picker v-model="form.btime" type="date" value-format="YYYY-MM-DD" style="width:100%" />
-        </el-form-item>
-
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="支付宝">
-              <el-input-number v-model="form.zplay" :precision="2" :min="0" :step="1000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="微信">
-              <el-input-number v-model="form.wechat" :precision="2" :min="0" :step="1000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="现金">
-              <el-input-number v-model="form.cash" :precision="2" :min="0" :step="500" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="建行">
-              <el-input-number v-model="form.jianbank" :precision="2" :min="0" :step="10000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="工行">
-              <el-input-number v-model="form.gongbank" :precision="2" :min="0" :step="10000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="中国银行">
-              <el-input-number v-model="form.zhongbank" :precision="2" :min="0" :step="10000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="农信社">
-              <el-input-number v-model="form.nongbank" :precision="2" :min="0" :step="10000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="公积金">
-              <el-input-number v-model="form.accumulationfund" :precision="2" :min="0" :step="10000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="负债">
-              <el-input-number v-model="form.borrow" :precision="2" :min="0" :step="10000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="借出">
-              <el-input-number v-model="form.lend" :precision="2" :min="0" :step="10000" style="width:100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item label="备注">
-          <el-input v-model="form.remarks" type="textarea" :rows="2" placeholder="可选" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="showFormDialog = false">取消</el-button>
-        <el-button :loading="store.saving" @click="handleCopy">复制上月</el-button>
-        <el-button type="primary" :loading="store.saving" @click="handleSave">
-          {{ editingId ? '更新' : '保存' }}
-        </el-button>
+      <template #header>
+        <div class="config-drawer__header">
+          <span class="config-drawer__title">口径配置</span>
+          <span class="config-drawer__sub">资产科目主数据 · 账单项分类规则</span>
+        </div>
       </template>
-    </el-dialog>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="config-drawer__tip"
+        title="这两块是配置项，日常无需进入"
+        description="资产科目决定「按科目录余额」能录哪些项；分类规则决定账单归到收入性质 / 支出刚性 / 现金流哪一类。改动会重算往期归类与六项比率，关闭本抽屉时自动刷新一次。"
+      />
+
+      <el-tabs v-model="configTab" class="config-drawer__tabs">
+        <el-tab-pane label="资产科目" name="account">
+          <AccountPanel />
+        </el-tab-pane>
+        <el-tab-pane label="分类规则" name="classify">
+          <ClassifyRulePanel />
+        </el-tab-pane>
+      </el-tabs>
+    </el-drawer>
+
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Calendar, DataAnalysis, Grid } from '@element-plus/icons-vue'
+import { Plus, Refresh, Calendar, DataAnalysis, Setting } from '@element-plus/icons-vue'
 import { useCashflowStore } from '../stores/cashflowStore'
+import { useDebtStore } from '../stores/debtStore'
+import { useAssetStore } from '../stores/assetStore'
+import { useClassifyStore } from '../stores/classifyStore'
+import { useRatioStore } from '../stores/ratioStore'
 import AssetOverview from '../components/cashflow/AssetOverview.vue'
 import AssetTrend from '../components/cashflow/AssetTrend.vue'
 import HealthMetrics from '../components/cashflow/HealthMetrics.vue'
-import SnapshotHistory from '../components/cashflow/SnapshotHistory.vue'
-import type { SnapshotListItem, SnapshotFormData } from '../types/wealthTypes'
+import LiabilityPanel from '../components/debt/LiabilityPanel.vue'
+import ReceivablePanel from '../components/debt/ReceivablePanel.vue'
+import AccountPanel from '../components/asset/AccountPanel.vue'
+import AssetSnapshotPanel from '../components/asset/AssetSnapshotPanel.vue'
+import ClassifyRulePanel from '../components/classify/ClassifyRulePanel.vue'
+import RatioPanel from '../components/ratio/RatioPanel.vue'
 
 const router = useRouter()
 const store = useCashflowStore()
+const debtStore = useDebtStore()
+const assetStore = useAssetStore()
+const classifyStore = useClassifyStore()
+const ratioStore = useRatioStore()
 
 const trendMonths = ref(12)
-const showFormDialog = ref(false)
-const editingId = ref<number | null>(null)
 
-const form = reactive({
-  yearmon: '',
-  btime: '',
-  zplay: 0,
-  wechat: 0,
-  cash: 0,
-  jianbank: 0,
-  gongbank: 0,
-  zhongbank: 0,
-  nongbank: 0,
-  accumulationfund: 0,
-  lend: 0,
-  borrow: 0,
-  remarks: '',
-})
+/**
+ * 口径配置抽屉（v3.60.6）。
+ *
+ * 两个页签对应两块配置面板：资产科目主数据 / 账单项分类规则。
+ * 它们与主区的取数**互相独立** —— 面板本身不 onMounted 取数，
+ * store 已由本页 onMounted 统一拉过（比率体系要用），故渲染可以安全延迟。
+ */
+const configDrawer = ref(false)
+const configTab = ref<'account' | 'classify'>('account')
 
-function resetForm() {
-  form.yearmon = ''
-  form.btime = ''
-  form.zplay = 0
-  form.wechat = 0
-  form.cash = 0
-  form.jianbank = 0
-  form.gongbank = 0
-  form.zhongbank = 0
-  form.nongbank = 0
-  form.accumulationfund = 0
-  form.lend = 0
-  form.borrow = 0
-  form.remarks = ''
+function openConfig() {
+  configDrawer.value = true
 }
 
-function openNewDialog() {
-  editingId.value = null
-  resetForm()
-  showFormDialog.value = true
+/**
+ * 关掉抽屉时刷一次比率体系。
+ *
+ * 科目与规则都是比率的**上游**：改一条规则会让往期归类重算，六项比率随之变。
+ * 不刷的话，用户关掉抽屉回到主区看到的仍是旧数 —— 而界面上看不出是旧的。
+ */
+function handleConfigClose() {
+  ratioStore.clearOpeningPosition()
+  ratioStore.fetchAll()
+}
+
+/**
+ * 全页唯一的录入入口。
+ *
+ * 2026-09-29 之前这里有**两个**「新增盘点」：页头那个写旧表
+ * `wealth_cash_flow` 的 8 个硬编码列，面板里那个按科目写新体系。
+ * 同一次月末盘点要填两遍，而顶部三块吃旧表、六项比率吃新体系 ——
+ * 两块的期次还会分叉（旧表 18 期 vs 新体系 1 期）。
+ *
+ * 现在统一到按科目的新体系：页头这个按钮只是把面板里的弹窗调起来，
+ * **不再自己持有一份表单** —— 入口可以有两个，数据源只能有一个。
+ */
+const snapshotPanelRef = ref<InstanceType<typeof AssetSnapshotPanel> | null>(null)
+
+function handleNewSnapshot() {
+  snapshotPanelRef.value?.openDialog()
 }
 
 function switchToMonthly() {
@@ -223,14 +201,18 @@ function switchToMonthly() {
 function switchToReview() {
   router.push('/wealth/review')
 }
-function switchToHeatmap() {
-  router.push('/wealth/heatmap')
-}
-
 function handleRefresh() {
   store.fetchOverview()
   store.fetchTrend(trendMonths.value)
-  store.fetchSnapshotList()
+  debtStore.fetchAll()
+  assetStore.fetchAll()
+  classifyStore.fetchAll()
+  // 快照列表归面板自己管，刷新时也要一起重拉
+  snapshotPanelRef.value?.refresh()
+  // 比率体系依赖资产快照 + 分类规则 + 负债台账 —— 三者任一变了数就变，
+  // 故刷新时一起重拉
+  ratioStore.clearOpeningPosition()
+  ratioStore.fetchAll()
 }
 
 function handleTrendMonthsChange(val: number) {
@@ -238,94 +220,18 @@ function handleTrendMonthsChange(val: number) {
   store.fetchTrend(val || 99)
 }
 
-async function handleCopy() {
-  const now = new Date()
-  const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0')
-  try {
-    await store.copyLastMonth(ym)
-    if (store.overview && store.overview.yearmon === ym) {
-      const a = store.overview.accounts
-      form.yearmon = ym
-      form.btime = store.overview.snapshot_date || ''
-      form.zplay = a.zplay
-      form.wechat = a.wechat
-      form.cash = a.cash
-      form.jianbank = a.jianbank
-      form.gongbank = a.gongbank
-      form.zhongbank = a.zhongbank
-      form.nongbank = a.nongbank
-      form.accumulationfund = a.accumulationfund
-      form.lend = store.overview.summary.lend
-      form.borrow = store.overview.summary.borrow
-      form.remarks = ''
-    }
-    ElMessage.success('已复制上月数据')
-  } catch {
-    ElMessage.warning('上月无盘点记录')
-  }
-}
-
-async function handleSave() {
-  const formData: SnapshotFormData = {
-    yearmon: form.yearmon,
-    btime: form.btime || undefined,
-    zplay: form.zplay,
-    wechat: form.wechat,
-    cash: form.cash,
-    jianbank: form.jianbank,
-    gongbank: form.gongbank,
-    zhongbank: form.zhongbank,
-    nongbank: form.nongbank,
-    accumulationfund: form.accumulationfund,
-    lend: form.lend,
-    borrow: form.borrow,
-    remarks: form.remarks,
-  }
-  try {
-    if (editingId.value) {
-      await store.updateSnapshot(formData)
-    } else {
-      await store.saveSnapshot(formData)
-    }
-    showFormDialog.value = false
-    editingId.value = null
-  } catch {
-    /* error handled by store */
-  }
-}
-
-function handleEditSnapshot(row: SnapshotListItem) {
-  editingId.value = row.baid
-  form.yearmon = row.yearmon || ''
-  form.btime = row.btime || ''
-  form.zplay = row.zplay
-  form.wechat = row.wechat
-  form.cash = row.cash
-  form.jianbank = row.jianbank
-  form.gongbank = row.gongbank
-  form.zhongbank = row.zhongbank
-  form.nongbank = row.nongbank
-  form.accumulationfund = row.accumulationfund
-  form.lend = row.lend
-  form.borrow = row.borrow
-  form.remarks = row.remarks || ''
-  showFormDialog.value = true
-}
-
-function handleDeleteSnapshot(baid: number) {
-  store.removeSnapshot(baid)
-}
-
-function handleSnapshotPageChange(page: number) {
-  store.fetchSnapshotList(page)
-}
-
 onMounted(() => {
   store.fetchOverview()
   store.fetchTrend(12)
-  store.fetchSnapshotList()
+  // 负债 / 应收台账与资产快照各自独立取数：改一笔台账不应触发全页重拉
+  debtStore.fetchAll()
+  // 资产科目与按科目的快照（全页唯一的资产录入体系）同样独立
+  assetStore.fetchAll()
+  // 账单项分类规则与归类结果 —— 改一条规则会让往期数字重算，故自带取数
+  classifyStore.fetchAll()
+  // 财务规划比率（六项）—— 依赖上面三者的结果，必须最后拉
+  ratioStore.fetchAll()
 })
-
 </script>
 
 <style scoped>
@@ -361,6 +267,23 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 .section-card :deep(.el-card__body) { padding: 20px; }
+
+/* 口径配置抽屉（配置项收口入口） */
+.config-drawer__header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.config-drawer__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.config-drawer__sub {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.config-drawer__tip { margin-bottom: 12px; }
 
 /* 顶部卡片等高对齐 */
 .cashflow-top-row {

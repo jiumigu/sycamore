@@ -84,7 +84,7 @@
       />
 
       <el-input
-        v-model="billSearch" placeholder="搜索备注 / 商户 / 分类" clearable size="small" style="width: 190px"
+        v-model="billSearch" placeholder="搜索备注 / 商户 / 分类 / 子分类" clearable size="small" style="width: 190px"
         @keyup.enter="applySearch" @clear="applySearch"
       >
         <template #prefix><el-icon><Search /></el-icon></template>
@@ -134,7 +134,11 @@
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="分类" width="72" prop="category" />
+      <el-table-column label="分类" width="76" prop="category" show-overflow-tooltip />
+      <!-- 子分类紧挨分类：分类是大类（食品酒水）、子分类是细类（早午晚餐），
+           两者在数据里从不重复，只看分类等于拿到一半信息。
+           空值留白、不写破折号（§39：数值占位、文本留白）。 -->
+      <el-table-column label="子分类" width="96" prop="subcategory" show-overflow-tooltip />
       <el-table-column label="商户" width="104" prop="merchant" show-overflow-tooltip />
       <el-table-column label="备注" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">{{ row.notes || '-' }}</template>
@@ -202,7 +206,7 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="子分类">
-              <el-input v-model="form.subcategory" />
+              <el-input v-model="form.subcategory" placeholder="细类，如 早午晚餐" />
             </el-form-item>
           </el-col>
         </el-row>

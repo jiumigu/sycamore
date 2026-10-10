@@ -165,6 +165,25 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
+  // 生存资源盘点（v3.59.0，P3-A）—— 独立菜单，不在 WealthHub 的 tab 里：
+  // 它盘的是「物」，与上面 /wealth/cashflow 的「资产盘点」（盘钱）是两件事。
+  {
+    path: '/wealth/survival',
+    name: 'wealth-survival',
+    component: () => import('@/modules/wealth/views/survival/SurvivalView.vue'),
+    meta: { title: '生存资源盘点' },
+  },
+
+  // 物件资产（v3.60.0，P4-A）—— 同样是独立菜单，也不进 WealthHub 的 tab：
+  // 它盘的是「耐用品」（会折旧、会报废，答案是「年」与「元」），
+  // 与 /wealth/survival 的「消耗物」（会被用完，答案是「天」）是两件事。
+  {
+    path: '/wealth/property',
+    name: 'wealth-property',
+    component: () => import('@/modules/wealth/views/property/PropertyView.vue'),
+    meta: { title: '物件资产' },
+  },
+
   // 三年赎回期
   {
     path: '/redemption',
@@ -263,6 +282,21 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'hourly-wage-tool',
         redirect: '/toolkit/hourly-wage',
+      },
+      {
+        // 用电记录的「月度用电」子页面：路径挂在父级之下 ⇒ 侧边栏「用电记录」保持高亮
+        path: 'electricity-record/monthly',
+        name: 'electricity-monthly',
+        component: () => import('@/modules/toolkit/views/tools/ElectricityMonthly.vue'),
+        meta: { title: '月度用电' },
+      },
+      {
+        // AI 问答库的「回顾」子页面：同样挂在父级之下 ⇒ 侧边栏「AI 问答库」保持高亮。
+        // 若写成平级的 /toolkit/ask-review，startsWith 匹配不上，侧边栏会整个不亮。
+        path: 'ask-library/review',
+        name: 'ask-library-review',
+        component: () => import('@/modules/toolkit/views/tools/AskReview.vue'),
+        meta: { title: '问答回顾' },
       },
       {
         path: ':toolKey',

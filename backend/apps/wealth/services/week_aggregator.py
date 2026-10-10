@@ -7,6 +7,7 @@ from django.utils.timezone import make_aware
 
 from apps.wealth.constants import (
     START_AGE, END_AGE, WEEKS_PER_YEAR, TOTAL_WEEKS,
+    WINDOW_START_INDEX, WINDOW_END_INDEX,
     age_week_to_global_index,
 )
 from apps.wealth.models import WealthLifeWeekCalendar
@@ -54,6 +55,112 @@ def date_to_week_index(tx_date: date, birth_date: date) -> int | None:
         week_num = WEEKS_PER_YEAR
 
     return age_week_to_global_index(age, week_num)
+
+
+# ──────────────────────────────────────────────────────────────
+# 「现在处在第几岁第几周」—— 全项目唯一真源是**周历表**
+#
+# 🔴 为什么必须读表、不能按出生日期现算（v3.60.15 修的 31/32 岁断层）：
+#   周历表是这套体系的**索引真源**：`global_week_index` 由它定义，
+#   账单按周聚合、热力图着色、推演起点全都按它对位。而它有两处写法
+#   与「生日现算」**天然不同**：
+#     ① `age_year = 日历年份 − 出生年`（`week=出生年+age`，见 calendar_init），
+#        即「那一年里你几岁」是按**年**编的，不随生日当天翻页；
+#     ② `week_number` 以**当年第一个周一**为第 1 周，而 `date.isocalendar()[1]`
+#        是 ISO 周 —— 只要 1 月 1 日不是周一，两者就差 1 周。
+#   于是「生日 + ISO 周」现算出来的位置会与表错开，最坏整整一年。
+#   2026-10-09 的现场：表说今天在 (31,40)=索引 715（最后一格彩色），
+#   现算说在 (32,41)=索引 768 ⇒ 中间 52 周既非「已度过」也不在推演
+#   覆盖范围内，热力图在 31/32 岁之间撕出一条 52 周的对角缺口。
+#
+#   ⇒ 判据：**「现在」是一个事实，不是一个可以各自推算的派生值。**
+#     凡「按出生日期现算当前位置」的写法一律不得进入渲染链路。
+# ──────────────────────────────────────────────────────────────
+
+# 「现在」的来源标识 —— 界面据此说明这个位置是怎么来的（回落必须显式告知）
+CURRENT_AGE_WEEK_SOURCE_CALENDAR = 'calendar'
+CURRENT_AGE_WEEK_SOURCE_BIRTHDATE = 'birthdate'
+CURRENT_AGE_WEEK_SOURCE_LABELS = {
+    CURRENT_AGE_WEEK_SOURCE_CALENDAR: '周历表（含今天的那一周）',
+    CURRENT_AGE_WEEK_SOURCE_BIRTHDATE: '按出生日期估算（周历尚未初始化）',
+}
+
+
+def _age_week_from_birth_date(today: date | None = None) -> tuple[int, int]:
+    """按出生日期现算「几岁第几周」—— **仅为回落路径**，不是真源。
+
+    只在周历表没有已度过行时使用（例如刚装好还没跑 `init_week_calendar`）。
+    返回值一律夹到合法区间，避免界面拿到 0 岁或第 53 周这类越界值 ——
+    越界值会让推演索引算到窗口之外，且**不报错**。
+    """
+    from django.conf import settings
+
+    birth_str = getattr(settings, 'WEALTH_BIRTH_DATE', '1995-01-01')
+    birth = date.fromisoformat(birth_str)
+    today = today or date.today()
+
+    age = today.year - birth.year
+    if (today.month, today.day) < (birth.month, birth.day):
+        age -= 1
+    age = min(max(age, START_AGE), END_AGE)
+    week = min(max(today.isocalendar()[1], 1), WEEKS_PER_YEAR)
+    return age, week
+
+
+def current_age_week(user_id: int = 1) -> dict:
+    """「现在处在第几岁第几周」—— 读周历表，不按出生日期现算（理由见上）。
+
+    口径与 `/wealth/summary/` 的 `lived_weeks` **同源**：都数窗口内 `is_lived`
+    的行，**含本周**（本周是你正在度过的一周，热力图也把它着色）。
+    同页这两个数字必须相等，否则推演面板的进度条与页头会各说各话。
+
+    返回:
+        current_age / current_week   —— 含今天那一行的 (age_year, week_number)
+        global_week_index            —— 同一行的全局索引，供调用方直接对位
+        lived_weeks                  —— 窗口（19–60 岁）内已度过周数
+        source                       —— 'calendar' / 'birthdate'（回落）
+        birth_date                   —— 表反推出的出生日期（回落时取 settings）
+    """
+    from apps.wealth.services.calendar_init import update_lived_status
+
+    # 先把今天及之前的周标记为已度过：本函数可能在 /calendar/ 之前被调用
+    # （推演面板 onMounted 就调它），不刷新会拿到上一次的边界。
+    update_lived_status()
+
+    row = (
+        WealthLifeWeekCalendar.objects
+        .filter(user_id=user_id, is_lived=True)
+        .order_by('-global_week_index')
+        .first()
+    )
+
+    if row is None:
+        age, week = _age_week_from_birth_date()
+        from django.conf import settings
+        return {
+            'current_age': age,
+            'current_week': week,
+            'global_week_index': age_week_to_global_index(age, week),
+            'lived_weeks': 0,
+            'source': CURRENT_AGE_WEEK_SOURCE_BIRTHDATE,
+            'birth_date': getattr(settings, 'WEALTH_BIRTH_DATE', ''),
+        }
+
+    lived_weeks = WealthLifeWeekCalendar.objects.filter(
+        user_id=user_id,
+        is_lived=True,
+        global_week_index__gte=WINDOW_START_INDEX,
+        global_week_index__lte=WINDOW_END_INDEX,
+    ).count()
+
+    return {
+        'current_age': row.age_year,
+        'current_week': row.week_number,
+        'global_week_index': row.global_week_index,
+        'lived_weeks': lived_weeks,
+        'source': CURRENT_AGE_WEEK_SOURCE_CALENDAR,
+        'birth_date': get_user_birth_date(user_id).isoformat(),
+    }
 
 
 def aggregate_weekly_net_income(user_id: int) -> dict[int, dict]:

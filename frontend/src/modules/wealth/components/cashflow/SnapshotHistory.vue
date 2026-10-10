@@ -8,46 +8,48 @@
       <el-table :data="items" v-loading="loading" stripe size="small" style="width: 100%; white-space: nowrap;">
         <el-table-column prop="yearmon" label="年月" width="90" fixed="left" />
         <el-table-column label="支付宝" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.zplay, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.zplay, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="微信" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.wechat, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.wechat, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="现金" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.cash, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.cash, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="建行" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.jianbank, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.jianbank, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="工行" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.gongbank, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.gongbank, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="中国银行" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.zhongbank, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.zhongbank, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="农信社" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.nongbank, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.nongbank, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="公积金" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.accumulationfund, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.accumulationfund, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="应收借出" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.lend, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.lend, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="负债" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.borrow, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.borrow, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="流动资金" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.flow_total, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.flow_total, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="金融资产" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.financial_assets, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.financial_assets, privacyMode) }}</template>
         </el-table-column>
         <el-table-column label="净资产" width="90" align="right" class-name="col-amount">
-          <template #default="{ row }">{{ formatAmount(row.net_worth, 0) }}</template>
+          <template #default="{ row }">{{ maskAmount(row.net_worth, privacyMode) }}</template>
         </el-table-column>
         <el-table-column prop="btime" label="复盘时间" width="100" />
-        <el-table-column prop="remarks" label="备注" min-width="120" show-overflow-tooltip />
+        <el-table-column label="备注" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ maskFreeText(row.remarks, privacyMode) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="110" fixed="right">
           <template #default="{ row }">
             <div class="action-btns">
@@ -77,9 +79,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { SnapshotListItem } from '../../types/wealthTypes'
-import { formatAmount } from '@/shared/utils/format'
+import { maskAmount, maskFreeText } from '@/shared/utils/privacy'
+import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
 
 const props = withDefaults(defineProps<{
   items: SnapshotListItem[]
@@ -96,6 +99,9 @@ defineEmits<{
   delete: [baid: number]
   pageChange: [page: number]
 }>()
+
+const privacyStore = usePrivacyStore()
+const privacyMode = computed(() => privacyStore.privacyMode)
 
 const page = ref(props.page)
 </script>

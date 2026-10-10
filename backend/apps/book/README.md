@@ -15,4 +15,8 @@
 | POST | /books/ | 创建 |
 | GET/PUT/DELETE | /books/&lt;pk&gt;/ | 详情/更新/删除 |
 | GET | /books/stats/ | 年度/月度阅读统计 |
-| GET | /books/recommendations/ | 推荐书单 |
+| GET | /books/by_year/ | 按年份列表（?year=） |
+| GET | /books/by_type/ | 按类型列表（?btype=） |
+| GET | /books/search_by_tag/ | 按标签检索（?tag=） |
+| POST | /books/&lt;pk&gt;/mark_completed/ | 标记读完 |
+| DELETE | /books/bulk_delete/ | 批量删除（body: `{bids: []}`） |

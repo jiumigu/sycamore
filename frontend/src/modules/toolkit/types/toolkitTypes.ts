@@ -167,3 +167,51 @@ export interface ElectricityRecord {
   notes: string
   created_at: string
 }
+
+/** 某个月的用电量（窗口内每个自然月一条，无记录月 usage 为 null，**不是 0**） */
+export interface ElectricityMonthUsage {
+  month: string
+  usage: number | null
+  days: number | null
+  daily_avg: number | null
+  records: number
+  base_date: string | null
+  base_source: 'own_first' | 'prev_month' | null
+  end_date: string | null
+  partial: boolean
+  in_pert_sample: boolean
+}
+
+/** PERT 三点估算：ready=false 时所有数值为 null，只看 issues 与 samples */
+export interface ElectricityPert {
+  samples: number
+  required: number
+  ready: boolean
+  optimistic: number | null
+  most_likely: number | null
+  pessimistic: number | null
+  expected: number | null
+  sigma: number | null
+  low: number | null
+  high: number | null
+  mean: number | null
+  issues: string[]
+}
+
+/** 统计卡数据（与分页解耦；字段比列表项少） */
+export interface ElectricityLatest {
+  id: number
+  record_date: string
+  meter_reading: number
+  interval_usage: number | null
+  interval_days: number | null
+  daily_avg: number | null
+  month_usage: number | null
+}
+
+export interface ElectricityOverview {
+  months: ElectricityMonthUsage[]
+  pert: ElectricityPert
+  latest: ElectricityLatest | null
+  total_records: number
+}

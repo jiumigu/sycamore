@@ -25,7 +25,6 @@ from .wealth_views import (
     AssetTrendView,
     SnapshotListView,
     SnapshotView,
-    ReconcileView,
     CopySnapshotView,
     RegularStatsView,
     RegularExpiringView,
@@ -35,8 +34,38 @@ from .wealth_views import (
     RegularBanksView,
     RegularUpdateStatusView,
     BillImportView,
+    LiabilityViewSet,
+    ReceivableViewSet,
+    AssetAccountViewSet,
+    AssetSnapshotViewSet,
+    ClassifyRuleViewSet,
+    ClassifyResultViewSet,
+    RatioViewSet,
 )
-
+# 生存资源盘点（v3.59.0，P3-A 一期）
+from .survival_views import (
+    SurvivalCategoryViewSet,
+    SurvivalUnitViewSet,
+    SurvivalItemViewSet,
+    SurvivalEssentialViewSet,
+    SurvivalRecipeViewSet,
+    SurvivalComboViewSet,
+    SurvivalSnapshotViewSet,
+    SurvivalStocktakeViewSet,
+    SurvivalFlowViewSet,
+    SurvivalAnalysisView,
+    SurvivalMetaView,
+    SurvivalMetricMetaView,
+)
+# 物件资产（v3.60.0，P4-A）—— 耐用品台账（冰箱 / 空调 / 床 / 柜子…）
+# ⚠️ 与 asset/accounts（金融口径的「资产科目」）**刻意分开命名**：
+#    那条是记账科目，这条是家里真有的一件东西，别合并。
+from .property_views import (
+    PropertyCategoryViewSet,
+    PropertyItemViewSet,
+    PropertySummaryView,
+    PropertyMetaView,
+)
 __all__ = [
     'calculate_current_age_week',
     'CurrentAgeWeekView',
@@ -64,7 +93,6 @@ __all__ = [
     'AssetTrendView',
     'SnapshotListView',
     'SnapshotView',
-    'ReconcileView',
     'CopySnapshotView',
     'RegularStatsView',
     'RegularExpiringView',
@@ -74,4 +102,27 @@ __all__ = [
     'RegularBanksView',
     'RegularUpdateStatusView',
     'BillImportView',
+    'LiabilityViewSet',
+    'ReceivableViewSet',
+    'AssetAccountViewSet',
+    'AssetSnapshotViewSet',
+    'ClassifyRuleViewSet',
+    'ClassifyResultViewSet',
+    'RatioViewSet',
+    'SurvivalCategoryViewSet',
+    'SurvivalUnitViewSet',
+    'SurvivalItemViewSet',
+    'SurvivalEssentialViewSet',
+    'SurvivalRecipeViewSet',
+    'SurvivalComboViewSet',
+    'SurvivalSnapshotViewSet',
+    'SurvivalStocktakeViewSet',
+    'SurvivalFlowViewSet',
+    'SurvivalAnalysisView',
+    'SurvivalMetaView',
+    'SurvivalMetricMetaView',
+    'PropertyCategoryViewSet',
+    'PropertyItemViewSet',
+    'PropertySummaryView',
+    'PropertyMetaView',
 ]

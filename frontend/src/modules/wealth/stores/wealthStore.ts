@@ -21,6 +21,13 @@ export const useWealthStore = defineStore('wealth', () => {
   const selectedWeekData = ref<WeekCalendarEntry | null>(null)
   const selectedWeekBills = ref<BillItem[]>([])
   const weekDetailLoading = ref(false)
+  /**
+   * 周明细**加载失败**的提示串（正常时为 null）。
+   * 🔴 「取不到」与「这一周没有账单」是两件事，必须分开显示 —— 2026-10-09 的现场：
+   * 接口 404 被下面的 catch 静默当成空数组，弹窗上半部分写着 +12,754.00 / −6,292.72，
+   * 下半部分写着「本周无账单记录」。**两个数都对得住自己，合起来是错的。**
+   */
+  const weekDetailError = ref<string | null>(null)
   const filterAge = ref<number | undefined>()
   const filterLivedOnly = ref(false)
 
@@ -124,11 +131,16 @@ export const useWealthStore = defineStore('wealth', () => {
     selectedWeekIndex.value = weekIndex
     selectedWeekData.value = weekData.value[weekIndex] ?? null
     weekDetailLoading.value = true
+    weekDetailError.value = null
     try {
       const response = await wealthApi.getBillsByWeek({ week_index: weekIndex })
-      selectedWeekBills.value = response.data.bills as BillItem[]
-    } catch {
+      selectedWeekBills.value = (response.data.bills as BillItem[]) ?? []
+    } catch (error) {
+      // 🔴 这里**不能**悄悄置空：置空等于替接口宣布「这一周没有账单」。
+      // 取不到就说取不到，让人看得见、能重试（文案由 WeekDetailModal 呈现）。
+      console.error('获取周账单明细失败:', error)
       selectedWeekBills.value = []
+      weekDetailError.value = '账单明细加载失败，请稍后重试'
     } finally {
       weekDetailLoading.value = false
     }
@@ -138,6 +150,7 @@ export const useWealthStore = defineStore('wealth', () => {
     selectedWeekIndex.value = null
     selectedWeekData.value = null
     selectedWeekBills.value = []
+    weekDetailError.value = null
   }
 
   function resetCoverage() {
@@ -245,6 +258,7 @@ export const useWealthStore = defineStore('wealth', () => {
     selectedWeekIndex.value = null
     selectedWeekData.value = null
     selectedWeekBills.value = []
+    weekDetailError.value = null
     weekDetailLoading.value = false
     filterAge.value = undefined
     filterLivedOnly.value = false
@@ -264,7 +278,7 @@ export const useWealthStore = defineStore('wealth', () => {
     scenario, scenarioLoading,
     coverageSet, coverageResult,
     summary, summaryLoading,
-    selectedWeekIndex, selectedWeekData, selectedWeekBills, weekDetailLoading,
+    selectedWeekIndex, selectedWeekData, selectedWeekBills, weekDetailLoading, weekDetailError,
     filterAge, filterLivedOnly,
     fetchCalendar, fetchScenario, runCoverage, fetchSummary,
     selectWeek, clearSelection, resetCoverage, initCalendar,

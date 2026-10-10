@@ -116,3 +116,33 @@ class TestBillCrud:
         }, format='json')
         assert r.status_code == 201
         assert r.data['necessity'] in (None, '')
+
+    # ─── 子分类：列表可读 + 可搜（v3.60.4） ───
+
+    def test_list_exposes_subcategory(self):
+        """列表返回体带 subcategory —— 表格新增「子分类」列的数据前提"""
+        from rest_framework.test import APIClient
+        self._create_bill('2026-08-01 09:00:00', subcategory='早午晚餐')
+        c = APIClient()
+        r = c.get('/api/wealth/bills/?date_from=2026-08-01&date_to=2026-08-31')
+        assert r.data['results'][0]['subcategory'] == '早午晚餐'
+
+    def test_search_hits_subcategory(self):
+        """子分类可被搜索命中：该值只在 subcategory 上，漏搜就是「搜不到却不知道为什么」"""
+        from rest_framework.test import APIClient
+        self._create_bill('2026-08-01 09:00:00', subcategory='早午晚餐')
+        self._create_bill('2026-08-02 09:00:00', subcategory='日常用品')
+        c = APIClient()
+        r = c.get('/api/wealth/bills/?search=日常用品')
+        assert r.data['count'] == 1
+        assert r.data['results'][0]['subcategory'] == '日常用品'
+
+    def test_search_subcategory_does_not_leak_siblings(self):
+        """同分类下两个子分类：搜其一不得连带命中另一个（证明按 subcategory 匹配）"""
+        from rest_framework.test import APIClient
+        self._create_bill('2026-08-01 09:00:00', subcategory='早午晚餐')
+        self._create_bill('2026-08-02 09:00:00', subcategory='水果-牛奶')
+        c = APIClient()
+        r = c.get('/api/wealth/bills/?search=水果-牛奶')
+        assert r.data['count'] == 1
+        assert r.data['results'][0]['subcategory'] == '水果-牛奶'
