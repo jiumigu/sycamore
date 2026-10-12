@@ -116,7 +116,7 @@ class Command(BaseCommand):
         except FileNotFoundError as e:
             raise CommandError(f'读不到文件：{e}')
         if not rows:
-            raise CommandError('没解析到任何日志行——检查 sheet 名是否含「每日记录」')
+            raise CommandError('没解析到任何日志行——检查 sheet 名是否含「每日记录」/「每日任务日志记录」')
 
         # 日期区间过滤
         d_from = datetime.strptime(opts['date_from'], '%Y-%m-%d').date() if opts['date_from'] else None

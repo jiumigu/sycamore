@@ -2,7 +2,8 @@
   <div class="receivable-panel">
     <div class="panel-header">
       <div class="panel-header__left">
-        <h3>应收借出台账</h3>
+        <!-- h3 已上移到宿主页面（v3.60.20 起本面板只服务独立页），
+             此处只留说明，避免与页面标题同屏重复 -->
         <span class="panel-header__hint">账龄越久越靠前，未填借出日的排在最后</span>
       </div>
       <el-button type="primary" size="small" @click="openDialog()">
@@ -322,7 +323,6 @@ const reconcileText = computed(() => {
   display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
 }
 .panel-header__left { display: flex; align-items: baseline; gap: 8px; }
-.panel-header__left h3 { margin: 0; font-size: 16px; font-weight: 600; }
 .panel-header__hint { font-size: 12px; color: var(--el-text-color-secondary); }
 
 .summary-strip {

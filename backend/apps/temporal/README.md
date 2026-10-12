@@ -4,7 +4,7 @@
 
 | 命令 | 用途 |
 |------|------|
-| `migrate_atracker` | 旧表数据迁移（逐条，去重键 `(task_name, start_time)`） |
+| `migrate_atracker` | 旧表数据迁移（逐条；**判重 = 同任务名 + 时段重叠**，见下「导入判重」） |
 | `migrate_oneday` | 旧日记表迁移 |
 | `migrate_temporal_categories` | 按 v0.3 新映射重跑历史 L2 类型 |
 | `generate_daily_log` | 每日自动生成默认日记 |
@@ -12,7 +12,7 @@
 | `**import_worklog**` | **工作日志 Excel → 「牛马工作」时间记录（v3.58.7）** |
 | `**reconstruct_worktime**` | **月度加班台账 → 逐日时间记录（反推，v3.60.8）** |
 
-### `import_worklog`（v3.58.7）
+### `import_worklog`（v3.58.7；**v3.60.28 起认第二族表**）
 
 ```bash
 python manage.py import_worklog <xlsx 路径>            # 干跑，只读不写（默认）
@@ -46,9 +46,10 @@ python manage.py import_worklog <xlsx 路径> --apply    # 落库
 >
 > ⚠️ **`--fill-gaps` 为什么默认关**：用户规则是「有记录就不新增」，它只在「当天有多段记录、或只有一段但两端都已达标」时才有意义（多段场景实测很少）。
 >
-> ⚠️ **写库前必备份** `temporal_time_atracker_tasks_list` + `temporal_task_meta`。**回滚分两类**：`DELETE ... WHERE import_batch='worklog'` **只能撤掉新增记录**；规则 A 改写过的原始记录（原批次号保留）**删不掉也回不到原起止**，只能**整表恢复备份**（**按项目铁律由用户本人执行**）。
+> ⚠️ **写库前必备份** `temporal_time_atracker_tasks_list` + `temporal_task_meta`。**回滚分两类**：`DELETE ... WHERE import_batch='worklog'` **只能撤掉新增记录**，⚠️ **但该批次已累计多轮导入 —— 再按批次整批删会把前几轮的一起带走**，单次回滚务必**按日期**限定（如 `AND DATE(start_time) >= '2026-09-18'`）；规则 A 改写过的原始记录（原批次号保留）**删不掉也回不到原起止**，只能**整表恢复备份**（**按项目铁律由用户本人执行**）。
 
-解析层 `worklog_parser.py` 是**纯函数、不碰 DB**：`read_worklog_rows(path)` 读表、`build_plan(rows)` 判定。xlsx 用**标准库** `zipfile + ElementTree` 直解（venv 无 openpyxl，也不打算加）。**一律按列位置解析、绝不按表头名**——sheet 名与年份不符、表头多处损坏、2026 中间嵌第二套表头、备注列三套位置，详见模块头。
+解析层 `worklog_parser.py` 是**纯函数、不碰 DB**：`read_worklog_rows(path)` 读表、`build_plan(rows)` 判定。xlsx 用**标准库** `zipfile + ElementTree` 直解（venv 无 openpyxl，也不打算加）。**一律按列位置解析、绝不按表头名**——sheet 名与年份不符、表头多处损坏、2026 中间嵌第二套表头、备注列**四套**位置，详见模块头。
+> 🔴 **v3.60.28 新增第四套**：「每日任务日志记录」族（单 sheet、**不含年份**）——E 列是**心情指数** ⇒ **备注在 F、且没有时长列**。⚠️ 新表族必须**同时改 `_SHEET_NAME_MARKERS` 与 `_layout_for`**：漏了会落到默认布局 `('F','E')`，把 1~5 的**心情指数当成加班 1~5 小时** —— 而链路上**没有任何一步会报错**（「裸数字 = 小时」本就是 2024 那代的合法写法）。两族名**不是包含关系**，只改原先那个字符串会漏掉一族。
 
 ### `reconstruct_worktime`（v3.60.8）
 
@@ -105,6 +106,23 @@ python manage.py reconstruct_worktime <xlsx 路径> --apply    # 落库
 - CSVImportService：CSV 导入
 - OneDayPageService：日记统计服务
 - DailyLogAutoService：每日自动生成默认日记（当天无任何日记时创建"幸福未被发现，就叫做普通的一天"），兜底入口在 OneDayPageViewSet.list()，管理命令为 `generate_daily_log`
+- **`find_duplicate_task()`：导入判重的单一真源**（CSV 导入与 `migrate_atracker` 共用）
+
+### 导入判重（v3.60.29，改判重前必读）
+
+🔴 **判重 = 「同任务名 + 时段重叠」，不是 `(task_name, start_time)` 精确相等。**
+旧口径（秒级半开区间精确匹配）会被 `import_worklog` **规则 A（时段补全）**打穿 ——
+规则 A 会把已有记录的 `start_time` 改写成标准上班时刻（08:05→08:00），
+那条记录在精确匹配下**"消失"**，于是再导一次 CSV / 重跑迁移就会**静默多插一条重复**
+（2026-09-17 实案：多出 9.92h；被改写过的「雷区日」共 50 天）。
+
+- 判据 = **重叠时长 ÷ 较短一方时长 ≥ `DUP_OVERLAP_RATIO`（0.8）**。
+  ⚠️ 用比值而不是「有重叠就算」：**相接分段会重叠几秒**（合法记录，不能吞）。
+- ⚠️ 命中后若**开始时刻与源数据不同** ⇒ 视为「起止已被工作日志校准」，
+  **跳过覆盖**并计入 `protected`（否则重导会把补全后的工时**静默打回**原值）。
+- ⚠️ `reconstruct_worktime` **有意不走**此判重：它按 `import_batch` 隔离，
+  且**故意允许**与 ATracker 记录并存（见 `test_overtime_recon.py`）。
+- 用例：`apps/temporal/tests/test_dedup.py`（11 条）。推导：`TECH-NOTES §64`。
 
 ## 三层分类模型（v0.3，勿改回颠倒层级）
 
@@ -136,9 +154,9 @@ L1 归因五词与顺序见 `temporal/constants.py` 的 `ATTRIBUTION_CHOICES` / 
 | GET | /tasks/balance/ | 平衡轮 |
 | GET | /tasks/ranking/ | 任务排行 |
 | GET | /tasks/calendar/ | 日历热力图 |
-| GET | /tasks/contrib/ | 贡献图（`?metric=record_count\|hours\|toward\|deepwork\|work\|dominant_attr`；`work`=按 L3 任务名「牛马工作」聚合，v3.58.14 起替代原 `sleep`） |
+| GET | /tasks/contrib/ | 贡献图（`?metric=record_count\|hours\|toward\|deepwork\|work\|dominant_attr`；`work`=按 L3 任务名「牛马工作」聚合，v3.58.14 起替代原 `sleep`）。**睡眠类不计入**（见下「不计入贡献图的任务」） |
 | POST | /tasks/import_csv/ | CSV 导入 |
-| GET | /tasks/daily_detail/ | 单日任务明细（?date=） |
+| GET | /tasks/daily_detail/ | 单日任务明细（`?date=`；`&scope=contrib` = 按**贡献图口径**取，即排除不计入贡献图的任务） |
 | GET | /tasks/distribution/ | 时长分布 |
 | GET | /tasks/meta/ | 任务元数据（**分类台账**主体，非「未归类池」） |
 | GET | /tasks/meta_ledger/ | 分类台账（编辑 / 撤销覆盖的入口） |
@@ -159,6 +177,23 @@ CSV 导入复用同一函数但**不传 `end`**（保留 ATracker 自带时长�
 - **主导归因模式**（`metric=dominant_attr`，`mode: "attribution"`）：`data: [{date, value, attr, breakdown}]`——
   `attr` 是当天**五个** L1 归因中时长最多者（并列按 `成长 > 关系 > 维持 > 谋生 > 流失` 价值序取靠前者，比较前先四舍五入到 2 位小数，保证与 `breakdown` 展示一致）；
   当天无任何已归因时长（L2 类型为「未归类」）时 `attr = null`，前端画灰格；`value` 仍是当天总时长（供「峰值」展示）。
+
+**不计入贡献图的任务**（v3.60.27 · 单一真源 = `constants.CONTRIB_EXCLUDED_TASK_NAMES`）
+
+- 目前名单：`休息睡眠`、`午睡`。**为什么**：它们的 L2 = 主动休息 ⇒ 归因 = 维持；
+  一天 8h 会长期成为当天**最大**归因，热力图（默认口径就是「主导归因」）于是几乎
+  天天一片「维持」，真正想看的成长 / 谋生 / 关系全被压掉。
+- **为什么按 `task_name` 而不是 L2**：同一个 L2「主动休息」里还有 **运动健身 / 心灵冥想**
+  （归因「成长」）—— 按 L2 剔会把它们一起误伤。
+- **过滤只有一处**：`contrib` 取数的那个 queryset ⇒ **6 个口径一起生效**
+  （逐口径各改一处的话，漏掉的那个不报错，而这类图是扫一眼看的，根本看不出来）。
+- **只作用于贡献图**：时间统计页的总时长 / 记录数 / 完整度 / 旭日图 / 趋势 / 168h 结构
+  **照旧包含**睡眠 —— 那页回答的是「一天到底怎么花的」。两页回答不同的问题，不共用一把尺子。
+  有一条**边界钉子**用例钉住这条：将来别把过滤顺手提到公共取数里。
+- **副作用（既定行为，不是 bug）**：只有睡眠记录的那天会**整格消失**（前端 `v === 0`
+  ⇒ 画空白格、不可点），语义是「那天没有可分析的活动」。
+- ⚠️ 任务改名 / 新增同类睡眠任务 ⇒ **必须同步那张名单**（`test_exclusion_list_is_pinned`
+  钉住名单内容，改名时它会失败提醒）。
 
 ### OneDay
 | 方法 | 端点 | 用途 |

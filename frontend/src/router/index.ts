@@ -184,6 +184,24 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '物件资产' },
   },
 
+  // 负债明细台账 / 应收借出台账（v3.60.20）—— 从「资产盘点」主区拆出的**页内子页面**：
+  // 不在侧边栏（刻意不占菜单项），入口是资产盘点页头右侧那两个按钮。
+  // ⚠️ path 挂在 `/wealth/cashflow/` 之下而非 `/wealth/`（§45.1）：
+  //    侧边栏高亮用 `route.path.startsWith('/wealth')`，两者都能亮「财务管理」，
+  //    但挂父路径之下才表达得出「这是资产盘点的下一层」。
+  {
+    path: '/wealth/cashflow/liability',
+    name: 'wealth-cashflow-liability',
+    component: () => import('@/modules/wealth/views/debt/LiabilityDetailView.vue'),
+    meta: { title: '负债明细台账' },
+  },
+  {
+    path: '/wealth/cashflow/receivable',
+    name: 'wealth-cashflow-receivable',
+    component: () => import('@/modules/wealth/views/debt/ReceivableDetailView.vue'),
+    meta: { title: '应收借出台账' },
+  },
+
   // 三年赎回期
   {
     path: '/redemption',

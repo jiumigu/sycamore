@@ -1008,6 +1008,32 @@ class BillViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(period_tag=period_tag)
         return qs
 
+    @action(detail=False, methods=['get'])
+    def totals(self, request):
+        """筛选结果总计：**与列表同一套 queryset**（含 search），跨页全量聚合。
+
+        ⚠️ 这里刻意**不重写**一遍过滤条件，而是复用 `filter_queryset(get_queryset())`
+        —— 它就是列表端点用的那个 queryset（含 SearchFilter 的 search 与 OrderingFilter）。
+        另写一份的后果是「总计的条数 ≠ 列表的『共 N 条』」，且以后任一方加筛选条件时
+        两边会各自漂移，界面上看不出错、只觉得数字对不上。
+        （`aggregate()` 会自行清掉 ORDER BY，不必手动去 order_by。）
+        """
+        qs = self.filter_queryset(self.get_queryset())
+        agg = qs.aggregate(
+            count=Count('id'),
+            income=Sum('amount', filter=Q(transaction_type='收入')),
+            expense=Sum('amount', filter=Q(transaction_type='支出')),
+        )
+        # 空结果集时 Sum 返回 None（不是 0）⇒ 必须归一，否则前端拿到 null 渲染成 0.00 与「真空集」不分
+        income = float(agg['income'] or 0)
+        expense = float(agg['expense'] or 0)
+        return Response({
+            'count': agg['count'] or 0,
+            'income': round(income, 2),
+            'expense': round(expense, 2),
+            'net': round(income - expense, 2),
+        })
+
     @action(detail=False, methods=['post'], url_path='batch-necessity')
     def batch_necessity(self, request):
         """批量标记必要性：POST {ids:[...], necessity:'必要'|'可选'|'冲动'}（仅支出行生效）"""

@@ -19,7 +19,8 @@
   ③ 按天口径走同一个接口（衣物那边同样会踩「一件 × 300 天的量」）；
   ④ 试算**不写库**；
   ⑤ 校验与保存**一模一样**（试算放行、保存报错是最糟的组合）；
-  ⑥ 配餐类拒绝试算（那时长由配方决定）；
+  ⑥ **已编进配方**的物品拒绝试算（那时长由配方决定）；
+     没编进配方的吃类物品**可以**试算 —— 它就是靠这一格拿口径的；
   ⑦ 配置不全时返回 `None` + 原因，**不是 0 天**。
 """
 
@@ -31,6 +32,8 @@ from rest_framework.test import APIClient
 from apps.wealth.models import (
     SurvivalCategory,
     SurvivalItem,
+    SurvivalRecipe,
+    SurvivalRecipeLine,
     SurvivalUnit,
 )
 
@@ -239,13 +242,30 @@ class TestPreviewSaysUnknownInsteadOfZero:
         assert row['expected'] is None
         assert 'no_days_per_unit' in [issue['code'] for issue in row['issues']]
 
-    def test_meal_category_is_refused(self):
-        """配餐类的时长由配方决定 —— 按单件口径算出来的是一个没人核对过的数"""
+    def test_meal_item_already_in_a_recipe_is_refused(self):
+        """**已由配方接管**的物品拒绝单件试算 —— 按单件口径算出来的是个没人核对过的数
+
+        ⚠️ 判据在 v3.60.25 从「配餐类一律拒绝」改成「已编进配方才拒绝」：
+           没编进配方的吃类物品（零食/调味/饮水）就该按自己的口径算，
+           一律拒绝会把它们的试算一起挡掉 —— 而那正是这次要打开的入口。
+        ⚠️ `item_id` 必须**从请求体**里读（只读的 `id` 会被 DRF 丢掉）——
+           本用例就是那条链路的守门员：传了 `item_id` 却读不到，这里会 200。
+        """
         api = APIClient()
         category = _category(name='吃', mode='meal', aggregate='min')
         unit = _unit(category, name='罐')
+        item = SurvivalItem.objects.create(
+            user_id=1, category=category, name='八宝粥', quantity=12,
+            unit=unit, satiety='filling', status='stocked',
+        )
+        recipe = SurvivalRecipe.objects.create(
+            user_id=1, category=category, name='一餐', meals_per_day=3,
+        )
+        SurvivalRecipeLine.objects.create(
+            recipe=recipe, item=item, role='staple', quantity_per_serving=1,
+        )
         payload = {
-            'category_id': category.id, 'name': '八宝粥',
+            'category_id': category.id, 'item_id': item.id, 'name': '八宝粥',
             'quantity': 12, 'unit_id': unit.id,
             'satiety': 'filling', 'status': 'stocked',
             'days_per_unit': 30,
@@ -253,3 +273,22 @@ class TestPreviewSaysUnknownInsteadOfZero:
         response = api.post(PREVIEW, payload, format='json')
         assert response.status_code == 400
         assert '配方' in response.json()['detail']
+
+    def test_meal_item_outside_a_recipe_can_be_previewed(self):
+        """没编进配方的吃类物品**能**试算 —— 这是「零食/调味/饮水」唯一的入口"""
+        api = APIClient()
+        category = _category(name='吃', mode='meal', aggregate='min')
+        unit = _unit(category, name='袋')
+        item = SurvivalItem.objects.create(
+            user_id=1, category=category, name='牛奶', quantity=30,
+            unit=unit, satiety='snack', status='stocked',
+        )
+        payload = {
+            'category_id': category.id, 'item_id': item.id, 'name': '牛奶',
+            'quantity': 30, 'unit_id': unit.id,
+            'satiety': 'snack', 'status': 'stocked',
+            'days_per_unit': 1,
+        }
+        row = api.post(PREVIEW, payload, format='json').json()
+        assert row['expected'] is not None
+        assert row['days_per_unit_effective'] == 1.0

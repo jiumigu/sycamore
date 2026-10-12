@@ -312,8 +312,12 @@ export function seedSurvivalEssentials(data?: { overwrite?: boolean }) {
 }
 
 // ── 库存流水（v3.60.18 · P0）──
-// ⚠️ 列表端点同样是**裸数组**（后端 ViewSet 不走全局分页）。
 // 🔴 **登记入口在物品上，不在这个页签里** —— 这里只负责「查」。
+//
+// ⚠️ 列表的返回体是**显式的 `{rows, total}`**（v3.60.26 起，不再是裸数组）：
+//    `limit` + `offset` 真分页，`total` 是**筛选之后**的总笔数 —— 翻页要知道一共多少笔。
+//    这与「被 DRF 全局分页包成 `{count, results}`」是两件事：那个是意外包装，
+//    前端按数组消费即「假 0」；这个是刻意选择的结构，字段名都不同。
 
 export function getSurvivalFlows(params?: {
   item_id?: number
@@ -324,6 +328,8 @@ export function getSurvivalFlows(params?: {
   date_to?: string
   keyword?: string
   limit?: number
+  /** 从第几条开始（0 基）—— 与 `limit` 一起构成真分页 */
+  offset?: number
 }) {
   return request({ url: '/wealth/survival/flows/', method: 'get', params })
 }

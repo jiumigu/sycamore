@@ -165,6 +165,7 @@
 | POST | /calculate_coverage/ | 现金流推演计算 |
 | GET | /summary/ | 人生总览 |
 | GET | /bills/by_week/ | 按周账单明细（**依赖上面那条路由顺序**；`week_index` 必填且须为整数——缺失/非数字均 400；区间半开 `[周一, 下周一)`，与 `/calendar/` 的聚合**同源同区间**） |
+| GET | /bills/totals/ | **筛选结果总计**（v3.60.19）：与 `/bills/` **同一套筛选参数**（含 `search`），**跨页全量**聚合，返回 `{count, income, expense, net}`。🔴 它**不受分页影响** —— `count` 必须等于列表的 `count`（实现上复用 `filter_queryset(get_queryset())`，守卫用例 `tests/test_bill_totals.py`）；空结果返回 0 而非 null |
 | POST | /calendar/init/ | 初始化周历 |
 | GET | /monthly_calendar/ | 月度日历数据 |
 | GET | /daily_detail/ | 单日收支明细 |
@@ -509,6 +510,53 @@ PERT           = (O + 4M + P) ÷ 6，σ = (O − P) ÷ 6
 折算后的 `days_per_unit_effective` 与口径标记 `life_mode` 一并下发，前后端共用一条判据 ——
 界面显示「一件可用」必须用前者：按次物品的 `days_per_unit` 是空的，直接读会显示成「未填」。
 
+🔴 **口径在不在物品上：判据 = 「有没有真的编进配方」**（v3.60.22 立 · v3.60.25 改判据）。
+被任何配方引用的物品，时长由配方里的「每餐用量」除以每日餐数得出，物品自身的两条口径**不该填** ——
+所以它们的 `life_mode` 恒为 None，若照旧渲染就是「未填」。而「未填」在别处**一律意味着
+「缺配置、去补」**（类别明细的「问题」列、缺口对账的 unknown），这句显示等于**谎报**。
+故另下发一个独立布尔 `uses_recipe`，界面据此显示「见配方」。
+
+⚠️ 它**不是 `life_mode` 的第四种取值**：`life_mode` 说「填了哪种口径」，`uses_recipe` 说
+「口径在不在物品上」，两个维度不同（混在一起会让 `resolve_life` 被迫知道类别，而它刻意不知道）。
+
+```python
+calc.recipe_used_item_ids(recipes) -> set[int]        # 唯一实现
+calc.life_from_recipe(item, used_item_ids=None) -> bool   # meal 类 且 id ∈ used
+```
+
+🔴 **v3.60.25：判据从「是不是配餐类」改成「真的被引用了吗」。**
+老判据 `satiety != 'snack'` 是在**猜**「口径在别处」—— 它把**没进配方**的调味 / 饮水
+一并判成「口径在配方上」，于是这类物品**既填不了**（弹窗整块隐藏）**也报不出**（不算孤儿）。
+新判据去查：
+
+| 情形 | 弹窗里的口径字段 | 清单「计量口径」列 |
+|---|---|---|
+| meal 类 且 **已进配方** | 整块收起，显示「见配方」并**点名是哪个配方** | 见配方 |
+| meal 类 但 **没进配方** | 按天 / 按次 / 一件可用天数 + 试算**照常可用** | 未填（是真的缺） |
+| 非 meal 类 | 与 v3.60.22 之前一致 | 按天 / 按次 |
+
+⚠️ **组合成员也算「已进配方」**：`recipe_used_item_ids` 必须同时遍历 `recipe.lines`
+与 `recipe.combo_lines__combo__members` —— 「分开登记、一起下锅」的那几件只出现在 `combo` 里，
+漏了就会**多报**一条「没编进任何配方」（静默，只在数字上差几件）。
+
+⚠️ **零食不必再单独判 `satiety`**：它从不进配方 ⇒ `id not in used` 天然成立 ⇒ **要**填口径。
+v3.60.22 那句「零食是例外」现在由集合运算自然给出，不再是一句需要维护的 `if`。
+**能靠集合消掉的例外，就别留成例外。**
+
+🔴 **「配餐之外」= 没进配方 且 非果腹**（v3.60.25 把原「零食」时段的**口径**扩到这里）：
+`[it for it in items if it.id not in used and it.satiety != 'filling']`，聚合仍是 `sum`。
+⚠️ 下发的键**仍叫 `snack_days`** —— 键名不改、只改口径与文案（类别卡显示「配餐外另 X 天」）。
+改名会牵动类型定义、卡片与用例，而这次要改的是**分母**、不是名字。
+排除 `filling` 是因为**没进配方的主食已由孤儿报掉**，再算进合计就是**一笔两记**。
+
+🔴 **「没着落的主食」判据同步收窄**：`satiety != 'snack'` → `satiety == 'filling'`
+（`ISSUE_NO_RECIPE` = 「N 件主食还没有编入任何配方」）。不收窄的话，没进配方的调味 / 饮水
+会被报成「没着落」—— 而它们现在**有出路了**（自己填口径）。受影响面只有主食，这点要有用例钉住。
+
+🔴 **没进配方的物品缺口径要报**（修 §56 待办）：`off_rows` 的 `issues` 必须
+`result['issues'].extend(...)`。原先漏了这一句 ⇒「配餐外」时长**悄悄算不出**、界面无提示，
+读起来像「这件东西没问题」。
+
 四条不变量：
 
 1. **配餐类跨配方固定取最小**（早/正餐每天都在吃），`aggregate_mode` 对它不生效；
@@ -522,7 +570,7 @@ PERT           = (O + 4M + P) ÷ 6，σ = (O − P) ÷ 6
 
 ```
 GET    /api/wealth/survival/analysis/?date=YYYY-MM-DD   综合分析（首屏一次取全）
-GET    /api/wealth/survival/meta/                        枚举 + 口径（单一出口）
+GET    /api/wealth/survival/meta/                        枚举 + 口径（单一出口；含渠道 `flow_channels`）
 GET    /api/wealth/survival/metrics/meta/                口径元信息（裸数组）
 CRUD   /api/wealth/survival/categories/                  含 POST seed（幂等初始化五类 + 基准清单）
 CRUD   /api/wealth/survival/units/
@@ -712,26 +760,54 @@ reasons   eat / use / broken / expired / discard / gift / buy / receive / correc
          正 delta 不猜；前端**不复制这张映射表**（那是第二份口径）
 ```
 
+⚠️ 这 6 个渠道由 `/survival/meta/` 的 **`flow_channels`** 下发给前端（v3.60.26）——
+前端既**不硬编码**、也不**从流水数据里聚合**：一加分页，聚合出来的选项就只剩
+当前页出现过的那些，**渠道选项会随翻页出现和消失**，用户想筛回去却找不到那个选项。
+⇒ 枚举的单一出口是 meta；且**全量下发**（不按当前筛选结果缩减 —— 缩减后筛了「吃掉」
+就只剩一个可选项，等于把用户锁死）。
+
 ```python
 # services/survival_flow.py（唯一实现）
 record_flow(item_id, delta, channel='manual', reason='', note='', occurred_at=None, reverses=None)
 reverse_flow(flow_id)                    # 补反向流水；一条最多冲销一次
 record_batch(rows, occurred_at=None)     # 整批一个事务：任一变负则**全不写**
-list_flows(...)                          # 裸数组；item_id / category_name / channel / reason / 日期段 / keyword
+_flow_queryset(...)                      # 筛选条件的**唯一实现**（v3.60.26）—— 下两个函数都走它
+list_flows(..., limit=None, offset=0)    # **一页**；item_id / category_name / channel / reason / 日期段 / keyword
+count_flows(**filters)                   # 当前筛选下的**总笔数**（分页要的那个分母）
 summarize_flows(month=None)              # 按月，**按单位分桶**，跨单位不相加
 _month_range(month)                      # → [月初, 下月初) 的 **aware datetime**
 ```
 
-```
-GET  /api/wealth/survival/flows/                    流水列表（**裸数组**，新的在前；支持筛选）
+🔴 **`list_flows` 与 `count_flows` 必须共用 `_flow_queryset()`**（v3.60.26）。
+两处各写一遍筛选，迟早有一处漏改某个条件 —— 而两种症状**都不报错**：
+总数偏大 ⇒ 页码比实际页数多，**翻到最后一页是空表**；总数偏小 ⇒ 末尾几笔
+**永远翻不到**（而那几笔确实在库里）。
+
+```python
 POST /api/wealth/survival/flows/                    记一笔（单笔 `{item_id, delta, ...}`；批量 `{rows:[...]}`）→ 201
 POST /api/wealth/survival/flows/{id}/reverse/       撤销 → 补一条反向流水
 GET  /api/wealth/survival/flows/summary/            按月汇总（`?month=YYYY-MM`）
 ```
 
+```
+GET  /api/wealth/survival/flows/                    流水列表 → **显式的 `{rows, total}`**（v3.60.26 起，**不再是裸数组**）
+      ?limit=&offset=&category_name=&channel=&reason=&item_id=&date_from=&date_to=&keyword=
+      · `limit` 缺省 30、夹在 **1..500**；`offset` 非法值**回落 0**（不 400）
+      · `total` 是**筛选之后**的笔数 —— 不是全表、也不是这一页的条数
+```
+
+⚠️ `{rows, total}` **不是**「被 DRF 全局分页包成 `{count, results}`」那件事：
+那个是**意外**包装（前端按数组消费即「假 0」，见「高频硬坑 2」），
+这个是**有意**的结构；字段名刻意取得不同，就是为了不被混同。
+前端拿到形状不符时必须**说出来**（`loaded=false` + 人话错误），
+不能沿用「不是数组就当空数组」那条旧兜底 —— 形状一变更，它就**反过来**
+把「前后端版本不一致」说成「没有流水」（把系统的失败记到用户的账上）。
+
 三处约定：
 
-- 列表端点 `pagination_class = None`（裸数组）；`summary` 写成 `detail=False` 的 action，
+- 列表端点 `pagination_class = None`（**不被 DRF 全局分页意外包一层**）；
+  流水列表的分页（v3.60.26）是**视图自己实现**的 `{rows, total}`，与上面那件事无关。
+  `summary` 写成 `detail=False` 的 action，
   **不被 `<pk>` 抢**（被抢的症状是 404，像路由没注册）
 - `delta = 0` 拒绝、改完 `< 0` 拒绝且**不夹到 0**（夹 0 会造出「账对了、事没了」的假象）；
   `occurred_at` 可以是过去、**不许是未来**
@@ -900,19 +976,27 @@ PERT 期望 8788 天 = **24.1 年**、离散度 701.9 天 —— 与四卡上那
 3. **`_PREVIEW_DEFAULTS` 是按「`compute_item_life` 读什么给什么」逐个对齐的。**
    少给一个属性不是「按缺省算」而是 `AttributeError`，
    且只会在某条从没被点过的分支上炸。
-4. **配餐类直接拒绝**（400）。那类物品的时长由配方决定，
-   按单件口径算出来的是一个没人核对过的数 —— 而它看着完全合理。
+4. **已由配方接管才拒绝**（400；v3.59.11 是「配餐类一律拒绝」，v3.60.25 改判据）。
+   时长由配方决定的物品，按单件口径算出来的是一个没人核对过的数 —— 而它看着完全合理。
+   ⚠️ 判据是「**这件物品**有没有进配方」（`life_from_recipe(item, used)`），**不是**
+   「它属不属于配餐类」—— 没进配方的调味 / 饮水照常试算，那正是 v3.60.25 要开的入口。
+   ⚠️ 请求体带 `item_id`（可选）。它是**只读 `id`**，DRF 校验后会把它从 `validated_data` 里
+   **丢掉且不报错** ⇒ 视图必须 `payload['item_id'] = request.data.get('item_id')` 单独补回来。
+   漏了这一句，这道护栏**静默失效**，界面上一点异常都看不出来。
+   （响应里的 `item_id` 仍然是 null —— 它只做入参，不进内存物品。）
 
 ⚠️ 试算是**护栏不是闸门**：前端在它失败时只降级成一句「试算暂时不可用
 （不影响保存）」，绝不阻断保存。
 
-**用例**（`tests/test_survival_item_preview.py`，12 条）钉死的东西：
+**用例**（`tests/test_survival_item_preview.py`，13 条）钉死的东西：
 ① **试算的数 == 保存后的数**（两条路径都走接口，不是「都调了同一个函数」）；
 ② 本案 300 × 300 → 45,144.2 天、改成 1 → 150.5 天；
-③ 试算不写库、`item_id` 恒为 null；
+③ 试算不写库、响应里的 `item_id` 恒为 null；
 ④ 校验与 `create` 一致（`use_times=0` 与跨类别单位两边都 400）；
 ⑤ 没填口径返回 `None` + `no_days_per_unit`，**不是 0 天**；
-⑥ 配餐类返回 400 且文案里点明「配方」。
+⑥ **已进配方**的物品返回 400 且文案里点明「配方」；**没进配方**的配餐类物品返回 200
+（`test_meal_item_outside_a_recipe_can_be_previewed`，v3.60.25 新增 —— 断言
+`days_per_unit_effective == 1.0`，即「走它自己的口径」而不是「算不出」）。
 
 ### 一条基准项挂多件物品（v3.59.12，P3-A 十二期）
 
@@ -1126,6 +1210,10 @@ cd backend && ../.venv/bin/python manage.py migrate wealth
   🔴 无论做哪一版，**都不替用户改存量数据**。
 - **物品类别可迁移的闸**（沿用 §26.6 / §27.7 的待办）：给 `update_item` 补
   「被配方引用则拒绝改类别」
+- **「已进配方 + 手工填了口径」的存量脏值巡检**（v3.60.25）：这类行的 `days_per_unit` /
+  按次四兄弟还在库里，但**既算不到**（`life_from_recipe` 胜）**也看不到**（弹窗口径块被收起）
+  ⇒ 将来某件从配方里移出时会**静默**启用一个旧数。要的是只读巡检或在清单上标出来，
+  **不替用户改存量数据**
 
 
 ---

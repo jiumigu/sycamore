@@ -46,6 +46,35 @@
 
   ⚠️ **不给「总盈亏」**。单位不同**不能相加**（盒 / 片 / 千克 / 罐 / 抽），
      `+6 盒` 与 `+50 抽` 加在一起没有意义。所以汇总行只给**次数与行数**。
+
+  ══════════════════════════════════════════════════════════════
+  🔴 2026-10-10：加分页（v3.60.26）—— 但**行合并表的分页边界在「次」之间**
+  ══════════════════════════════════════════════════════════════
+
+  实测 8 次盘点 = 10 行明细，900px 视口下表格高 550px、往下溢出约 1 行。
+  常量与分页栏的显示判据走 `utils/survivalPaging.ts`（单一实现），
+  这里只写**这张表特有的两条**：
+
+  1. **边界必须落在「一次盘点」之间，不能落在明细行之间。**
+     本表是一套网格 + `span-method` 行合并：记录级那几列（盘点日 / 结果 /
+     备注 / 操作）靠 `recordSpan` 按 `groupSize` 跨行。
+     若按**行**切（先拍平再 `slice`），某次盘点的组首就会落到上一页 ——
+     本页首行的 `recordSpan` 拿到 `[0, 0]` ⇒ **那一格整格不渲染**，
+     后面各列**集体左移**，而表头和分页栏都照常显示。
+     所以顺序是**先按记录切、再拍平**：
+     `pageRecords = store.stocktakes.slice(...)` → `flattenStocktakeRows(pageRecords)`。
+     ⚠️ 本面板**不做前端分页**：数据量小（一次返回全部记录），
+        这里的切片只切**显示**，不涉及取数。
+
+  2. **列渲染的判据必须读全量。** `hasLineNotes` 决定「行备注」这一列
+     整列渲不渲染。它若读**当前页**，翻页时这一列会**整列出现又消失**
+     （第 1 页某条有行备注 ⇒ 有列；翻到第 2 页全是空 ⇒ 列没了），
+     用户会以为「换了一页，表也换了」。
+     ⇒ 它读 `store.stocktakes`（全量）。
+
+  ⚠️ **每页的单位是「次」不是「行」**：一次盘点可能占好几行明细，
+     而分页栏里的选择器照例写「N 条/页」—— 不写一句的话，
+     用户会按「行」理解，然后发现每页的行数对不上，以为分页错了。
 -->
 <template>
   <div class="survival-stocktake-panel">
@@ -73,7 +102,7 @@
       <div class="survival-stocktake-panel__summary">{{ summaryLine }}</div>
 
       <el-table
-        :data="flatRows"
+        :data="pageRows"
         size="small"
         row-key="key"
         :span-method="spanOf"
@@ -188,6 +217,31 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <!--
+        分页 —— 判据见文件头 2026-10-10。**按「次盘点」分页，不是按行**。
+        🔴 `:total` 是**记录数**（`store.stocktakes.length`）、`:data` 是
+           「这些记录拍平出来的行」—— 两者**不是同一个量**，不能互相替换：
+           拿行数当 total，页码会比实际多（一次盘点占好几行），翻到最后是空表。
+        ⚠️ 单位必须写出来：分页栏里的选择器照例写「N 条/页」，
+           而这里的一条 = **一次盘点**（可能占好几行明细）。
+      -->
+      <div
+        v-if="shouldShowPager(store.stocktakes.length)"
+        class="survival-stocktake-panel__pagination"
+      >
+        <span class="survival-stocktake-panel__pager-unit">
+          每页 {{ pageSize }} <b>次盘点</b>（一次盘点可能占好几行明细）
+        </span>
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :page-sizes="PAGE_SIZE_OPTIONS"
+          :total="store.stocktakes.length"
+          size="small"
+          layout="prev, pager, next, sizes"
+        />
+      </div>
     </template>
 
     <el-empty
@@ -199,11 +253,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MoreFilled } from '@element-plus/icons-vue'
 import { useSurvivalStore } from '../../stores/survivalStore'
 import { usePrivacyMask } from '@/shared/composables/usePrivacyMask'
+import {
+  DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, pageCountOf, pageSlice, shouldShowPager,
+} from '../../utils/survivalPaging'
 import {
   deltaKindType,
   formatClock,
@@ -226,8 +283,51 @@ const emit = defineEmits<{
 const store = useSurvivalStore()
 const { maskFreeText } = usePrivacyMask()
 
-/** 表行 = 明细行（拍平在 utils，本组件不做行构造） */
+/**
+ * 分页状态（v3.60.26）—— 单位是**次盘点**，不是行（判据见文件头）。
+ */
+const page = ref(1)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
+
+/**
+ * 本页的「次」—— **先按记录切，再拍平**。
+ *
+ * 🔴 顺序不能反。反了（先 `flattenStocktakeRows` 再 `slice`）会把某次盘点的
+ *    前几行留在上一页、组首落到别处 ⇒ 本页首行的 `recordSpan` 拿到 `[0, 0]`
+ *    ⇒ 记录级那几列**整格不渲染、后面各列左移**，而表头照常。
+ *    （`groupSize` 是**每条记录**的行数，跨页就失去参照。）
+ */
+const pageRecords = computed(() => {
+  const [start, end] = pageSlice(page.value, pageSize.value)
+  return store.stocktakes.slice(start, end)
+})
+
+/** 喂给 `el-table` 的行 = **当前页那几次**盘点拍平出来的明细行 */
+const pageRows = computed(() => flattenStocktakeRows(pageRecords.value))
+
+/**
+ * 全量表行 —— **只用于**「有没有记录」与汇总行，**不给表格**。
+ *
+ * ⚠️ 一加分页，凡是「从列表取全量」的地方都要重新问一遍「它该读哪一份」。
+ *    这里读全量是对的：汇总行说的是「一共盘了几次、共几行明细」，
+ *    是**整份数据**的陈述；换成 `pageRows` 就变成「本页几行」，
+ *    而它写在表格**上方**、看着像全局统计（同 TECH-NOTES §57 那一族）。
+ */
 const flatRows = computed(() => flattenStocktakeRows(store.stocktakes))
+
+/** 总页数（至少 1） */
+const pageCount = computed(() => pageCountOf(store.stocktakes.length, pageSize.value))
+
+/**
+ * 结果变少导致当前页越界 ⇒ 拉回最后一页。
+ *
+ * ⚠️ 本面板**有**这条路径（与流水面板不同）：删除一次盘点就是**真的少一条**
+ *    —— 删掉末页最后一条之后，不夹的话停在空页上，读作「记录都没了」。
+ * ⚠️ 改每页条数时也要夹：20 条/页下的第 3 页，切到 100 条/页就没有第 3 页了。
+ */
+watch(pageCount, (total) => {
+  if (page.value > total) page.value = total
+})
 
 /**
  * 汇总行。
@@ -235,6 +335,8 @@ const flatRows = computed(() => flattenStocktakeRows(store.stocktakes))
  * 🔴 **不给「总盈亏」**：单位不同不能相加（盒 / 片 / 千克 / 罐 / 抽），
  *    `+6 盒牛奶` 与 `+50 抽洗脸巾` 加起来没有意义 —— 那正是本项目反复防的
  *    那类「看着合理的错值」。所以只给**次数与行数**。
+ * ⚠️ 读的是**全量**（`store.stocktakes` / `flatRows`），不是当前页：
+ *    它讲的是「一共盘了几次」，不是「这一页几次」。切片后仍读全量。
  */
 const summaryLine = computed(() => {
   const records = store.stocktakes
@@ -247,7 +349,14 @@ const summaryLine = computed(() => {
   return parts.join(' · ')
 })
 
-/** 整表都没有行备注时，那一列整个不渲染（实测 0/10 条有内容） */
+/**
+ * 整表都没有行备注时，那一列整个不渲染（实测 0/10 条有内容）。
+ *
+ * 🔴 判据必须读**全量**（`store.stocktakes`），**不能读 `pageRows`**：
+ *    读当前页的话，这一列会**随翻页整列出现又消失**
+ *    （第 1 页某条有行备注 ⇒ 有列；翻到第 2 页都是空 ⇒ 列没了），
+ *    用户以为「翻页把表也换了」—— 而这是本项目最典型的静默错。
+ */
 const hasLineNotes = computed(() =>
   store.stocktakes.some((record) => (record.lines ?? []).some((line) => Boolean(line.note))),
 )
@@ -346,6 +455,20 @@ async function remove(row: SurvivalStocktake) {
 /* 组与组的分隔线：合并单元格之后，不画线就看不出「哪几行是同一次盘点」 */
 .survival-stocktake-panel__table :deep(.is-group-start > td) {
   border-top: 2px solid var(--el-border-color-lighter);
+}
+/* 分页栏 —— 与另三个列表同一套摆法（居中、贴表格下方 10px）；
+   左侧那句话说清「每页的单位是次、不是行」 */
+.survival-stocktake-panel__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.survival-stocktake-panel__pager-unit {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .survival-stocktake-panel__date {
   color: var(--el-text-color-primary);

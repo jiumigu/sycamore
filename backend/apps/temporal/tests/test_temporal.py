@@ -2,7 +2,7 @@
 import pytest
 from datetime import date, datetime
 
-from apps.temporal.models import TemporalTask, OneDayPage
+from apps.temporal.models import TaskMeta, TemporalTask, OneDayPage
 
 
 @pytest.mark.django_db
@@ -235,3 +235,134 @@ class TestContribEndpoints:
         HealthRecord.objects.create(time=datetime.now(), total=8000, htype=1)
         d = APIClient().get('/api/health/records/contrib/').data
         assert d['summary']['total_days'] >= 1
+
+
+@pytest.mark.django_db
+class TestContribExcludesSleep:
+    """v3.60.27：睡眠类任务**不计入**「时间贡献图」
+
+    病根：「休息睡眠」的 L2 = 主动休息 ⇒ 归因 = 维持。一天 8h 睡眠会成为当天**最大**
+    归因，而热力图默认口径就是「主导归因」⇒ 几乎天天一片「维持」色，
+    真正想看的结构（成长 / 谋生 / 关系）全被压掉。
+
+    ⚠️ 边界：**只剔贡献图**（含点格子的当天明细）。时间统计页的总时长 / 完整度 /
+    旭日图 / 月度趋势 / 168h 结构**照旧包含**睡眠 —— 那是「一天到底怎么花的」全量口径。
+    本类最后一条用例专门钉住这条边界，防止将来有人把过滤顺手提到公共取数里。
+    """
+
+    CONTRIB = '/api/temporal/tasks/contrib/'
+    DETAIL = '/api/temporal/tasks/daily_detail/'
+    STATS = '/api/temporal/tasks/stats/'
+
+    def _seed(self):
+        """2026-08-01 共 13h / 3 条：休息睡眠 8h（维持）+ 阅读思考 4h（成长）+ 牛马工作 1h（谋生）
+
+        剔掉睡眠后应为 5h / 2 条，主导归因「成长」（4h > 谋生 1h）。
+        """
+        for name, at, attr in [
+            ('休息睡眠', '主动休息', '维持'),
+            ('阅读思考', '深度工作', '成长'),
+            ('牛马工作', '浅层工作', '谋生'),
+        ]:
+            TaskMeta.objects.create(task_name=name, activity_type=at, default_attribution=attr)
+        for name, hour, dur in [('休息睡眠', 0, 8), ('阅读思考', 10, 4), ('牛马工作', 14, 1)]:
+            TemporalTask.objects.create(
+                task_name=name,
+                start_time=datetime.fromisoformat(f'2026-08-01 {hour:02d}:00:00'),
+                duration_hours=dur,
+                year=2026, mon='08', day=1,
+            )
+
+    def _contrib(self, metric='hours'):
+        from rest_framework.test import APIClient
+        return APIClient().get(self.CONTRIB, {'metric': metric}).data
+
+    def _day(self, body, iso='2026-08-01'):
+        return next(x for x in body['data'] if x['date'] == iso)
+
+    def test_hours_metric_excludes_sleep(self):
+        """小时口径：8h 睡眠不能算进那天（否则每天 +8h，峰值与总量一起虚高）"""
+        self._seed()
+        assert self._day(self._contrib('hours'))['value'] == 5.0      # 4 + 1，不含 8
+
+    def test_record_count_metric_excludes_sleep(self):
+        """记录数口径：睡眠那条也不该占一笔"""
+        self._seed()
+        assert self._day(self._contrib('record_count'))['value'] == 2
+
+    def test_sleep_never_becomes_dominant_attr(self):
+        """🔴 本轮核心：8h「维持」不能再当那天的主导归因"""
+        self._seed()
+        day = self._day(self._contrib('dominant_attr'))
+        assert day['attr'] == '成长'            # 剔掉睡眠后：成长 4h > 谋生 1h
+        assert day['breakdown']['维持'] == 0     # 「维持」桶里一点都不剩
+
+    def test_other_metrics_are_not_collateral_damage(self):
+        """剔睡眠**只**动睡眠：成长 / 牛马工作两个口径照旧精确"""
+        self._seed()
+        assert self._day(self._contrib('toward'))['value'] == 4.0     # 成长小时
+        assert self._day(self._contrib('work'))['value'] == 1.0       # 牛马工作
+
+    def test_nap_is_excluded_too(self):
+        """名单是**两个**：只剔「休息睡眠」的话午睡会继续定色
+
+        （实测开发库 2026-10-07 / 10-09 两天的主导归因就是被午睡顶成「维持」的。）
+        """
+        self._seed()
+        TaskMeta.objects.create(task_name='午睡', activity_type='主动休息', default_attribution='维持')
+        TemporalTask.objects.create(
+            task_name='午睡', start_time=datetime.fromisoformat('2026-08-01 13:00:00'),
+            duration_hours=2, year=2026, mon='08', day=1,
+        )
+        # 那天变成 15h / 4 条；两个睡眠任务都被剔 ⇒ 仍应是 5h / 2 条
+        assert self._day(self._contrib('hours'))['value'] == 5.0
+        assert self._day(self._contrib('record_count'))['value'] == 2
+
+    def test_a_day_with_only_sleep_drops_out_of_the_graph(self):
+        """只有睡眠的天会**整格消失**（前端渲染成空白格、不可点）
+
+        语义是「那天没有可分析的活动」。这不是 bug —— 钉住它，
+        防止将来有人当成「数据丢了」去改回来。
+        """
+        TaskMeta.objects.create(task_name='休息睡眠', activity_type='主动休息', default_attribution='维持')
+        TemporalTask.objects.create(
+            task_name='休息睡眠', start_time=datetime.fromisoformat('2026-08-03 00:00:00'),
+            duration_hours=8, year=2026, mon='08', day=3,
+        )
+        assert all(x['date'] != '2026-08-03' for x in self._contrib('hours')['data'])
+
+    def test_daily_detail_scope_contrib_excludes_sleep(self):
+        """点格子弹的明细：不带 scope = 当天全部（通用口径）；scope=contrib = 与热力图同口径
+
+        ⚠️ 默认**不**过滤是故意的：这是通用明细接口，将来别处复用时不该莫名少几行
+        （「少行且不报错」正是本项目反复防的那类静默失败）。
+        """
+        self._seed()
+        from rest_framework.test import APIClient
+        c = APIClient()
+        full = c.get(self.DETAIL, {'date': '2026-08-01'}).data
+        assert len(full['items']) == 3 and full['total'] == 13.0
+        scoped = c.get(self.DETAIL, {'date': '2026-08-01', 'scope': 'contrib'}).data
+        assert len(scoped['items']) == 2 and scoped['total'] == 5.0
+        assert all(i['task_name'] != '休息睡眠' for i in scoped['items'])
+
+    def test_exclusion_list_is_pinned(self):
+        """名单内容钉死 —— 改任务名 / 新增同类睡眠任务时，这条会失败并提醒同步 constants
+
+        名单是「按任务名」的口径，天生带着「改名之后静默漏掉」的风险；
+        这条用例是那个风险的唯一警报器（没有它，漏掉是无声的）。
+        """
+        from apps.temporal.constants import CONTRIB_EXCLUDED_TASK_NAMES
+        assert CONTRIB_EXCLUDED_TASK_NAMES == {'休息睡眠', '午睡'}
+
+    def test_time_stats_page_still_counts_sleep(self):
+        """🔴 边界钉子：**只剔贡献图**，时间统计页的总时长照旧含睡眠
+
+        那页是「一天到底怎么花的」的全量口径。把过滤提到那里等于改变了
+        「已记录 / 总时间」的含义 —— 而完整度分母本来就是 16h「清醒时段」，
+        真要动它是一次独立的、需要重新想清楚的口径决策，不在本轮。
+        """
+        self._seed()
+        from rest_framework.test import APIClient
+        ov = APIClient().get(self.STATS, {'year': 2026}).data
+        assert ov['total_hours'] == 13.0        # 8 + 4 + 1，含睡眠

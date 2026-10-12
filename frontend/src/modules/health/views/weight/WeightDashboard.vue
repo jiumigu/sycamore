@@ -85,7 +85,9 @@
     </template>
 
     <!-- 添加/编辑记录弹窗 -->
+    <!-- 🔴 ref 不能省：编辑态的回填靠 formRef.loadRecord()，漏绑 ⇒ undefined?.() 静默不回填 -->
     <WeightForm
+      ref="formRef"
       v-model="showForm"
       :record="editingRecord"
       :submitting="submitting"

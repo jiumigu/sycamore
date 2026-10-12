@@ -42,9 +42,18 @@
       <span v-else class="survival-card__foot-item survival-card__foot-item--empty">
         还没有可用物品
       </span>
-      <span v-if="result.snack_days !== null" class="survival-card__foot-item">
-        零食另 {{ formatDays(result.snack_days) }}
-      </span>
+      <!-- 「配餐外」= 没编进配方的吃类物品（零食/调味/饮水）各自口径之和。
+           说「零食」是旧的窄口径 —— 调味与饮水那时既进不了配方又没入口，
+           会被这句话排除在外。 -->
+      <el-tooltip
+        v-if="result.snack_days !== null"
+        content="没编进配方的吃的东西（零食 / 调味 / 饮水）各自还能撑的天数之和，不混进上面的主食时长"
+        placement="top"
+      >
+        <span class="survival-card__foot-item">
+          配餐外另 {{ formatDays(result.snack_days) }}
+        </span>
+      </el-tooltip>
       <span v-if="result.hours_total !== null" class="survival-card__foot-item">
         可读 {{ formatHours(result.hours_total) }}
       </span>

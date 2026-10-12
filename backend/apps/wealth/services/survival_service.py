@@ -42,6 +42,7 @@ from ..constants import (
     SURVIVAL_CATEGORY_SEEDS,
     SURVIVAL_DAYS_PER_YEAR,
     SURVIVAL_ESSENTIAL_LEVELS,
+    SURVIVAL_FLOW_CHANNELS,
     SURVIVAL_MEAL_SCENARIOS,
     SURVIVAL_SATIETY_COUNTED,
     SURVIVAL_SCENARIOS,
@@ -139,7 +140,24 @@ def _resolve_category(category_id) -> SurvivalCategory | None:
 # 读：物品 / 配方
 # ──────────────────────────────────────────────────────────────
 
-def _item_row(item: SurvivalItem) -> dict:
+def _used_recipe_item_ids() -> set[int]:
+    """被配方引用的物品 id（含配方里的**组合成员**）—— 一次查完，判据与报账共用
+
+    🔴 只此一份来源（v3.60.25）：`_item_row` 的 `uses_recipe`（清单显示「见配方」）
+       与 `calc.compute_category` 的「配餐之外 / 没着落的主食」两处报账都读它。
+       各自查一遍迟早分叉 —— 一边在清单上写「见配方」、另一边报「未纳入任何配方」，
+       同一件东西两种说法，用户无从判断该信哪个。
+
+    ⚠️ 预取三层（配方行 / 组合行 / 组合成员）：不预取的话，
+       50 件物品 × 每件一次子查询，列表页会明显变慢。
+    """
+    recipes = SurvivalRecipe.objects.filter(user_id=1).prefetch_related(
+        'lines', 'combo_lines__combo__members',
+    )
+    return calc.recipe_used_item_ids(recipes)
+
+
+def _item_row(item: SurvivalItem, used_item_ids: set[int] | None = None) -> dict:
     # 一份可用天数走 calc 的唯一实现（按天直填 / 按次折算），服务层不自己算 ——
     # 两处都算的话，界面显示的天数会与类别卡片里的天数不一致，且没人会发现。
     life = calc.resolve_life(item)
@@ -172,6 +190,11 @@ def _item_row(item: SurvivalItem) -> dict:
         # ⚠️ 显示「一份可用」时必须用 effective：直接显示 days_per_unit
         #    会让按次计量的物品看起来「什么都没填」。
         'life_mode': life['mode'],
+        # 这件物品的时长是否来自**配方**（v3.60.25：判据 = 真的被某个配方引用了）。
+        # ⚠️ 为 true 时上面 `life_mode` 必然是 None —— 界面据此显示「见配方」
+        #    而不是「未填」：后者在别处一律意味着「缺配置、去补」，而这里
+        #    口径本来就在配方里，写「未填」是谎报（判据见 calc.life_from_recipe）。
+        'uses_recipe': calc.life_from_recipe(item, used_item_ids),
         'days_per_unit_effective': (
             round(life['days_per_unit'], 2) if life['days_per_unit'] is not None else None
         ),
@@ -203,7 +226,10 @@ def get_item_list(
         qs = qs.filter(status=status)
     # 排序在服务层给：managed 表不设 Meta.ordering（项目硬坑②），
     # 而这里 order_by 是显式的、不会被注入进聚合里。
-    return [_item_row(i) for i in qs.order_by('category_id', 'status', 'name')]
+    used = _used_recipe_item_ids()
+    return [
+        _item_row(i, used) for i in qs.order_by('category_id', 'status', 'name')
+    ]
 
 
 def _line_row(line: SurvivalRecipeLine) -> dict:
@@ -374,7 +400,7 @@ def create_item(payload: dict) -> dict:
                 note='建档时的初始数量', user_id=1,
             )
             item.refresh_from_db()
-    return _item_row(item)
+    return _item_row(item, _used_recipe_item_ids())
 
 
 def update_item(pk: int, payload: dict) -> dict:
@@ -405,7 +431,7 @@ def update_item(pk: int, payload: dict) -> dict:
                     note='直接编辑物品改了数量', user_id=1,
                 )
                 item.refresh_from_db()
-    return _item_row(item)
+    return _item_row(item, _used_recipe_item_ids())
 
 
 def delete_item(pk: int) -> int:
@@ -461,15 +487,23 @@ def preview_item_life(payload: dict, reference: date | None = None) -> dict:
        造一个只活在内存里的物品，交给 `compute_item_life` 去算，
        与保存后列表里跑的是**同一行代码**。
 
-    ⚠️ 配餐类（`consume_mode='meal'`）直接拒绝：那类物品的时长由配方决定，
-       按单件口径算出来的是一个没人核对过的数 —— 而它看着完全合理。
+    ⚠️ 拒绝条件**不是「配餐类」，而是「这件物品已由配方接管」**（v3.60.25）。
+       配餐类里没编进配方的物品（零食 / 调味 / 饮水）时长就该按它自己的口径算，
+       一律拒绝会把它们的试算一起挡掉 —— 而那正是这次要打开的入口。
+       判据与 `_item_row` 的 `uses_recipe` 同源，不在这里另写一遍「meal 就拒绝」。
     """
     payload = dict(payload)
-    category_id = payload.get('category_id')
-    if category_id:
-        category = SurvivalCategory.objects.filter(id=category_id, user_id=1).first()
-        if category is not None and category.consume_mode == 'meal':
-            raise ValueError('配餐类的时长由配方决定，单件试算没有意义')
+    # ⚠️ `item_id` 由视图从 `request.data` 里取（不是模型字段，不进序列化器）。
+    #    从 `validated_data` 读只读的 `id` 是拿不到的 —— 会被静默丢掉，
+    #    然后这道护栏就永远不生效，而没人会发现。
+    item_id = payload.get('item_id')
+    if item_id:
+        item = SurvivalItem.objects.filter(id=item_id, user_id=1).first()
+        if item is not None and calc.life_from_recipe(item, _used_recipe_item_ids()):
+            raise ValueError(
+                '这件物品的时长由配方决定，单件试算没有意义；'
+                '要改请去配方里改「每餐用量」',
+            )
 
     unit = None
     if payload.get('unit_id'):
@@ -610,6 +644,9 @@ def get_analysis(reference_date: date | None = None) -> dict:
         categories = list(
             SurvivalCategory.objects.filter(user_id=1).order_by('sort_order', 'id')
         )
+        # 口径来源集合一次算完、所有类别共用（v3.60.25）—— 逐类别各查一遍既慢，
+        # 又会在「配方跨类别引用」时给出两个答案（一个类别认、另一个不认）。
+        used = _used_recipe_item_ids()
         result_rows = []
         for category in categories:
             items = list(
@@ -618,7 +655,9 @@ def get_analysis(reference_date: date | None = None) -> dict:
             recipes = list(category.recipes.prefetch_related(
                 'lines__item__unit', 'lines__unit',
             ).order_by('sort_order', 'id')) if category.consume_mode == 'meal' else []
-            result_rows.append(calc.compute_category(category, items, recipes, today))
+            result_rows.append(calc.compute_category(
+                category, items, recipes, today, used_item_ids=used,
+            ))
 
         # 必需品对账（v3.59.7）—— 放在同一个 try 里：基准表与类别表是同一批迁移，
         # 表不在时两个查询都会炸，分成两段只会让「迁移没跑」出现两种错误长相。
@@ -860,4 +899,16 @@ def get_meta() -> dict:
         #    混进计算就等于给所有衣物套一个统一寿命 —— 那恰恰是本次要修的错
         #    （「还能穿多久」取决于接受标准，不是一个可以统一规定的数）。
         'wear_reference': [dict(row) for row in SURVIVAL_WEAR_REFERENCE],
+        # 库存流水的渠道（v3.60.26）—— 流水页签那个「渠道」下拉的选项。
+        #
+        # 🔴 它为什么要走 meta、而不是**从流水数据里聚合**（原实现就是从数据聚合的）：
+        #    流水列表一加分页，`flows` 就只剩**当前页**那几条 ⇒ 渠道下拉的选项
+        #    会**随翻页而变**（第 1 页有「手工登记」，翻到第 2 页它就不见了，
+        #    用户想筛回去却找不到那个选项）。而原注释担心的「硬编码枚举迟早与后端分叉」，
+        #    正解本来就是**由后端下发枚举** —— 与 `_clean_channel` 同一个常量真源。
+        # ⚠️ 全量下发（不做分面过滤）：渠道只有 6 个、且是枚举，
+        #    若按当前筛选结果缩减，筛了「吃掉」之后就只剩一个可选项，等于锁死用户。
+        'flow_channels': [
+            {'value': value, 'label': label} for value, label in SURVIVAL_FLOW_CHANNELS
+        ],
     }

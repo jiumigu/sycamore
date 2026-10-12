@@ -592,6 +592,70 @@ def resolve_life(item) -> dict:
     }
 
 
+def recipe_used_item_ids(recipes) -> set[int]:
+    """被这些配方引用的物品 id 集合 —— **唯一实现**（v3.60.25）
+
+    两个消费方必须读同一个集合：
+        ① `life_from_recipe`  —— 这件物品的时长是不是由配方说了算；
+        ② `compute_category`  —— 「配餐之外」算哪几件、「没着落的主食」点名谁。
+    各自实现一遍迟早分叉，而分叉是**静默的**：一边在清单上写「见配方」、
+    另一边又把它当零散物品算一遍，同一件东西被算两遍，两个数看着都正常。
+
+    🔴 组合行要把**组内每一件**都算进来：只算 `line.item` 会把
+       「只通过组合下锅」的食材（绿豆、薏仁…）误判成没进配方 ——
+       而那正是组合功能的主场景，报出来是纯噪音。
+    """
+    used: set[int] = set()
+    for recipe in recipes:
+        for line in recipe.lines.all():
+            if line.item_id is not None:
+                used.add(line.item_id)
+        for line in recipe.combo_lines.all():
+            for member in line.combo.members.all():
+                used.add(member.item_id)
+    return used
+
+
+def life_from_recipe(item, used_item_ids=None) -> bool:
+    """这件物品的「一份可用天数」是否来自**配方**，而不是自身口径
+
+    🔴 判据（v3.60.25 改）：类别是配餐类，**且这件物品真的被某个配方引用了**。
+
+    为什么从「按饱腹角色」改成「按有没有编进配方」—— 原判据 `satiety != 'snack'`
+    两头都错，而且错得对称（2026-10-10 实测）：
+
+        · **零食**（牛奶）判为「不该填口径」⇒ 清单显示「未填」，
+          可编辑弹窗里口径字段整块被 `isMeal` 藏起来 ⇒ **这一格没有入口**。
+          用户看到「未填」去找地方填，怎么也找不到。
+        · **调味 / 饮水**（蒸鱼豉油、食盐）判为「时长来自配方」⇒ 显示「见配方」，
+          可配方只有「主食位（求和）」与「必配位（取最小）」两个餐位，
+          而它们的消耗节奏根本不是「每顿定量」—— 挂主食位会把主食天数**推高**
+          （500ml 酱油 ÷ 3ml/餐 = 166 顿，并进主食池求和），
+          挂必配位会把它们变成**每顿的硬约束**。
+
+        ⇒ 「见配方」三个字把用户引向一个**没有正确填法**的格子。
+          实测的后果：把「蒸鱼豉油」改挂到「用」类 —— 一次静默的数据迁移，
+          食物被记成了日用品。
+
+    改成「有没有编进配方」之后，「见配方」第一次**名副其实**：编进去了才有这一格，
+    没编进去就按自己的口径填。而**主食**（果腹）没编进配方时，它既显示「未填」、
+    又会被 `ISSUE_ORPHAN_ITEM` 点名 —— 显示与报账指向同一个动作：去编配方。
+
+    ⚠️ 只看 `consume_mode`、**不看类别名**：用户把「吃」改名成「口粮」
+       不该让显示失效（同 `compute_category` 的分派判据）。
+    """
+    category = getattr(item, 'category', None)
+    if category is None:
+        return False
+    if getattr(category, 'consume_mode', '') != 'meal':
+        return False
+    if used_item_ids is None:
+        # 回退路径：调用方没预先算集合时自己查。别在列表里逐件走这条路 ——
+        # 那是 N+1；`survival_service._used_recipe_item_ids()` 会一次查完。
+        used_item_ids = recipe_used_item_ids(category.recipes.all())
+    return getattr(item, 'id', None) in used_item_ids
+
+
 def compute_item_life(item, today: date) -> dict:
     """一件非配餐物品能撑多少天（三档）
 
@@ -687,7 +751,7 @@ def _aggregate_scenarios(rows: list[dict], aggregate_mode: str) -> dict[str, flo
 
 
 def compute_category(
-    category, items: list, recipes: list, today: date,
+    category, items: list, recipes: list, today: date, used_item_ids=None,
 ) -> dict:
     """一个类别的生存时长（三档 + 期望）+ 明细
 
@@ -744,38 +808,39 @@ def compute_category(
         # 这个类别的数字就整体不可信。
         result['trustworthy'] = not any(not row['trustworthy'] for row in recipe_rows)
 
-        # 有库存却没有任何配方的类别算不出时长 —— 这不是「0 天」，
+        # 🔴 口径来源判据与 `life_from_recipe` 读**同一个集合**（v3.60.25）：
+        #    显示「见配方」的，和被算进「配餐之外」的，必须是同一批 ——
+        #    否则同一件东西会既挂着「见配方」、又被零散算了一遍。
+        used = (
+            used_item_ids if used_item_ids is not None
+            else recipe_used_item_ids(recipes)
+        )
+
+        # 「没着落的主食」= **果腹**、有库存、却一件配方都没编进去。
+        # 主食是一顿饭的主体，它的量只能由配方的「每餐用量」说了算，
+        # 所以它没编进配方时算不出「能撑多少顿」—— 这不是「0 天」，
         # 是「还没告诉系统你怎么吃」。必须显式说出来，否则用户会以为
         # 系统把他那一柜子粮食算漏了（其实是的，但要知道原因）。
-        countable_items = [it for it in usable_items if it.satiety != 'snack']
-        if countable_items and not recipe_rows:
+        #
+        # ⚠️ 判据从「非零食」收窄成「果腹」（v3.60.25）：零食/调味/饮水现在走
+        #    自己的口径（见下面「配餐之外」），它们**没进配方不是问题**；
+        #    把这三类也报成「未纳入配方」报出来的就是纯噪音 ——
+        #    而噪音会把真正该修的那件埋掉。
+        staple_items = [it for it in usable_items if it.satiety == 'filling']
+        if staple_items and not recipe_rows:
             result['issues'].append(_issue(
                 ISSUE_NO_RECIPE,
-                detail=f'{len(countable_items)} 件食材还没有编入任何配方，不计入时长',
+                detail=f'{len(staple_items)} 件主食还没有编入任何配方，不计入时长',
             ))
 
-        # 编了库存却没进配方的食材 = 白存。这个数字不参与计算，
+        # 编了库存却没进配方的**主食** = 白存。这个数字不参与计算，
         # 但**不能被静默吞掉** —— 「看不见的数据」比「错的数据」更危险。
-        #
-        # ⚠️ 组合行要把**组内每一件**都算进「已编入配方」：只加 `line['item_id']`
-        #    会把「只通过组合下锅」的食材（绿豆、薏仁…）误报成孤儿 ——
-        #    而那正是本次要做组合的场景，报出来就是纯噪音。
-        used_item_ids = set()
-        for row in recipe_rows:
-            for line in row['lines']:
-                if line['item_id'] is not None:
-                    used_item_ids.add(line['item_id'])
-                for member in line.get('members') or []:
-                    used_item_ids.add(member['item_id'])
-        orphan = [
-            it.name for it in countable_items
-            if it.id not in used_item_ids and it.satiety != 'snack'
-        ]
+        orphan = [it.name for it in staple_items if it.id not in used]
         if orphan:
             result['issues'].append(_issue(
                 ISSUE_ORPHAN_ITEM,
                 items=orphan,
-                detail=f'{len(orphan)} 件食材未纳入任何配方：{"、".join(orphan[:5])}',
+                detail=f'{len(orphan)} 件主食未纳入任何配方：{"、".join(orphan[:5])}',
             ))
 
         # 配餐类：每个配方都是**每天都要吃到**的一组（早/正餐），
@@ -786,14 +851,33 @@ def compute_category(
         if rows:
             result['days'] = _aggregate_scenarios(rows, 'min')
 
-        # 零食：自身单独折算，不进主食时长（用期望值与四卡口径一致）
-        snack_items = [it for it in items if it.satiety == 'snack']
-        if snack_items:
-            snack_rows = [compute_item_life(it, today) for it in snack_items]
-            snack_triple = _aggregate_scenarios(
-                [r for r in snack_rows if r['days']['likely'] is not None], 'sum',
+        # ── 配餐之外（v3.60.25）──
+        #
+        # 没编进配方的吃类物品（零食 / 调味 / 饮水…），按它们**自己的口径**折算后
+        # 合计成一个数。判据原来是 `satiety == 'snack'`，把调味/饮水排除在外 ——
+        # 可它们既进不了配方（没有合适的餐位），又没有口径入口，于是
+        # 「蒸鱼豉油」这类的唯一出路是把类别改成「用」（实测发生过）。
+        #
+        # 为什么不并进上面的天数：它们不是「一顿饭」，混进分母只会让
+        # 「能撑多少顿」看着更耐吃 —— 那是往乐观方向错。
+        #
+        # ⚠️ 字段名仍是 `snack_days`（快照表里存着这一列，改名的代价比收益大）；
+        #    它的**口径**是「配餐之外」，不是「零食」。界面文案跟口径走。
+        #
+        # ⚠️ 逐件的问题要**报出来**：这一段原来把 `issues` 直接丢掉，于是
+        #    「零食还能吃几天」悄悄变成 None、界面一句提示都没有（§56 登记的
+        #    那条待办）。现在零食/调味/饮水真的可以自己填口径了，缺了就是缺了。
+        off_items = [
+            it for it in items if it.id not in used and it.satiety != 'filling'
+        ]
+        off_rows = [compute_item_life(it, today) for it in off_items]
+        for row in off_rows:
+            result['issues'].extend(row['issues'])
+        if off_rows:
+            off_triple = _aggregate_scenarios(
+                [r for r in off_rows if r['days']['likely'] is not None], 'sum',
             )
-            result['snack_days'] = pert_triple(snack_triple)['expected']
+            result['snack_days'] = pert_triple(off_triple)['expected']
     else:
         item_rows = [compute_item_life(it, today) for it in usable_items]
         result['items'] = item_rows

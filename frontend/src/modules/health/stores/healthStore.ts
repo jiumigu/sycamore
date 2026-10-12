@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as healthApi from '../api/healthApi'
 import type {
@@ -214,3 +214,22 @@ export const useWeightStore = defineStore('weight', () => {
     fetchRecords, createRecord, updateRecord, deleteRecord, loadAll,
   }
 })
+
+// 开发期热更新：Vite 只重建 `.vue`，**Pinia 的 store 实例不会重建** ——
+// 改本文件之后，页面上跑的还是旧定义（模板新、数据旧，看起来像「功能没做」）。
+// ⚠️ 本模块导出**两个** store，不能直接 `acceptHMRUpdate(useA, hot)` + `acceptHMRUpdate(useB, hot)`：
+//    它的回调会遍历新模块的**全部**导出，遇到 id 不同的那个就 `console.warn` + `invalidate()`
+//    （整页刷新）—— 等于没加固，还多一条误导性警告。
+//    ⇒ 各包一层，让每次回调只看得见自己那一个。
+// ⚠️ 生产构建里 `import.meta.hot` 是 undefined ⇒ 整段被 tree-shake，对线上零影响。
+if (import.meta.hot) {
+  const hmrHealthStore = acceptHMRUpdate(useHealthStore, import.meta.hot)
+  const hmrWeightStore = acceptHMRUpdate(useWeightStore, import.meta.hot)
+  import.meta.hot.accept((mod) => {
+    // ⚠️ Vite 的签名是 `accept(cb?: (mod?: any) => void)` —— `mod` 类型上是**可选**的。
+    //    真拿不到模块时直接不动，别把 `undefined` 喂给 rebuild（它会 `for...in` 一个 undefined）。
+    if (!mod) return
+    hmrHealthStore({ useHealthStore: mod.useHealthStore })
+    hmrWeightStore({ useWeightStore: mod.useWeightStore })
+  })
+}

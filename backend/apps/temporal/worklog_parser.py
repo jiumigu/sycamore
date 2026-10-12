@@ -16,8 +16,12 @@
 2. **表头多处损坏**：2024 的 A1/B1 是空格串，2025/2026 的 A1 是字母 `y`。
 3. **2026 表第 41 行是嵌在数据区中间的「第二套表头」**（月份/日期/工作内容/工作状态/备注/文本）
    → 靠「B 列是不是日期」识别并跳过，不要写死行号。
-4. **备注列位置三套**：2023 在 G（F 是「评分」）／2024·2025 在 F／2026 在 E（且 2026 没有
-   「加班|请假时长」列，备注就是那一列）。
+4. **备注列位置四套**：2023 在 G（F 是「评分」）／2024·2025 在 F／2026 在 E（且 2026 没有
+   「加班|请假时长」列，备注就是那一列）／**「每日任务日志记录」那一族在 F**（v3.60.28 新增：
+   它的 E 列是**心情指数**、同样没有时长列，备注因此后移到 F）。
+   🔴 漏掉第四套的后果是**静默错值**：落到默认分支 `('F','E')` 之后，E 列的心情指数
+      （1~5 的整数）会被 `_extract_hours` 当成「加班时长」解出来 —— 每个加班日凭空多出
+      1~5 小时，而界面上看不出任何异常。`TestReadWorklogRows.test_task_log_*` 钉住了它。
 5. **B 列是日期序列号**：2023 带时间分量（44929.375 = 2023-01-03 09:00），2024 起是纯日期。
 
 两条「已有记录 / 无时段」的补充规则（用户 2026-09-18 二次拍板）
@@ -69,7 +73,10 @@ EARLY_LEAVE_MARKERS = ('提前下班', '提早下班', '提前走了', '提前�
 
 _XLSX_NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 _REL_NS = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
-_SHEET_NAME_MARKER = '每日记录'   # 只认这一族的 sheet（跳过残留的空白 Sheet1）
+# 只认这一族的 sheet（跳过残留的空白 Sheet1 / 其他杂表）。
+# v3.60.28 起多认一族「每日任务日志记录」—— 它与「每日记录YYYY」**不是包含关系**
+# （「每日记录」不是它的子串），所以必须并列写出来，不能只改那一个字符串。
+_SHEET_NAME_MARKERS = ('每日记录', '每日任务日志记录')
 
 # HH:MM 或 HH:MM:SS（中文冒号也认）
 _TIME_RE = re.compile(r'(\d{1,2})\s*[:：]\s*(\d{1,2})(?:\s*[:：]\s*(\d{1,2}))?')
@@ -225,7 +232,14 @@ class _Workbook:
 # 读表
 # ════════════════════════════════════════════════════════════════════════════
 def _layout_for(sheet_name: str) -> tuple[str, str | None]:
-    """→ (备注列, 「加班|请假时长」列)。坑 4：三套列布局，按 sheet 名分流。"""
+    """→ (备注列, 「加班|请假时长」列)。坑 4：四套列布局，按 sheet 名分流。
+
+    ⚠️ 判断顺序有意义：先认「任务日志」这一族、再按年份认老四表 ——
+       「每日任务日志记录」不含年份，若走到最后会被当成默认的 ('F','E')，
+       把 E 列的**心情指数**误读成加班时长（见模块头 坑 4）。
+    """
+    if '任务日志' in sheet_name:
+        return 'F', None         # v3.60.28：E=心情指数、无时长列 ⇒ 备注在 F
     if '2023' in sheet_name:
         return 'G', 'E'          # 2023 多一列「评分」F → 备注落到 G
     if '2026' in sheet_name:
@@ -238,8 +252,8 @@ def read_worklog_rows(path: str) -> list[WorkLogRow]:
     wb = _Workbook(path)
     out: list[WorkLogRow] = []
     for sheet_name, sheet_path in wb.sheets:
-        if _SHEET_NAME_MARKER not in sheet_name:
-            continue                       # 跳过残留的空白 Sheet1
+        if not any(m in sheet_name for m in _SHEET_NAME_MARKERS):
+            continue                       # 跳过残留的空白 Sheet1 / 其他杂表
         note_col, dur_col = _layout_for(sheet_name)
         for row_no, cells in wb.rows(sheet_path):
             if row_no < 2:

@@ -124,7 +124,14 @@ export function getOnedayContrib() {
   return request({ url: '/temporal/oneday/contrib/', method: 'get' })
 }
 
-export function getTaskDailyDetail(params: { date: string }) {
+/**
+ * 每日任务明细（点贡献图格子看当天）。
+ *
+ * ⚠️ `scope`：贡献图那侧**必须**传 `'contrib'` —— 后端据此排除不计入贡献图的睡眠类
+ * 任务（名单在后端 `temporal/constants.py`，前端**不复制这份名单**）。
+ * 不传 = 当天全部任务（通用口径），供将来别处复用。
+ */
+export function getTaskDailyDetail(params: { date: string; scope?: 'contrib' }) {
   return request<{ date: string; total?: number; items: any[] }>({ url: '/temporal/tasks/daily_detail/', method: 'get', params })
 }
 

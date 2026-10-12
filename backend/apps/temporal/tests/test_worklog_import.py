@@ -362,6 +362,47 @@ class TestReadWorklogRows:
         assert len(rows) == 1 and rows[0].day == date(2025, 2, 3)
 
 
+class TestTaskLogSheetFamily:
+    """「每日任务日志记录」这一族（v3.60.28 新增支持）——单 sheet、带「心情指数」列。
+
+    🔴 这一族最容易出的不是「读不到」，而是**读错列**：
+       它的 sheet 名**不含年份**，若不显式分流就会落到 `_layout_for` 的默认分支
+       `('F', 'E')`，于是 E 列的**心情指数**（1~5 的整数）被 `_extract_hours`
+       当成「加班时长」——每个加班日凭空多出 1~5 小时，而界面上看不出任何异常。
+       下面两条一条钉「列映射」、一条钉「端到端结果」。
+    """
+
+    SHEET = '每日任务日志记录'
+    HEADER = ['月份', '日期', '工作内容', '工作状态', '心情指数', '备注']
+
+    def _one(self, tmp_path, status, mood, note, day=(2026, 3, 9)):
+        p = tmp_path / 'tasklog.xlsx'
+        make_xlsx(p, [(self.SHEET, [
+            self.HEADER,
+            ['3月', _serial(*day), '内容', status, mood, note],
+        ])])
+        return read_worklog_rows(str(p))
+
+    def test_note_column_is_f_and_there_is_no_duration_column(self, tmp_path):
+        rows = self._one(tmp_path, '正常工作', 3, '不想干')
+        assert len(rows) == 1
+        assert rows[0].note == '不想干'
+        assert rows[0].dur_raw == ''        # 🔴 不是 '3'（心情指数）
+
+    def test_mood_index_never_becomes_overtime_hours(self, tmp_path):
+        """端到端：心情指数=3 + 备注「加班到9点」 ⇒ 收工 21:00、13.0h。
+
+        若心情指数泄漏成加班时长，结果会是 17:45+3h = 20:45、12.75h ——
+        这条断言就是为那个数字写的。
+        """
+        rows = self._one(tmp_path, '加班', 3, '加班到9点')
+        pd = plan_day(rows[0])
+        assert pd.end == datetime(2026, 3, 9, 21, 0)
+        assert pd.duration_hours == 13.0
+        assert pd.start == datetime(2026, 3, 9, 8, 0)
+
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # 导入命令
 # ════════════════════════════════════════════════════════════════════════════

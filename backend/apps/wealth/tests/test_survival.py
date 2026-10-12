@@ -9,7 +9,7 @@
   ④ PERT 三档由**每日餐数**派生（省 2 / 常 3 / 放 4）：O ≥ P、离散度 ≥ 0
   ⑤ 保质期是硬上限：库存能撑 200 天但最早那批 10 天后过期 → 封顶 10 天
   ⑥ 算不出来就返回 None + 原因，**绝不返回 0**；配方缺件判「不可信」不静默跳过
-  ⑦ 零食不参与「能撑多少顿」，单独统计
+  ⑦ 「配餐之外」单独统计、不参与「能撑多少顿」（v3.60.25：不再只算零食）
   ⑧ 分派只看 consume_mode，**不看类别名**（把「吃」改名成「口粮」仍然算得对）
   ⑨ 删除一律先问再删：类别里有东西、单位被引用、物品被配方引用 → 400 可照做
   ⑩ 接口：四个列表端点与口径元信息都是**裸数组**（被全局分页包住会静默变空）
@@ -1195,3 +1195,196 @@ class TestSurvivalApis:
             format='json',
         )
         assert resp.status_code == 400
+
+
+# ══════════════════════════════════════════════════════════════
+# ⑯ 「见配方」：配餐类非零食的时长不在物品上（v3.60.22）
+# ══════════════════════════════════════════════════════════════
+
+@pytest.mark.django_db
+class TestLifeFromRecipe:
+    """物品清单里「计量口径」那一格，该写「未填」还是「见配方」的分派判据
+
+    背景（2026-10-10 实测）：配餐类的物品 `life_mode` 恒为 None，于是清单里
+    一格一格写着「未填」。而「未填」在别处**一律意味着「缺配置、去补」**
+    （品类明细的「问题」列、缺口对账的 unknown），这个显示在语义上等于
+    **谎报** —— 它把「口径在配方里」说成了「你没填」。
+
+    实测的后果：用户顺着这一列找原因，得出「快照有缺件、不可信是因为
+    吃的没填计量口径」这个**错的**结论（真因是 2 件食材没编进配方）。
+    """
+
+    def test_meal_filling_life_comes_from_recipe(self):
+        """配餐类 + 果腹 + **真的编进了配方** → 时长来自配方
+
+        ⚠️ 判据在 v3.60.25 从「配餐类 + 非零食」改成「被某个配方引用了」——
+           本用例原来不建任何配方也断言 True，那正是要被修正的旧口径。
+        ⚠️ 同时断言 `life_mode is None`：把判据写成「看 life_mode 填没填」
+           也能让本用例过，但那正是要被修正的旧显示口径。
+        """
+        category = _category('吃', mode='meal')
+        bag = _unit(category, '袋', '袋')
+        item = _item(category, '大米', 5, bag, satiety='filling')
+        recipe = SurvivalRecipe.objects.create(
+            user_id=1, category=category, name='一餐', meals_per_day=3,
+        )
+        _line(recipe, item, 600)
+        row = svc._item_row(item)
+        assert row['uses_recipe'] is True
+        assert row['life_mode'] is None            # 物品自己确实没填
+        assert row['days_per_unit_effective'] is None
+
+    def test_meal_snack_life_comes_from_itself(self):
+        """配餐类 + 零食 → **仍要填口径**，绝不能显示「见配方」
+
+        零食不进配方、由 `compute_item_life` 单独折算。把它也算作「见配方」，
+        那件零食就永远不提示补口径 —— 从「谎报有」变成「静默漏」。
+        """
+        category = _category('吃', mode='meal')
+        box = _unit(category, '盒', '盒')
+        item = _item(category, '牛奶', 30, box, satiety='snack')
+        assert svc._item_row(item)['uses_recipe'] is False
+
+    @pytest.mark.parametrize('mode', ['on_demand', 'depreciation', 'time_based'])
+    def test_non_meal_category_is_never_by_recipe(self, mode):
+        """非配餐类一律按物品自身口径 —— 没填就该老实显示「未填」"""
+        category = _category('用', mode=mode, aggregate='sum')
+        piece = _unit(category, '件', '件')
+        item = _item(category, '纸巾', 10, piece)
+        assert svc._item_row(item)['uses_recipe'] is False
+
+    def test_dispatch_follows_consume_mode_not_category_name(self):
+        """判据只看 `consume_mode` —— 把「吃」改名成「口粮」不该让显示失效"""
+        category = _category('口粮', mode='meal')
+        bag = _unit(category, '袋', '袋')
+        item = _item(category, '大米', 5, bag)
+        recipe = SurvivalRecipe.objects.create(
+            user_id=1, category=category, name='一餐', meals_per_day=3,
+        )
+        _line(recipe, item, 600)
+        assert svc._item_row(item)['uses_recipe'] is True
+
+    def test_item_list_endpoint_exposes_the_flag(self):
+        """接口要真的下发这个字段 —— 漏在视图里，界面就还是「未填」"""
+        category = _category('吃', mode='meal')
+        bag = _unit(category, '袋', '袋')
+        rice = _item(category, '大米', 5, bag)
+        _item(category, '牛奶', 30, bag, satiety='snack')
+        recipe = SurvivalRecipe.objects.create(
+            user_id=1, category=category, name='一餐', meals_per_day=3,
+        )
+        _line(recipe, rice, 600)
+        resp = APIClient().get('/api/wealth/survival/items/')
+        assert resp.status_code == 200
+        assert isinstance(resp.data, list)          # 裸数组，不是 {count, results}
+        by_name = {r['name']: r for r in resp.data}
+        assert by_name['大米']['uses_recipe'] is True
+        assert by_name['牛奶']['uses_recipe'] is False
+
+
+# ══════════════════════════════════════════════════════════════
+# ⑰ 配餐之外：没编进配方的吃类物品（v3.60.25）
+# ══════════════════════════════════════════════════════════════
+
+@pytest.mark.django_db
+class TestOffRecipe:
+    """「零食 / 调味 / 饮水」的口径入口 —— 钉住 2026-10-10 那次抱怨
+
+    原话：「只有果腹的可以在配餐配方中配置，但零食、调味、饮水找不到配置的
+    地方，因为它们大都按次来消耗」。实测的后果是把「蒸鱼豉油」改挂到「用」类。
+
+    真因是**两头堵**：
+        · 配方只有主食位（求和）与必配位（取最小）两个餐位，
+          都不合「偶尔用一点」的节奏（挂主食位把主食天数推高、挂必配位
+          变成每顿的硬约束）；
+        · 口径字段整块被 `isMeal` 藏起来，连按次都没处填。
+
+    所以判据从「按饱腹角色」改成「按有没有真的编进配方」。
+    """
+
+    def test_seasoning_without_a_recipe_uses_its_own_measure(self):
+        """调味没编进配方 → 口径来自它自己（按次），不再显示「见配方」"""
+        category = _category()
+        bottle = _unit(category, '瓶', '瓶')
+        soy = _item(
+            category, '蒸鱼豉油', 2500, bottle, satiety='seasoning',
+            uses_per_unit=0.05, use_cycle_num=1, use_cycle_unit='day', use_times=1,
+        )
+        row = svc._item_row(soy)
+        assert row['uses_recipe'] is False
+        assert row['life_mode'] == 'cycle'
+        assert row['days_per_unit_effective'] is not None
+
+    def test_same_item_in_a_recipe_goes_back_to_the_recipe(self):
+        """同一件调味料编进配方后 → 口径立刻归配方（判据就是「有没有进配方」）"""
+        category = _category()
+        bottle = _unit(category, '瓶', '瓶')
+        soy = _item(
+            category, '蒸鱼豉油', 2500, bottle, satiety='seasoning',
+            uses_per_unit=0.05, use_cycle_num=1, use_cycle_unit='day', use_times=1,
+        )
+        recipe = SurvivalRecipe.objects.create(
+            user_id=1, category=category, name='一餐', meals_per_day=3,
+        )
+        _line(recipe, soy, 3, role='required')
+        row = svc._item_row(soy)
+        assert row['uses_recipe'] is True
+        # ⚠️ 物品上那条旧口径仍在库里（本用例没清它）—— 但它**不再生效**：
+        #    口径只能有一把尺子，判据优先，不是「两条都用」。
+        assert row['life_mode'] == 'cycle'
+
+    def test_non_filling_items_are_not_reported_as_orphans(self):
+        """没编进配方的调味/饮水/零食**不是**「白存」—— 报出来是纯噪音
+
+        ⚠️ 原判据是「非零食」：调味/饮水没编进配方就会被点名「未纳入任何配方」，
+           可它们根本没有合适的餐位可挂 —— 那是**报了一个用户修不了的问题**。
+        """
+        category = _category()
+        bottle = _unit(category, '瓶', '瓶')
+        _item(category, '蒸鱼豉油', 2500, bottle, satiety='seasoning', days_per_unit=20)
+        _item(category, '饮用水', 20, bottle, satiety='water', days_per_unit=10)
+        _item(category, '牛奶', 30, bottle, satiety='snack', days_per_unit=1)
+        result = calc.compute_category(category, list(category.items.all()), [], TODAY)
+        codes = [i['code'] for i in result['issues']]
+        assert calc.ISSUE_ORPHAN_ITEM not in codes
+        assert calc.ISSUE_NO_RECIPE not in codes
+
+    def test_staple_outside_a_recipe_is_still_reported(self):
+        """主食没编进配方 **仍然** 要点名 —— 它的量只能由配方说了算"""
+        category = _category()
+        bag = _unit(category, '袋', '袋')
+        _item(category, '大米', 5, bag, satiety='filling', days_per_unit=30)
+        result = calc.compute_category(category, list(category.items.all()), [], TODAY)
+        codes = [i['code'] for i in result['issues']]
+        assert calc.ISSUE_ORPHAN_ITEM in codes
+        assert calc.ISSUE_NO_RECIPE in codes
+
+    def test_staple_outside_a_recipe_does_not_join_the_off_recipe_sum(self):
+        """主食没编进配方**进不了**「配餐之外」—— 它不是零碎消耗，不该混进那个数"""
+        category = _category()
+        bag = _unit(category, '袋', '袋')
+        _item(category, '大米', 5, bag, satiety='filling', days_per_unit=30)
+        _item(category, '牛奶', 30, bag, satiety='snack', days_per_unit=1)
+        result = calc.compute_category(category, list(category.items.all()), [], TODAY)
+        # 只有牛奶那 30 袋 × 1 天（期望 30.1）；大米那 150 天不在里面
+        assert result['snack_days'] == 30.1
+
+    def test_off_recipe_sum_covers_seasoning_and_water(self):
+        """「配餐之外」= 零食 + 调味 + 饮水（原判据只算了零食）"""
+        category = _category()
+        bag = _unit(category, '袋', '袋')
+        _item(category, '牛奶', 10, bag, satiety='snack', days_per_unit=1)
+        _item(category, '食盐', 10, bag, satiety='seasoning', days_per_unit=1)
+        _item(category, '饮用水', 10, bag, satiety='water', days_per_unit=1)
+        result = calc.compute_category(category, list(category.items.all()), [], TODAY)
+        # 三件各 10 天求和 → 期望值 30.1（单件的 3 倍，不是其中最大的一件）
+        assert result['snack_days'] == 30.1
+
+    def test_off_recipe_missing_measure_is_reported(self):
+        """配餐之外缺口径要**报出来** —— 原来那段把 `issues` 直接丢掉（§56 待办）"""
+        category = _category()
+        bag = _unit(category, '袋', '袋')
+        _item(category, '牛奶', 30, bag, satiety='snack')      # 没填口径
+        result = calc.compute_category(category, list(category.items.all()), [], TODAY)
+        assert result['snack_days'] is None
+        assert calc.ISSUE_NO_DAYS_PER_UNIT in [i['code'] for i in result['issues']]

@@ -22,6 +22,24 @@
 
   ⚠️ 颜色刻意不套「涨红跌绿」：那套是**价格**语义。天数变长是好事，
      颜色跟语义走、不跟数值方向走（见 survivalFormat.deltaType）。
+
+  ══════════════════════════════════════════════════════════════
+  🔴 2026-10-10：加分页（v3.60.26）—— 为「四处行为一致」而加
+  ══════════════════════════════════════════════════════════════
+
+  实测只有 5 期、表格高 192px，900px 视口下**还放得下**（余 134px）。
+  所以这一处不是被溢出逼出来的 —— 加它是因为物品清单 / 盘点记录 / 库存流水
+  都分了页，而**同一种东西在四处长得不一样**本身就是一种静默的不一致
+  （用户会去猜「是不是这几块坏了」）。数据一多，这里同样会溢出。
+
+  两条要求：
+
+  ① **折线与表格的数据源不同，别一起切。** 折线取的是 `/snapshot/trend/`
+     （后端收敛好的整条序列），表格取的是快照列表 ——
+     分页只切**表格**，折线仍然是全量：折线的意义就是「看整条趋势」，
+     切成 20 期一段等于把唯一要看的东西裁掉。
+  ② **「共 N 期」读全量**（`store.snapshots`），不是当前页。
+     常量与分页栏的显示判据走 `utils/survivalPaging.ts`（单一实现）。
 -->
 <template>
   <div class="survival-snapshot">
@@ -113,9 +131,17 @@
       </div>
     </div>
 
+    <!--
+      「共 N 期」—— 读的是**全量**（`store.snapshots`），不是当前页：
+      它讲的是「一共记了几期」，而表格下面那一段只是其中一页。
+    -->
+    <div v-if="hasPoints" class="survival-snapshot__table-head">
+      共 {{ store.snapshots.length }} 期快照
+    </div>
+
     <el-table
       v-if="hasPoints"
-      :data="store.snapshots"
+      :data="pageRows"
       size="small"
       class="survival-snapshot__table"
     >
@@ -160,15 +186,41 @@
       description="还没有快照 —— 点「记一次快照」把今天的结论留下来，第二次开始就能看出方向"
       :image-size="60"
     />
+
+    <!--
+      分页 —— 判据见文件头 2026-10-10。
+      ⚠️ 位置放在 `v-else` 的 `el-empty` **之后**是必须的，不是排版选择：
+         `v-else` 要求紧邻它的 `v-if`（中间只允许注释），
+         插在表格与空态之间会让编译器直接报「v-else has no adjacent v-if」。
+         而在「有数据」时空态本就不渲染 ⇒ 视觉上它仍然紧贴表格。
+      🔴 这里切的是**表格**，折线仍然是全量（它取的是 `/snapshot/trend/`，
+         不是这份列表）—— 折线的意义就是看整条趋势。
+      🔴 `:total` 读**全量**（`store.snapshots.length`），不是 `pageRows.length`：
+         拿当前页当总数，页码永远只有 1 页，而分页栏照常渲染。
+      ⚠️ 本模块四个列表共用同一套常量与判据（v3.60.26 起），组件里不再各留一份。
+    -->
+    <div v-if="shouldShowPager(store.snapshots.length)" class="survival-snapshot__pagination">
+      <el-pagination
+        v-model:current-page="page"
+        v-model:page-size="pageSize"
+        :page-sizes="PAGE_SIZE_OPTIONS"
+        :total="store.snapshots.length"
+        size="small"
+        layout="prev, pager, next, sizes"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MetricTooltip from '../common/MetricTooltip.vue'
 import { useSurvivalStore } from '../../stores/survivalStore'
 import { usePrivacyMask } from '@/shared/composables/usePrivacyMask'
+import {
+  DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, pageCountOf, pageSlice, shouldShowPager,
+} from '../../utils/survivalPaging'
 import {
   bottleneckType, deltaType, formatDateShort, formatDays, formatDelta,
   formatInterval, formatScenarioRange,
@@ -182,6 +234,37 @@ const { maskFreeText } = usePrivacyMask()
 const note = ref('')
 
 const hasPoints = computed(() => (store.snapshotTrend?.count ?? 0) > 0)
+
+/**
+ * 分页状态（v3.60.26）—— **只切表格**。
+ *
+ * 🔴 折线（`segments` / `dots` / `axisLabels`）读的是 `store.snapshotTrend`，
+ *    那是 `/snapshot/trend/` 这条**另一个接口**给的整条序列 ——
+ *    与表格这份列表**不同源**，所以上面这些几何计算**不需要动**、
+ *    也不能「顺手」改成读 `pageRows`：折线的意义就是看整条趋势，
+ *    切成一段一段等于把唯一要看的东西裁掉。
+ * ⚠️ 数据量变化时两者的关系是「表格少了一段、折线仍是全部」——
+ *    这是刻意的：表格用来「找到并可操作某一期」，折线用来「看方向」。
+ */
+const page = ref(1)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
+
+/** 本页的快照 —— 快照表没有行合并，可以按条直接切 */
+const pageRows = computed(() => {
+  const [start, end] = pageSlice(page.value, pageSize.value)
+  return store.snapshots.slice(start, end)
+})
+
+/** 总页数（至少 1） */
+const pageCount = computed(() => pageCountOf(store.snapshots.length, pageSize.value))
+
+/**
+ * 结果变少导致当前页越界 ⇒ 拉回最后一页。
+ * ⚠️ 本面板**有**这条路径：删除一期快照就是真的少一条（快照不可编辑、只能重记）。
+ */
+watch(pageCount, (total) => {
+  if (page.value > total) page.value = total
+})
 const comparison = computed(() => store.snapshotComparison)
 const snapshotDaysMeta = computed<RatioMeta | null>(
   () => store.metricMetaByKey['snapshot_days'] ?? null,
@@ -424,7 +507,19 @@ function extractMessage(e: unknown, fallback: string): string {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
 }
+/* 「共 N 期快照」—— 表格上方的一行，讲的是**全量**的期数 */
+.survival-snapshot__table-head {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
 .survival-snapshot__table {
   width: 100%;
+}
+/* 分页栏 —— 与另三个列表同一套摆法（居中、贴表格下方 10px） */
+.survival-snapshot__pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
 }
 </style>

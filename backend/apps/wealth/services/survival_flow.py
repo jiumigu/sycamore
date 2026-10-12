@@ -313,7 +313,7 @@ def record_batch(rows, user_id: int = 1) -> list[dict]:
 # 读：流水列表
 # ══════════════════════════════════════════════════════════════
 
-def list_flows(
+def _flow_queryset(
     item_id: int | None = None,
     category_name: str | None = None,
     channel: str | None = None,
@@ -321,14 +321,15 @@ def list_flows(
     date_from: date | None = None,
     date_to: date | None = None,
     keyword: str | None = None,
-    limit: int | None = None,
     user_id: int = 1,
-) -> list[dict]:
-    """流水列表（**降序**：最近发生的在最上面）
+):
+    """筛选条件的**唯一实现** —— `list_flows`（取一页）与 `count_flows`（数总数）都走它。
 
-    ⚠️ 端点**返回裸数组**，不走 DRF 全局分页；「最近 N 条」由这里的 `limit` 控制
-       （默认 30、上限 500）—— 绕回分页会把数组包成 `{count, results}`，
-       前端按数组消费就是「假 0」。
+    🔴 为什么必须抽出来（v3.60.26 加分页时立的）：分页要求「这一页的行」与「总数」
+       出自**同一套筛选**。两处各写一遍，迟早有一处漏改某个条件 ——
+       而两种症状都不报错：
+         · 总数偏大 ⇒ 页码比实际页数多，翻到最后一页是**空表**；
+         · 总数偏小 ⇒ 末尾几笔**永远翻不到**（而那几笔确实在库里）。
     """
     qs = SurvivalFlow.objects.filter(user_id=user_id)
     if item_id:
@@ -347,11 +348,61 @@ def list_flows(
         # 物品已删的流水只剩 `item_name`，所以搜索必须能搜到它 ——
         # 搜不到且不报错是这类「冗余快照列」的经典漏法（补列要同步补 search_fields）
         qs = qs.filter(Q(item_name__icontains=keyword) | Q(note__icontains=keyword))
+    return qs
+
+
+def count_flows(**filters) -> int:
+    """当前筛选下的**总笔数** —— 分页要的那个分母。
+
+    ⚠️ 与 `list_flows` 同源（都走 `_flow_queryset`），且**必须是筛选之后的数**：
+       给全表数会让页码比真实页数多，用户翻到最后一页看到一张空表，
+       读作「我的流水丢了」。
+    """
+    return _flow_queryset(**filters).count()
+
+
+def list_flows(
+    item_id: int | None = None,
+    category_name: str | None = None,
+    channel: str | None = None,
+    reason: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    keyword: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    user_id: int = 1,
+) -> list[dict]:
+    """流水列表（**降序**：最近发生的在最上面）
+
+    `limit` + `offset` 构成真分页：「最近 N 条」由 `limit` 控制（默认 30、上限 500），
+    `offset` 是「从第几条开始」。总数由 `count_flows` 给。
+
+    🔴 **端点不再返回纯裸数组**（v3.60.26）。理由：翻得到更早的流水就必须知道
+       一共有多少笔，光有数组给不出页码。所以端点改成显式 `{rows, total}`。
+
+       ⚠️ 这与「被 DRF 全局分页包成 `{count, results}`」**不是一回事**，别混：
+          那个是**意外**包装（`pagination_class` 没关掉），前端按数组消费即「假 0」，
+          界面上什么都不显示还没有报错；这个是**有意**的结构，字段名也刻意不同
+          （`rows` / `total` 而不是 `count` / `results`），就是为了让人一眼看出
+          「这是我们自己分页，不是 DRF 顺手包的」。
+    """
+    qs = _flow_queryset(
+        item_id=item_id,
+        category_name=category_name,
+        channel=channel,
+        reason=reason,
+        date_from=date_from,
+        date_to=date_to,
+        keyword=keyword,
+        user_id=user_id,
+    )
 
     limit = SURVIVAL_FLOW_DEFAULT_LIMIT if limit is None else limit
     limit = max(1, min(int(limit), SURVIVAL_FLOW_MAX_LIMIT))
+    offset = max(0, int(offset or 0))
 
-    flows = list(qs.order_by('-occurred_at', '-id')[:limit])
+    flows = list(qs.order_by('-occurred_at', '-id')[offset:offset + limit])
     if not flows:
         return []
 

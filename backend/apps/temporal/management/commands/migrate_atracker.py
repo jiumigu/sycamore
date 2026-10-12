@@ -1,21 +1,23 @@
 """迁移旧数据库 o_atracker_tasks_list 到 temporal_time_atracker_tasks_list
 
-v3.58.5 起与 CSV 导入口径对齐：**按原始记录逐条迁移**（不再按「任务名 + 日期」合并），
-去重键 = (task_name, start_time)，重复执行幂等。
+v3.58.5 起与 CSV 导入口径对齐：**按原始记录逐条迁移**（不再按「任务名 + 日期」合并）。
+
+判重（v3.60.29 起）= **同任务名 + 时段重叠**，走 `services.find_duplicate_task`，
+与 CSV 导入**共用一份实现**。⚠️ 旧口径 `(task_name, start_time)` 精确相等会被
+`import_worklog` 规则 A 的「时段补全」（改写 start_time 08:05→08:00）打穿 ⇒
+重跑本命令时**静默多迁一条**（2026-09-17 就是这么多了 9.92h 一条，TECH-NOTES §64）。
 
 Usage:
     python manage.py migrate_atracker
     python manage.py migrate_atracker --dry-run
 """
 
-from datetime import timedelta
-
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 from django.utils import timezone
 
 from apps.temporal.models import TemporalTask
-from apps.temporal.services import _ensure_task_meta
+from apps.temporal.services import _ensure_task_meta, find_duplicate_task
 
 
 class Command(BaseCommand):
@@ -35,7 +37,8 @@ class Command(BaseCommand):
 
         self.stdout.write(f'旧表记录数：{len(rows)}')
 
-        # 去重键 = (task_name, start_time)：同一条原始记录重复出现时只迁一次
+        # 【源数据内】去重键 = (task_name, start_time)：同一条原始记录在旧表里重复出现时只迁一次。
+        # ⚠️ 这与「库里是否已有这条记录」是**两回事** —— 后者见下方 find_duplicate_task。
         deduped: dict[tuple[str, object], dict] = {}
         duplicated = 0
         for data in rows:
@@ -59,7 +62,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f'共 {len(deduped)} 条待迁移'))
             return
 
-        created = updated = skipped = 0
+        created = updated = skipped = protected = 0
         with transaction.atomic():
             for (name, start), data in deduped.items():
                 # 旧库 start_time 为本地 naive 时间 → 统一 make_aware，与 CSV 导入口径一致
@@ -71,13 +74,19 @@ class Command(BaseCommand):
                 hours = float(data.get('duration_hours') or 0)
                 d = start_aware.date()
 
-                existing = TemporalTask.objects.filter(
-                    task_name=name,
-                    start_time__gte=start_aware,
-                    start_time__lt=start_aware + timedelta(seconds=1),
-                ).first()
+                # 判重 = 「同任务名 + 时段重叠」（与 CSV 导入共用单一真源 `find_duplicate_task`）。
+                # 旧的秒级精确匹配会被 import_worklog 的「时段补全」改写 start_time 打穿。
+                existing = find_duplicate_task(name, start_aware, end_aware, hours)
 
                 if existing:
+                    # 🔴 v3.60.29 保护（与 CSV 导入同口径）：命中但**开始时刻不同** ⇒
+                    # 库里这条的起止被 `import_worklog` 的「时段补全」改写过，源数据带的是
+                    # 改写之前的旧值 ⇒ 不许覆盖回去（否则每次重跑本命令都会**静默撤销**
+                    # 那次日志校准）。旧判重命中不了这条，是直接 create 出一条重复。
+                    if (existing.start_time.replace(microsecond=0)
+                            != start_aware.replace(microsecond=0)):
+                        protected += 1
+                        continue
                     if abs(float(existing.duration_hours or 0) - hours) < 0.01:
                         skipped += 1
                         continue
@@ -113,6 +122,6 @@ class Command(BaseCommand):
         _ensure_task_meta(sorted({name for name, _ in deduped}))
 
         self.stdout.write(self.style.SUCCESS(
-            f'迁移完成：新增 {created} 条、更新 {updated} 条、跳过 {skipped} 条'
-            f'（去重后共 {len(deduped)} 条）'
+            f'迁移完成：新增 {created} 条、更新 {updated} 条、跳过 {skipped} 条、'
+            f'保留校准值 {protected} 条（去重后共 {len(deduped)} 条）'
         ))

@@ -68,6 +68,7 @@ from ..services.survival_combo_service import (
 # ⚠️ 它同时是**改库存的唯一写口**（`record_flow`）：本模块不直接写 quantity，
 #    别的模块也不许 —— 绕过它就等于造出一次「账变了但没记录」。
 from ..services.survival_flow import (
+    count_flows,
     list_flows,
     record_batch,
     record_flow,
@@ -259,8 +260,13 @@ class SurvivalItemViewSet(viewsets.ModelViewSet):
         """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        payload = dict(serializer.validated_data)
+        # ⚠️ `item_id` 只能从原始请求体里取：它是**只读** `id`，DRF 校验后会把它丢掉，
+        #    从 `validated_data` 里读永远是 None —— 那道「已由配方接管就不试算」
+        #    的护栏会静默失效，而界面上一点异常都看不出来（v3.60.25）。
+        payload['item_id'] = request.data.get('item_id')
         try:
-            row = svc.preview_item_life(dict(serializer.validated_data))
+            row = svc.preview_item_life(payload)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(SurvivalItemPreviewSerializer(row).data)
@@ -734,26 +740,39 @@ class SurvivalFlowViewSet(viewsets.ViewSet):
        本端点（生存资源页第 5 个页签）**刻意不放登记按钮**：那会把「查流水」
        变成「又要先选一次物品」，而用户想「我吃了一罐」时，眼睛盯的是那件物品。
 
-    ⚠️ 列表**返回裸数组**：ViewSet 不走 `pagination_class`，「最近 N 条」
-       由服务层的 `limit` 控制 —— 绕回分页会把数组包成 `{count, results}`，
-       前端按数组消费就是「假 0」。
+    ⚠️ 列表返回**显式的 `{rows, total}`**（v3.60.26 起，**不再是裸数组**）：
+       `limit` + `offset` 是真分页，`total` 是筛选后的总笔数 —— 要翻页就得知道总共多少笔。
+       🔴 这**不是**「被 DRF 全局分页包成 `{count, results}`」那种**意外**包装
+          （那个前端按数组消费即「假 0」，界面上什么都不显示还不报错，见项目硬坑③）：
+          字段名刻意取 `rows` / `total`，就是为了与 DRF 的形状一眼分开，
+          并提醒后人「这是我们自己分页，别再套一层」。
     """
 
     permission_classes = [AllowAny]
 
     def list(self, request):
         raw_limit = request.query_params.get('limit')
+        raw_offset = request.query_params.get('offset')
         raw_item = request.query_params.get('item_id')
         try:
             limit = int(raw_limit) if raw_limit else None
         except (TypeError, ValueError):
             limit = None
+        # ⚠️ 非法 offset 回落成 0（第一页），不 400 —— 翻页参数是界面自己拼的，
+        #    为它整页报错会把「看流水」变成一片红。
+        try:
+            offset = int(raw_offset) if raw_offset else 0
+        except (TypeError, ValueError):
+            offset = 0
         try:
             item_id = int(raw_item) if raw_item else None
         except (TypeError, ValueError):
             item_id = None
 
-        rows = list_flows(
+        # 🔴 筛选参数**只构造一次**，同一份同时喂给「取一页」与「数总数」。
+        #    写两遍必有一遍漏条件，而两种症状都不报错：
+        #    总数偏大 ⇒ 最后一页是空表；总数偏小 ⇒ 末尾几笔永远翻不到。
+        filters = dict(
             item_id=item_id,
             category_name=(request.query_params.get('category_name') or '').strip() or None,
             channel=(request.query_params.get('channel') or '').strip() or None,
@@ -761,9 +780,13 @@ class SurvivalFlowViewSet(viewsets.ViewSet):
             date_from=_parse_date(request.query_params.get('date_from')),
             date_to=_parse_date(request.query_params.get('date_to')),
             keyword=(request.query_params.get('keyword') or '').strip() or None,
-            limit=limit,
         )
-        return Response(SurvivalFlowSerializer(rows, many=True).data)
+
+        rows = list_flows(**filters, limit=limit, offset=offset)
+        return Response({
+            'rows': SurvivalFlowSerializer(rows, many=True).data,
+            'total': count_flows(**filters),
+        })
 
     def create(self, request):
         """记一笔；请求体里带 `rows` 时按**批量**处理。

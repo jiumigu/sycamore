@@ -219,6 +219,18 @@ export function getBills(params?: Record<string, unknown>) {
   return request({ url: '/wealth/bills/', method: 'get', params })
 }
 
+/**
+ * 筛选结果总计（v3.60.19）
+ *
+ * ⚠️ 参数必须与 `getBills` **同源**（同一个 `filterParams()`），
+ * 差异只在于这里不带 `page` / `page_size` —— 它算的是**跨页全量**。
+ */
+export function getBillTotals(params?: Record<string, unknown>) {
+  return request<{ count: number; income: number; expense: number; net: number }>({
+    url: '/wealth/bills/totals/', method: 'get', params,
+  })
+}
+
 export function createBillRecord(data: Record<string, unknown>) {
   return request({ url: '/wealth/bills/', method: 'post', data })
 }

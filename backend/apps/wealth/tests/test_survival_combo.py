@@ -686,3 +686,43 @@ class TestEssentialSingleOwner:
             ess_svc.create_essential({
                 'name': '袜子', 'category_id': category.id, 'item_ids': [shoes.id],
             })
+
+
+# ══════════════════════════════════════════════════════════════
+# v3.60.25：口径来源判据改成「有没有编进配方」后，组合这条路也要认
+# ══════════════════════════════════════════════════════════════
+
+@pytest.mark.django_db
+class TestComboCountsAsInARecipe:
+    """🔴 只通过**组合**下锅的食材，与「在配方里挂一行」是同一件事
+
+    判据实现（`calc.recipe_used_item_ids`）必须把组合成员的 item_id 也算进来：
+    漏了它，绿豆/薏仁这类「分开登记、一起下锅」的食材会被判成
+    「没进配方」——一边显示「未填」、一边把它们算进零碎消耗，
+    而它们明明就在那锅粥里。
+    """
+
+    def test_combo_members_are_treated_as_in_a_recipe(self):
+        category = _category()
+        gram = _unit(category, '克')
+        combo, items = _conjee(category, gram)
+        recipe = _recipe(category)
+        SurvivalRecipeComboLine.objects.create(recipe=recipe, combo=combo)
+
+        for name, item in items.items():
+            assert svc._item_row(item)['uses_recipe'] is True, name
+
+    def test_combo_members_are_not_counted_as_off_recipe(self):
+        """既不算「没着落的主食」，也不进「配餐之外」的合计"""
+        category = _category()
+        gram = _unit(category, '克')
+        combo, items = _conjee(category, gram)
+        recipe = _recipe(category)
+        SurvivalRecipeComboLine.objects.create(recipe=recipe, combo=combo)
+
+        result = calc.compute_category(
+            category, list(category.items.all()), [recipe], TODAY,
+        )
+        codes = [i['code'] for i in result['issues']]
+        assert calc.ISSUE_ORPHAN_ITEM not in codes
+        assert result['snack_days'] is None

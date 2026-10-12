@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 import { sampleApi } from '../api'
 import type { LifeSample, LifeSampleForm, ScanResult, Stats, SyncResult } from '../types'
@@ -98,3 +98,11 @@ export const useSampleStore = defineStore('life-sample', () => {
     getSampleTypeLabel,
   }
 })
+
+// 开发期热更新：Vite 只重建 `.vue`，**Pinia 的 store 实例不会重建** ——
+// 改本文件之后，页面上跑的还是旧定义（模板是新的、数据逻辑是旧的，
+// 看起来像「功能没做」。2026-10-10 实例：流水列表「共 笔」是空的 + 空态误报）。
+// ⚠️ 生产构建里 `import.meta.hot` 是 undefined ⇒ 整段被 tree-shake，对线上零影响。
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useSampleStore, import.meta.hot))
+}

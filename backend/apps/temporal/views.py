@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from django.db.models import Count, DateField, Max, Sum
 from django.db.models.functions import Cast
 
-from .constants import ATTRIBUTION_ORDER
+from .constants import ATTRIBUTION_ORDER, CONTRIB_EXCLUDED_TASK_NAMES
 from .models import OneDayPage, TaskMeta, TemporalTask, WeeklyTimeCache
 from .serializers import (
     OneDayPageSerializer,
@@ -171,7 +171,15 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def daily_detail(self, request):
-        # 每日明细：按日期查当日所有时间任务
+        """每日明细：按日期查当日的**全部**时间任务。
+
+        `?scope=contrib`（v3.60.27）：改用**贡献图口径** —— 排除不计入贡献图的睡眠类
+        任务（名单见 `constants.CONTRIB_EXCLUDED_TASK_NAMES`）。贡献图点格子弹的明细走这个。
+
+        ⚠️ 默认不传 = 当天全部任务，行为与从前一致。这是**故意的**：本接口语义是
+        「那天我记了什么」，将来别处（任务清单等）复用时不该莫名其妙少几行 ——
+        而「少行且不报错」正是本项目反复防的那类静默失败。
+        """
         from datetime import datetime
         from django.utils import timezone
 
@@ -184,7 +192,10 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
             return Response({'error': 'date 格式 YYYY-MM-DD'}, status=400)
         ws = timezone.make_aware(datetime.combine(d, datetime.min.time()))
         we = timezone.make_aware(datetime.combine(d, datetime.max.time()))
-        qs = TemporalTask.objects.filter(start_time__gte=ws, start_time__lte=we).order_by('start_time')
+        qs = TemporalTask.objects.filter(start_time__gte=ws, start_time__lte=we)
+        if request.query_params.get('scope') == 'contrib':
+            qs = qs.exclude(task_name__in=CONTRIB_EXCLUDED_TASK_NAMES)
+        qs = qs.order_by('start_time')
         meta = resolve_task_meta([t.task_name for t in qs])
         attr = resolve_attribution([t.task_name for t in qs])
         items = [{
@@ -215,10 +226,17 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         dominant_attr（主导归因）：不按量值着色，而是给每天算五个 L1 归因的小时数，
         取最多者作为当天「主导归因」（并列按 ATTRIBUTION_ORDER 的价值序取靠前者）；
         五者全为 0 的日子 attr 返回 null，前端显示为「未归类」灰格。
+
+        🔴 v3.60.27：睡眠类任务**不计入本图**（名单 `constants.CONTRIB_EXCLUDED_TASK_NAMES`）。
+        它们的 L2 = 主动休息 ⇒ 归因 = 维持，每天 8h 会让热力图几乎天天是「维持」色，
+        把真正想看的结构压掉。**六个口径一律排除**（同一处 queryset，不会只改一半）。
+        ⚠️ 只剔本图：时间统计页的总时长 / 完整度 / 旭日图 / 趋势 / 168h 结构仍含睡眠。
         """
         metric = request.query_params.get('metric', 'hours')
         rows = list(
             TemporalTask.objects.exclude(start_time__isnull=True)
+            # 睡眠类不计入贡献图 —— 名单是单一真源，见 constants.py 的说明
+            .exclude(task_name__in=CONTRIB_EXCLUDED_TASK_NAMES)
             .annotate(d=Cast('start_time', DateField()))
             .values('d', 'task_name', 'duration_hours')
             .order_by('d')

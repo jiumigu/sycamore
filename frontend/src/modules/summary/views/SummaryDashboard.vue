@@ -271,6 +271,68 @@
       </el-table>
     </el-dialog>
 
+    <!--
+      七维平衡 · 封顶配置弹窗。
+      ⚠️ v3.60.31 前这里**没有这段模板**：script 里的 openRadarConfig / configForm /
+      configHistory / saveRadarConfig 全都写好了，却没有任何 el-dialog 消费它们 ⇒
+      点「配置」时请求正常发出、configVisible 被置 true，页面上什么都不出现
+      （用户读到的是「按钮坏了」）。**逻辑齐了、渲染层丢了**这类缺陷不报错。
+    -->
+    <el-dialog v-model="configVisible" title="📡 七维平衡 · 封顶配置" width="660" append-to-body>
+      <div class="config-hint">
+        下面填的数字是雷达图上这一轴的<b>满格刻度（点）</b>—— 数值越接近它，该维度越接近满格。
+        保存后立即生效，并留下一条历史版本（旧版本自动转为「历史」）。
+      </div>
+
+      <el-form label-width="88px" size="small">
+        <el-form-item v-for="item in configItems" :key="item.key" :label="item.label">
+          <el-input-number
+            :model-value="Number(configForm[item.key])"
+            :min="1"
+            :step="1"
+            controls-position="right"
+            style="width:150px"
+            @update:model-value="(v: number | undefined) => (configForm[item.key] = v ?? 1)"
+          />
+          <span class="config-unit">{{ item.unit }}</span>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            :model-value="String(configForm.note ?? '')"
+            maxlength="200"
+            placeholder="为什么改（可不填，历史版本里能看到）"
+            @update:model-value="(v: string) => (configForm.note = v)"
+          />
+        </el-form-item>
+      </el-form>
+
+      <el-divider class="history-divider" content-position="left">历史版本</el-divider>
+      <div v-if="configHistory.length" class="history-collapse">
+        <el-collapse accordion>
+          <el-collapse-item v-for="row in configHistory" :key="row.id" :name="String(row.id)">
+            <template #title>
+              <span class="history-time">{{ (row.created_at || '').slice(0, 16).replace('T', ' ') }}</span>
+              <el-tag v-if="row.is_active" type="success" size="small" class="history-tag">生效</el-tag>
+              <el-tag v-else type="info" size="small" class="history-tag">历史</el-tag>
+              <span class="history-note">{{ row.note || '（无备注）' }}</span>
+            </template>
+            <div class="history-detail">
+              <div v-for="item in configItems" :key="item.key" class="history-row">
+                <span class="history-label">{{ item.label }}</span>
+                <span>{{ row[item.key] }}</span>
+              </div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+      <div v-else class="history-empty">还没有历史版本 —— 保存一次就会出现</div>
+
+      <template #footer>
+        <el-button @click="configVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingConfig" @click="saveRadarConfig">保存并生效</el-button>
+      </template>
+    </el-dialog>
+
     <MonthlyModal
       v-model:visible="showMonthModal"
       :year="store.currentYear"
@@ -285,6 +347,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh, Setting } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { apiErrorText } from '@/shared/utils/apiError'
 import { getRadarConfig, saveRadarConfig as apiSaveRadarConfig, getRadarConfigHistory, getYearlyDetail } from '../api/summaryApi'
 import { useSummaryStore } from '../stores/summaryStore'
 import { YEARLY_TARGET } from '../types/summaryTypes'
@@ -340,14 +403,22 @@ const dailyQuote = ref<Quote | null>(null)
 const conclusion = ref<AskConclusionItem | null>(null)
 
 // ─── 七维平衡封顶配置 ───
+/**
+ * ⚠️ 这里的数字是**雷达图上该轴的满格刻度（点）**，不是物理量本身。
+ * 换算系数来自后端 `summary/constants.py` 的 `CONVERSION_RULES[*].divisor`
+ * （`_raw_to_points = 原始值 ÷ divisor`、`indicator.max = *_max`）——
+ * 两边同一把尺子，所以单位一律写成「1 点 = N <物理量>」。
+ * 千万别写成裸的物理量名（如「小时」）：max=80 会被读成「封顶 80 小时」，
+ * 而它实际是 **2400 小时**（80 × 30），差 30 倍且界面上看不出。
+ */
 const CONFIG_ITEMS = [
-  { key: 'wealth_max', label: '财富', unit: '万元' },
-  { key: 'health_max', label: '健康', unit: '万步' },
-  { key: 'times_max', label: '时间投入', unit: '小时/30' },
-  { key: 'words_max', label: '文字记录', unit: '万字' },
-  { key: 'sugar_max', label: '小确幸', unit: '级' },
-  { key: 'travel_max', label: '旅行', unit: '次' },
-  { key: 'book_max', label: '阅读', unit: '本' },
+  { key: 'wealth_max', label: '财富', unit: '点（1 点 = 1 万元）' },
+  { key: 'health_max', label: '健康', unit: '点（1 点 = 1 万步）' },
+  { key: 'times_max', label: '时间投入', unit: '点（1 点 = 30 小时）' },
+  { key: 'words_max', label: '文字记录', unit: '点（1 点 = 1 万字）' },
+  { key: 'sugar_max', label: '小确幸', unit: '点（1 点 = 10 级）' },
+  { key: 'travel_max', label: '旅行', unit: '点（1 点 = 1 次）' },
+  { key: 'book_max', label: '阅读', unit: '点（1 点 = 1 本）' },
 ]
 const configItems = CONFIG_ITEMS
 const configVisible = ref(false)
@@ -366,24 +437,47 @@ async function openRadarConfig() {
     }
     configForm.note = ''
     configVisible.value = true
+  } catch (e) {
+    ElMessage.error(apiErrorText(e, '获取配置失败'))
+    return
+  }
+  // 历史单独取：它拉不到**不等于**「配置没取到」，更不该沿用上一次的列表
+  // （沿用 ⇒ 弹窗里挂着上一轮的版本记录，看不出是旧的）
+  try {
     const his = await getRadarConfigHistory()
     configHistory.value = his.data || []
-  } catch {
-    ElMessage.error('获取配置失败')
+  } catch (e) {
+    configHistory.value = []
+    ElMessage.warning(`历史版本没取到：${apiErrorText(e, '请稍后重试')}`)
   }
 }
 
+/**
+ * 保存封顶配置。
+ *
+ * ⚠️ 「写配置」与「刷新雷达图」是**两件事**，不能共用一个 try ——
+ * 混在一起时刷新失败会被报成「保存失败」，而配置**其实已经写进去了**，
+ * 用户会再点一次保存（多留一条历史版本）。
+ */
 async function saveRadarConfig() {
   savingConfig.value = true
+  let saved = false
   try {
     await apiSaveRadarConfig({ ...configForm })
-    ElMessage.success('封顶配置已保存')
-    configVisible.value = false
-    await store.fetchRadar()  // 立即刷新雷达图
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+    saved = true
+  } catch (e) {
+    ElMessage.error(apiErrorText(e, '保存失败'))
   } finally {
     savingConfig.value = false
+  }
+  if (!saved) return
+
+  ElMessage.success('封顶配置已保存')
+  configVisible.value = false
+  try {
+    await store.fetchRadar()  // 立即刷新雷达图
+  } catch {
+    ElMessage.warning('配置已保存，但雷达图没刷新成功 —— 刷新页面即可')
   }
 }
 

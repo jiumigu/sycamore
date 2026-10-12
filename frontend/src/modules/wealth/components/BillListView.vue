@@ -151,6 +151,23 @@
       </el-table-column>
     </el-table>
 
+    <!-- 筛选结果总计 —— 位置在分页栏上方。
+         🔴 统计的是**当前筛选条件下全部结果**（跨页），不是当前页 20 行的小计；
+         与列表共用 `filterParams()`，两者永远同源，不会各算各的。 -->
+    <div v-if="billTotals" class="bill-totals">
+      <span class="totals-hint">本轮筛选合计</span>
+      <span class="totals-item">共 <b>{{ billTotals.count }}</b> 笔</span>
+      <span v-if="billTotals.income" class="totals-item">
+        收入 <b class="amount income">¥{{ formatAmount(billTotals.income) }}</b>
+      </span>
+      <span v-if="billTotals.expense" class="totals-item">
+        支出 <b class="amount">¥{{ formatAmount(billTotals.expense) }}</b>
+      </span>
+      <span v-if="billTotals.count" class="totals-item">
+        净额 <b class="amount" :class="{ income: billTotals.net > 0 }">{{ formatSignedAmount(billTotals.net, 2, true) }}</b>
+      </span>
+    </div>
+
     <el-pagination
       v-model:current-page="billPage" :page-size="PAGE_SIZE" :total="billTotal"
       layout="prev, pager, next" small style="margin-top: 10px; justify-content: center"
@@ -317,8 +334,14 @@ function resetFilters() {
   loadStats()
 }
 
-function listParams() {
-  const params: Record<string, unknown> = { page: billPage.value, page_size: PAGE_SIZE }
+/**
+ * 筛选条件的**唯一真源**。
+ *
+ * 🔴 列表与「筛选结果总计」都必须走这里。各写一份的后果不是报错，而是
+ * 两个数字对不上 —— 界面上看不出谁错，只会觉得统计不准。
+ */
+function filterParams() {
+  const params: Record<string, unknown> = {}
   if (billTypeFilter.value) params.transaction_type = billTypeFilter.value
   if (necessityFilter.value) params.necessity = necessityFilter.value
   if (periodTagFilter.value) params.period_tag = periodTagFilter.value
@@ -330,10 +353,28 @@ function listParams() {
   return params
 }
 
+function listParams() {
+  return { ...filterParams(), page: billPage.value, page_size: PAGE_SIZE }
+}
+
+/** 筛选结果总计（跨页全量，与列表同源） */
+const billTotals = ref<{ count: number; income: number; expense: number; net: number } | null>(null)
+
+async function loadTotals() {
+  try {
+    const res = await wealthApi.getBillTotals(filterParams())
+    billTotals.value = res.data
+  } catch {
+    // 取不到就整行不渲染（模板用 v-if）—— 不留一个可能已过期的旧数字
+    billTotals.value = null
+  }
+}
+
 async function loadBills() {
   billsLoading.value = true
   try {
-    const res = await wealthApi.getBills(listParams())
+    // 两者并行、同一轮筛选条件：串行会出现「新列表配旧总计」的一帧
+    const [res] = await Promise.all([wealthApi.getBills(listParams()), loadTotals()])
     const data = res.data
     bills.value = (data.results || data) as any[]
     billTotal.value = data.count ?? bills.value.length
@@ -585,4 +626,30 @@ onMounted(() => {
   &.income { color: #f56c6c; }
 }
 .muted { color: var(--el-text-color-placeholder); }
+
+/* 筛选结果总计（分页栏上方）—— 承接表格的「页脚」感，右对齐 */
+.bill-totals {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 8px 12px 0;
+  margin-top: 6px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+.bill-totals .totals-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.bill-totals .totals-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* 只给「纯数字」加深色；带 .amount 的交给上方收／支配色，
+   否则这里会把红绿盖成灰黑 */
+.bill-totals .totals-item > b:not(.amount) { color: var(--el-text-color-primary); }
+.bill-totals .totals-item .amount { font-weight: 600; }
 </style>

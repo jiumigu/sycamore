@@ -101,7 +101,9 @@ async function onCellClick(date: string) {
   detailSummary.value = ''
   detailLoading.value = true
   try {
-    const res = await getTaskDailyDetail({ date })
+    // scope='contrib'：口径与热力图一致 —— 排除睡眠类，否则格子上写「成长」、
+    // 点进去却是 8h 睡眠占了半天，两处数对不上（v3.60.27）。
+    const res = await getTaskDailyDetail({ date, scope: 'contrib' })
     const data: any = res.data
     detailItems.value = data.items || []
     detailSummary.value = data.items?.length ? `共 ${data.items.length} 项，总时长 ${data.total} 小时` : ''

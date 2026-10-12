@@ -1,14 +1,24 @@
 <!--
   物品编辑弹窗
 
-  字段按类别的消耗模式显隐，**不按类别名判断**：
-    配餐类只填「有多少、什么角色、什么时候过期」—— 每天消耗多少由配方决定；
-    折旧 / 按需 / 数字类才填「一件还能用多少天」。
-  让配餐类也填「单件可用天数」是错的：八宝粥能撑多久取决于一天吃几罐，
-  那是配方的事，填在这里会得到两个互相矛盾的口径。
+  字段显隐的判据（v3.60.25 改）：**这件物品有没有编进配方**，而不是「它属不属于配餐类」。
 
-  ⚠️ 「单件可用天数」在配餐类里**刻意不显示也不提交** ——
-     显示了就会有人填，填了就会有两份口径。
+    已编进配方   → 只填「有多少、什么角色、什么时候过期」，口径归配方；
+    还没编进配方 → 连配餐类也要填「一件还能用多少天 / 一份能用几次」。
+
+  🔴 为什么从「按类别」改成「按有没有进配方」：原来配餐类**整类**都不显示口径，
+     于是「零食 / 调味 / 饮水」这三个角色两头堵死 ——
+
+       · 它们进不了配方（配方只有主食位与必配位，一个会把主食天数推高、
+         一个会把它们变成每顿的硬约束），
+       · 又没有口径入口（整块口径字段被 `isMeal` 藏起来）。
+
+     实测的后果：用户把「蒸鱼豉油」改挂到「用」类才勉强能用 ——
+     一次静默的数据迁移，食物被记成了日用品。
+
+  ⚠️ 已编进配方时**不显示也不提交** —— 显示了就会有人填，填了就会有两份口径。
+     判据来自后端下发的 `uses_recipe`（`calc.life_from_recipe`），
+     前端**不自己判「在不在配方里」**：那是一份注定会分叉的副本。
 
   ── 类别可选（v3.59.5） ──
 
@@ -147,11 +157,19 @@
           />
         </el-select>
         <span class="survival-item-dialog__suffix">
-          零食不参与「能撑多少顿」，会单独统计
+          果腹是「一顿饭」的主体、走配方；其余三种按自己的节奏单独统计
         </span>
       </el-form-item>
 
-      <template v-if="!isMeal">
+      <!-- 已编进配方：口径字段**不出现在这里**（显示了就会有人填，填了就有两份口径），
+           但必须**说清楚它去哪了** —— 别的物品这一格有「按天/按次」，这件没有，
+           不解释就会被读成「这件坏了」或「我找不到地方填」。 -->
+      <el-form-item v-if="byRecipe" label="计量方式">
+        <el-tag size="small" effect="plain">见配方</el-tag>
+        <span class="survival-item-dialog__suffix">{{ recipeHint }}</span>
+      </el-form-item>
+
+      <template v-if="!byRecipe">
         <el-form-item label="计量方式">
           <el-radio-group v-model="form.measure" size="small">
             <el-radio-button value="day">按天</el-radio-button>
@@ -308,7 +326,7 @@
       <!-- 保存前试算（v3.59.11）—— 判据见文件头：错在最后一跳，就让它先跳一遍。
            ⚠️ 停在这儿而不是塞进页脚：它要跟着「数量 / 计量方式」一起被读到，
               放在备注、状态、盘点周期之下就离输入太远了。 -->
-      <el-form-item v-if="!isMeal" label=" ">
+      <el-form-item v-if="!byRecipe" label=" ">
         <div class="survival-item-dialog__preview">
           <span class="survival-item-dialog__preview-title">试算</span>
           <template v-if="previewExpected !== null">
@@ -483,6 +501,43 @@ const isMeal = computed(() => mode.value === 'meal')
 const isDepreciation = computed(() => mode.value === 'depreciation')
 const isTimeBased = computed(() => mode.value === 'time_based')
 
+/**
+ * 这件物品的时长**是不是由配方说了算**（v3.60.25）。
+ *
+ * 🔴 判据不在这里 —— 后端下发的 `uses_recipe` 是唯一真源（`calc.life_from_recipe`）。
+ *    前端自己判「它在不在某个配方里」会变成第二份判断，而两份判断会在
+ *    「组合行」「跨类别引用」这些边角上悄悄分叉（一边说见配方、一边说未填）。
+ *
+ * 新建时恒为 false：还没进任何一个配方。
+ */
+const byRecipe = computed(() => {
+  if (!props.itemId) return false
+  return store.items.find((i) => i.id === props.itemId)?.uses_recipe === true
+})
+
+/** 引用了这件物品的配方名 —— 「见配方」得能照做：让人知道去哪个配方里找 */
+const recipeNames = computed(() => {
+  const id = props.itemId
+  if (!id) return [] as string[]
+  return store.recipes
+    .filter((r) => (r.lines ?? []).some((l) => l.item_id === id))
+    .map((r) => r.name)
+})
+
+/**
+ * 「口径去哪了」的说明。
+ *
+ * ⚠️ 可能一个名字都说不上来：这件物品是通过**组合**下锅的，而组合引用不落在
+ *    `recipe.lines` 上。那时给一句通用的 —— 不能因为取不到名字就什么都不显示，
+ *    那句话正是这一格存在的理由。
+ */
+const recipeHint = computed(() => {
+  const names = recipeNames.value
+  return names.length
+    ? `已编入配方「${names.join('、')}」：一天消耗多少由它的「每餐用量」决定`
+    : '已编入配餐（挂在某个组合里）：一天消耗多少由配方决定'
+})
+
 const unitOptions = computed(() => store.units.filter((u) => u.category_id === form.category_id))
 
 /**
@@ -609,11 +664,27 @@ function onUnitCreated(unit: SurvivalUnit) {
   form.unit_id = unit.id
 }
 
+/** 「一件可用天数」那格的示例 —— 只讲这一格怎么填，不讲口径去了哪 */
 const lifeHint = computed(() => {
-  if (isMeal.value) return '每天消耗多少由配方决定，这里只记有多少、什么时候过期'
   if (isDepreciation.value) return '一件大衣还能穿 3 年 → 填 1095'
   if (isTimeBased.value) return '一册书按我的节奏能读几天'
   return '一份能用多少天：一包纸巾用 10 天 → 填 10'
+})
+
+/**
+ * 「类别」那格的说明正文 —— 这件东西的**口径在哪**（v3.60.25）。
+ *
+ * 三种情形分开说，判据是「口径归谁」而不是「它属于哪一类」：
+ *   已编进配方 → 归配方；没编进配方的配餐类 → 还没编，先按自己填；
+ *   非配餐类 → 一直就是自己的口径。
+ *
+ * ⚠️ 第二种必须给出**动作**（「先按它自己的节奏填」）：不说这句，用户会以为
+ *    这件物品没填的地方是坏的 —— 那正是「找不到配置的地方」这句抱怨的由来。
+ */
+const categoryLifeText = computed(() => {
+  if (byRecipe.value) return '每天消耗多少由配方决定，这里只记有多少、什么时候过期'
+  if (isMeal.value) return '还没编进任何配方：先按它自己的节奏填，编进配方后改由配方说了算'
+  return lifeHint.value
 })
 
 const measureHint = computed(() => (
@@ -630,7 +701,7 @@ const measureHint = computed(() => (
  */
 const categoryHint = computed(() => {
   const head = modeLabel.value ? `${modeLabel.value}：` : ''
-  const body = `${head}${lifeHint.value}`
+  const body = `${head}${categoryLifeText.value}`
   if (!props.itemId) return body
   return `${body}。类别建好后不可改 —— 换类别等于换一套账，请另建一件`
 })
@@ -724,8 +795,8 @@ watch(visible, (open) => {
   form.notes = item.notes
 })
 
-/** 按次计量是否生效；配餐类永远不生效（消耗由配方决定） */
-const byCycle = computed(() => !isMeal.value && form.measure === 'cycle')
+/** 按次计量是否生效；口径归配方（已编进配方）的物品永远不生效 */
+const byCycle = computed(() => !byRecipe.value && form.measure === 'cycle')
 
 // ── 保存前试算（v3.59.11） ──
 
@@ -741,7 +812,7 @@ let previewTimer: ReturnType<typeof setTimeout> | undefined
 
 /** 填到能算的程度才发请求 —— 半截配置只会撞上后端的必填校验，那是纯噪音 */
 const canPreview = computed(() => {
-  if (isMeal.value || !form.category_id || !(form.quantity > 0)) return false
+  if (byRecipe.value || !form.category_id || !(form.quantity > 0)) return false
   if (byCycle.value) {
     return Boolean(
       form.uses_per_unit && form.use_cycle_num && form.use_times && form.use_cycle_unit,
@@ -804,7 +875,13 @@ async function runPreview() {
   }
   try {
     // 与 store 里一样按 `resp.data` 取 —— 拦截器把整个 AxiosResponse 透传下来了
-    const resp = await previewSurvivalItem(buildPayload(categoryId))
+    // ⚠️ 带上 `item_id`：后端据此判断「这件物品是不是已由配方接管」。
+    //    它是**只读的 `id`**，不是模型字段 —— 从 `validated_data` 里读不到
+    //    （DRF 会把只读字段丢掉），不显式传的话那道护栏只是装饰。
+    const resp = await previewSurvivalItem({
+      ...buildPayload(categoryId),
+      item_id: props.itemId ?? undefined,
+    })
     previewRow.value = (resp.data as SurvivalItemPreview) ?? null
     previewError.value = ''
   } catch {
@@ -856,17 +933,21 @@ function buildPayload(categoryId: number): SurvivalItemFormData {
     grade: form.grade,
     status: form.status,
     priority: isTimeBased.value ? form.priority : '',
-    // 配餐类不提交单件可用天数 —— 每天消耗多少由配方决定，两处都填会互相矛盾
-    days_per_unit: isMeal.value || byCycle.value ? null : form.days_per_unit,
+    // 口径归配方的物品不提交任何单件口径 —— 每天消耗多少由配方决定，
+    // 两处都填会互相矛盾。而**没编进配方**的吃类物品要照常提交：
+    // 那是它们唯一的入口（v3.60.25）。
+    days_per_unit: byRecipe.value || byCycle.value ? null : form.days_per_unit,
     // ⚠️ 切换口径时**显式送 null** 清掉另一条 —— 后端判据是「填了按次就按次算」，
     //    留着旧值会让界面显示按次、算法按天，而且找不到地方改。
     //    三个频次字段**一起送 null**：只让 unit 那个送 'day'（当年为了迁就
     //    NOT NULL 列写的）看起来没事，实际把「一列迁就、两列不迁就」的不一致
     //    藏了起来 —— 后端放行 null、数据库拒收，保存直接失败。
-    uses_per_unit: byCycle.value ? form.uses_per_unit : null,
-    use_cycle_num: byCycle.value ? form.use_cycle_num : null,
-    use_cycle_unit: byCycle.value ? form.use_cycle_unit : null,
-    use_times: byCycle.value ? form.use_times : null,
+    // ⚠️ `byRecipe` 时同样**显式送 null**（而不是「不提交」）：这件物品**脱离配方**
+    //    的那天会重新按自己的口径算，留着一条界面上看不见的旧值，那天就静默生效了。
+    uses_per_unit: !byRecipe.value && byCycle.value ? form.uses_per_unit : null,
+    use_cycle_num: !byRecipe.value && byCycle.value ? form.use_cycle_num : null,
+    use_cycle_unit: !byRecipe.value && byCycle.value ? form.use_cycle_unit : null,
+    use_times: !byRecipe.value && byCycle.value ? form.use_times : null,
     stocktake_cycle_days: form.stocktake_cycle_days,
     restock_threshold: form.restock_threshold,
     hours_per_unit: isTimeBased.value ? form.hours_per_unit : null,

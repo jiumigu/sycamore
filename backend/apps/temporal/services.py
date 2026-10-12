@@ -116,6 +116,96 @@ def build_time_fields(start_dt: datetime, end_dt: datetime | None = None) -> dic
     return fields
 
 
+# ── 重复判定（单一真源，v3.60.29） ─────────────────────────────────────────
+# 🔴 为什么不能用 `(task_name, start_time)` 精确相等判重：
+# `import_worklog` 规则 A 会**改写已有记录的 start_time**（08:05 → 08:00，附注留
+# 「原 08:05–18:00」）⇒ 那条记录的原始时刻在精确匹配下**"消失"**了 ⇒ 再导入一次 CSV
+# 或迁移旧库时被判为新记录、**静默插入一条重复**（2026-09-17 就是这么多出 9.92h 一条，
+# 推导见 TECH-NOTES §64）。实测「被改写过的日子」有 50 天，全是雷区。
+# ⚠️ 别退回精确匹配：它是**容错余量为零**的键 —— 只要有一个流程会改这个字段，
+#    它就会在某次导入时静默失效，而链路上没有任何一步会报错。
+DUP_OVERLAP_RATIO = 0.8      # 重叠时长 ÷ 较短一方时长 ≥ 此值 ⇒ 判为同一条
+DUP_SEARCH_WINDOW_DAYS = 1   # 在开始时刻前后各搜 1 天（容忍跨天的长记录）
+
+
+def _to_aware(dt: datetime | None) -> datetime | None:
+    """库里读出的 datetime 恒为 aware（`USE_TZ=True`），外部传入的可能是 naive ⇒ 统一。"""
+    if dt is None:
+        return None
+    return timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+
+
+def _span(start_dt, end_dt, duration_hours) -> tuple[datetime, datetime] | None:
+    """把「开始 + (结束时刻 | 时长)」归一成一个 `(起, 止)` 区间。
+
+    结束时刻缺失时用时长推算（ATracker 导出的「结束时间」列常为空，但「持续时间」必有）。
+    两侧都缺 ⇒ 退化成零宽区间（止 = 起），由 `_overlap_ratio` 的零宽分支处理。
+    """
+    start = _to_aware(start_dt)
+    if start is None:
+        return None
+    end = _to_aware(end_dt)
+    if end is None and duration_hours:
+        end = start + timedelta(hours=float(duration_hours))
+    if end is None or end < start:
+        end = start
+    return start, end
+
+
+def _overlap_ratio(a: tuple, b: tuple) -> float:
+    """重叠时长 ÷ **较短一方**时长。
+
+    🔴 用比值而不是「有重叠就算」：ATracker 允许同时做两件事，**相接分段也会重叠几秒**
+    （2026-01-10「日常家务」两段只重叠 30 秒 ⇒ 比值 2%，是合法记录）。
+    按「有重叠就算重复」会把它们吞掉，且**界面上看不出来少了什么**。
+    """
+    a_start, a_end = a
+    b_start, b_end = b
+    a_secs = (a_end - a_start).total_seconds()
+    b_secs = (b_end - b_start).total_seconds()
+    if a_secs <= 0 or b_secs <= 0:
+        # 零宽（只有开始时刻）：退化为「点是否落在对方区间内」
+        if a_secs <= 0:
+            return 1.0 if b_start <= a_start <= b_end else 0.0
+        return 1.0 if a_start <= b_start <= a_end else 0.0
+    overlap = (min(a_end, b_end) - max(a_start, b_start)).total_seconds()
+    return max(overlap, 0.0) / min(a_secs, b_secs)
+
+
+def find_duplicate_task(task_name: str, start_dt, end_dt=None, duration_hours=None):
+    """按「同任务名 + 时段重叠」找已有记录；找不到（或都没到阈值）返回 None。
+
+    调用方：`CSVImportService.import_from_csv`（前端 CSV 导入）与
+    `migrate_atracker` 命令（旧库 `o_atracker_tasks_list` 迁移）——**两处共用这一份实现**，
+    别再各写一份精确匹配（理由见上方 `DUP_OVERLAP_RATIO` 的注释）。
+
+    ⚠️ **`reconstruct_worktime` 有意不走这里**：它按 `import_batch` 隔离，
+    并且**故意允许**与已有 ATracker 记录并存（台账推定的加班时段本就可能与原始记录同期，
+    见 `test_overtime_recon.py` 的「当天两条并存」用例）。改走这里会破坏那个语义。
+    """
+    span = _span(start_dt, end_dt, duration_hours)
+    if not task_name or span is None:
+        return None
+    a_start, a_end = span
+    lo = a_start - timedelta(days=DUP_SEARCH_WINDOW_DAYS)
+    hi = a_start + timedelta(days=DUP_SEARCH_WINDOW_DAYS) + (a_end - a_start)
+
+    best, best_ratio = None, 0.0
+    for cand in TemporalTask.objects.filter(
+        task_name=task_name, start_time__gte=lo, start_time__lt=hi,
+    ):
+        c_start = cand.start_time
+        c_end = _to_aware(cand.end_time)
+        if c_end is None and cand.duration_hours:
+            c_end = c_start + timedelta(hours=float(cand.duration_hours))
+        if c_end is None or c_end < c_start:
+            c_end = c_start
+        ratio = _overlap_ratio(span, (c_start, c_end))
+        if ratio > best_ratio:
+            best, best_ratio = cand, ratio
+    return best if best_ratio >= DUP_OVERLAP_RATIO else None
+
+
 def _ensure_task_meta(task_names: list[str]) -> int:
     """为新出现的 task_name 建 TaskMeta；命中 TASK_TO_L2 则带活动类型+归因，否则进未归类桶。幂等。
 
@@ -254,7 +344,8 @@ class CSVImportService:
         # ── 覆盖模式写入（去重键 = task_name + start_time） ──
         # 注意：v0.3 起不再写入 category_level1/category_color（旧四大类字段停用），
         # 分类改走独立 managed 表 temporal_task_meta（由 migrate_temporal_categories 或下方自动建）。
-        stats = {'inserted': 0, 'updated': 0, 'skipped': 0,
+        # protected = 命中但「起止被工作日志校准过」⇒ 保留校准值、不用源数据覆盖的条数
+        stats = {'inserted': 0, 'updated': 0, 'skipped': 0, 'protected': 0,
                  'deduplicated': duplicated, 'total_parsed': len(rows)}
         for (name, start_dt), r in deduped.items():
             duration = float(r['duration'])
@@ -277,15 +368,23 @@ class CSVImportService:
             # 导入的时长以 ATracker 自带的为准（可能含计时器暂停），不用「结束−开始」覆盖。
             task_defaults.update(build_time_fields(start_dt))
 
-            # 去重键 = (task_name, start_time)。用「半开区间」比较而非 __date / __exact：
-            # 既避开 CONVERT_TZ 时区转换返回 NULL 的历史坑，也容忍秒级以下精度差。
-            existing = TemporalTask.objects.filter(
-                task_name=name,
-                start_time__gte=start_aware,
-                start_time__lt=start_aware + timedelta(seconds=1),
-            ).first()
+            # 判重 = 「同任务名 + 时段重叠」（单一真源 `find_duplicate_task`）。
+            # v3.60.29 之前这里是 (task_name, start_time) 的**秒级精确匹配**，会被
+            # `import_worklog` 规则 A 的「时段补全」（改写 start_time 08:05→08:00）打穿
+            # ⇒ 重复导入时静默多插一条。推导见 TECH-NOTES §64。
+            existing = find_duplicate_task(name, start_aware, end_aware, duration)
 
             if existing:
+                # 🔴 v3.60.29 保护：命中、但**开始时刻与源数据不同** ⇒ 库里这条的起止被别的
+                # 流程改写过（`import_worklog` 规则 A 的「时段补全」：08:05→08:00，附注留了
+                # 原时刻）。源数据带的是**改写之前**的旧值 ⇒ 不许用它覆盖回去，否则每次重导
+                # CSV 都会**静默撤销**那次日志校准（把 10h 打回 9.92h）。
+                # ⚠️ 旧判重命中不了这条（它直接 create 出一条重复）—— 「多一条」与
+                # 「改回旧值」两种错都错，但后者在界面上看不出来，所以单列一个计数键。
+                if (existing.start_time.replace(microsecond=0)
+                        != start_aware.replace(microsecond=0)):
+                    stats['protected'] += 1
+                    continue
                 # 时长 / 结束时刻 / 附注（CSV 有值时）全同 → 跳过，保证重复导入幂等
                 same_hours = abs(float(existing.duration_hours or 0) - duration) < 0.01
                 same_end = end_aware is None or existing.end_time == end_aware

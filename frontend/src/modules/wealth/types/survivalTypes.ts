@@ -103,6 +103,19 @@ export interface SurvivalItem {
   /** 计量口径：'cycle' 按次 / 'day' 按天 / null 两条都没填 */
   life_mode: string | null
   /**
+   * 时长是否来自**配方**（v3.60.25：判据 = 真的被某个配方引用了）。
+   *
+   * ⚠️ 为 true 时 `life_mode` 必然是 null —— 但那**不是「没填」**，
+   *    是「不在这件物品上填」：时长由配方里的「每餐用量」除以每日餐数得出。
+   *    界面据此显示「见配方」，而不是会让人以为「缺配置」的「未填」。
+   *
+   * ⚠️ 旧判据是「配餐类 + 不是零食」，把**整类**吃的东西都算作「口径在配方里」——
+   *    于是零食/调味/饮水既进不了配方（没有合适的餐位）又没有口径入口，两头堵死。
+   *    现在判据看**有没有真的编进配方**：编进去了才显示「见配方」，
+   *    没编进去就按物品自己的口径算，缺了就是真的缺，老实显示「未填」。
+   */
+  uses_recipe: boolean
+  /**
    * 折算后的「一份可用天数」。
    *
    * ⚠️ 界面显示「一份可用」必须用这个，**不是 `days_per_unit`** ——
@@ -297,7 +310,13 @@ export interface SurvivalCategoryResult extends SurvivalScored {
   aggregate_mode_effective: string
   usable_item_count: number
   item_count: number
-  /** 零食单独统计：它顶不了一顿饭，不混进主食时长 */
+  /**
+   * **配餐之外**的合计天数（v3.60.25）—— 没编进配方的吃类物品
+   * （零食 / 调味 / 饮水…）按各自口径折算后求和，不混进主食时长。
+   *
+   * ⚠️ 字段名仍是 `snack_days`（快照表里存着这一列，改名的代价大于收益）；
+   *    但它的**口径**是「配餐之外」，不是「零食」—— 界面文案跟口径走。
+   */
   snack_days: number | null
   /** 数字类：还能读多少小时 */
   hours_total: number | null
@@ -534,6 +553,16 @@ export interface SurvivalMeta {
   essential_levels: SurvivalOption[]
   /** 衣物可穿次数参考（v3.59.8）—— 仅录入锚点，算法不读它 */
   wear_reference: SurvivalWearReference[]
+  /**
+   * 库存流水的**渠道**选项（v3.60.26）—— 流水页签那个「渠道」下拉的来源。
+   *
+   * 🔴 它**必须**来自 meta，不能像原先那样「从已加载的流水里聚合」：
+   *    流水列表一加分页，`flows` 就只剩当前页 ⇒ 渠道选项会**随翻页而变**
+   *    （第 1 页有「手工登记」，翻到第 2 页它就不见了，用户想筛回去却找不到）。
+   *    而「枚举迟早与后端分叉」这个担心，正解本来就是**由后端下发** ——
+   *    与后端 `_clean_channel` 读的是同一个常量。
+   */
+  flow_channels: SurvivalOption[]
 }
 
 export interface SurvivalSeedResult {
@@ -568,6 +597,14 @@ export interface SurvivalUnitFormData {
 
 export interface SurvivalItemFormData {
   category_id: number
+  /**
+   * 仅**试算**用：后端据此判断这件物品是不是已由配方接管（是则拒绝单件试算）。
+   *
+   * ⚠️ 它不是模型字段，DRF 会忽略它（保存不受影响）。之所以要显式传：
+   *    只读的 `id` 在校验后被 DRF 丢掉，从 `validated_data` 里读永远是 None ——
+   *    那道护栏会静默失效，而界面上一点异常都看不出来。
+   */
+  item_id?: number
   name: string
   quantity: number
   unit_id?: number | null

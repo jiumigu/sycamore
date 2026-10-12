@@ -78,17 +78,28 @@ function staleness(days: number | null): number {
 }
 
 /**
- * 按「最久没盘」排序：从未盘过的在最前，其余越久越前。
+ * 按「离上次盘点有多远」排序。`direction` 默认 `'desc'`（最久没盘在前）。
  *
  * ⚠️ 返回的是**新数组**，不改原数组 —— 调用点常常直接拿
  *    `store.worksheet` 或 computed 的产物，原地 `sort()` 会把共享状态改掉。
  * ⚠️ 同一天的（含多件「从未盘点」）按 `item_id` 兜底排序：
  *    否则 `Array.sort` 在不同浏览器/不同次渲染里的顺序不稳定，
  *    用户会看到列表「自己跳」。
+ *
+ * `direction`（2026-10-10 加，默认值保持原行为）：
+ *    清单页的「上次盘点」表头可点 ⇒ 需要一个反方向。
+ *    🔴 反方向**必须从这里取**，不要在组件里再写一个比较器 ——
+ *       「`null`（从未盘点）当作正无穷」与「同天用 `item_id` 兜底」这两件事
+ *       在这里已经写对了一次；抄第二遍必漏其中一件，而漏了是**静默**的
+ *       （列表顺序看着仍然「有道理」）。
  */
-export function sortRowsByStaleness<T extends StocktakePickable>(rows: T[]): T[] {
+export function sortRowsByStaleness<T extends StocktakePickable>(
+  rows: T[],
+  direction: 'asc' | 'desc' = 'desc',
+): T[] {
+  const sign = direction === 'desc' ? 1 : -1
   return [...rows].sort((a, b) => {
-    const diff = staleness(b.days_since_stocktake) - staleness(a.days_since_stocktake)
+    const diff = sign * (staleness(b.days_since_stocktake) - staleness(a.days_since_stocktake))
     if (diff !== 0) return diff
     return a.item_id - b.item_id
   })
@@ -99,6 +110,9 @@ export function sortRowsByStaleness<T extends StocktakePickable>(rows: T[]): T[]
  *
  * ⚠️ 只挑传入的行 —— 调用点要先把**当前筛选结果**传进来。
  *    在用户看不见的行上悄悄勾选是说不清的（同原 `checkDue` 的注释）。
+ *    ⚠️ 清单页加分页后（v3.60.24），「筛选结果」与「当前页」**不再等价**：
+ *       调用方仍旧传全量结果，而把「哪几件在别的页」交给界面念出来
+ *       （`selectionHint`）—— 缩到当前页会让「一次挑 N 件去盘」做不到。
  */
 export function pickStalestIds<T extends StocktakePickable>(
   rows: T[],

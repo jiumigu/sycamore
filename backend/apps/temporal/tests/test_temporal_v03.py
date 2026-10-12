@@ -635,8 +635,10 @@ class TestCsvImportPerRecord:
     """v3.58.5：CSV 导入按 ATracker 原始记录逐条落库（不再按「任务名 + 日期」合并）
 
     旧口径把同一天同名任务压成一行、时长累加、end_time 取当天最晚 → 导致
-    「结束 − 开始 ≠ 时长」且 count 类指标偏小。新口径一条记录一行，
-    去重键 = (task_name, start_time)。
+    「结束 − 开始 ≠ 时长」且 count 类指标偏小。新口径一条记录一行。
+
+    判重（v3.60.29 起）= **同任务名 + 时段重叠**（单一真源 `services.find_duplicate_task`），
+    不再是 `(task_name, start_time)` 精确相等 —— 后者会被规则 A 改写 start_time 打穿。
     """
 
     URL = '/api/temporal/tasks/import_csv/'

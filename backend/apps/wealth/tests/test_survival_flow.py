@@ -317,11 +317,18 @@ class TestReverse:
 @pytest.mark.django_db
 class TestApi:
 
-    def test_list_returns_bare_array(self):
-        """⭐ 列表**返回数组**，不是 `{count, results}`
+    def test_list_returns_rows_and_total(self):
+        """⭐ 列表返回**显式的 `{rows, total}`**（v3.60.26 起，不再返回裸数组）
 
-        DRF 全局分页会把裸数组包成对象，前端按数组消费即「假 0」——
-        界面上什么都不显示，还没有报错。
+        🔴 这条用例**推翻的是它自己原来的版本**（原 `test_list_returns_bare_array`）——
+           不是为了「让它变绿」，而是因为要真分页就绕不开总数：
+           翻页必须知道一共多少笔，而纯数组给不出页码。
+
+        ⚠️ 它与「被 DRF 全局分页包成 `{count, results}`」是**两件事**，别因为长得像就回改：
+             那个是**意外**包装（`pagination_class` 漏关），前端按数组消费即「假 0」，
+             界面上什么都不显示、还没有报错；
+             这个是**有意**的结构，字段名刻意取 `rows` / `total`，就是为了
+             与 DRF 的形状一眼分开 —— 所以本用例**刻意不再断言 `isinstance(body, list)`**。
         """
         _, _, item = _setup()
         flw.record_flow(item.id, -1, reason='eat')
@@ -329,10 +336,11 @@ class TestApi:
         resp = _client().get(BASE)
         assert resp.status_code == 200
         body = resp.json()
-        assert isinstance(body, list)
-        assert len(body) == 1
-        assert body[0]['channel_label'] == '手工登记'
-        assert body[0]['reason_label'] == '吃掉'
+        assert set(body) == {'rows', 'total'}
+        assert body['total'] == 1
+        assert len(body['rows']) == 1
+        assert body['rows'][0]['channel_label'] == '手工登记'
+        assert body['rows'][0]['reason_label'] == '吃掉'
 
     def test_default_order_newest_first(self):
         """默认排序 = 新的在前（`-occurred_at, -id`）"""
@@ -450,8 +458,11 @@ class TestApi:
 
         resp = _client().get(BASE, {'item_id': a.id})
         body = resp.json()
-        assert len(body) == 1
-        assert body[0]['item_id'] == a.id
+        assert len(body['rows']) == 1
+        assert body['rows'][0]['item_id'] == a.id
+        # 🔴 `total` 也必须是**筛选之后**的数：给全表数会让页码比真实页数多，
+        #    用户翻到最后一页看到一张**空表**，读作「我的流水丢了」。
+        assert body['total'] == 1
 
 
 # ══════════════════════════════════════════════════════════════
@@ -549,3 +560,121 @@ class TestSummary:
         # 下发给界面的「到」是区间**最后一天**（半开区间的右端减一天，人才看得懂）
         assert flw.summarize_flows(month='2020-01')['date_to'] == '2020-01-31'
         assert flw.summarize_flows(month='2020-01')['date_from'] == '2020-01-01'
+
+
+# ══════════════════════════════════════════════════════════════
+# ⑥ 分页：offset + total（v3.60.26）
+# ══════════════════════════════════════════════════════════════
+#
+# 加分页的**唯一理由**：`limit` 默认只给 30 条，而流水是「改一次库存就多一笔」，
+# 所以第 31 笔之后的记录**从前端根本够不着** —— 而界面上写着「最近 N 条」，
+# 不说被截断了（静默截断，比没有更糟：用户以为那就是全部）。
+#
+# 🔴 两条必须同时成立，缺一条分页就是错的：
+#     ① `rows` 逐页拼接 == 全量（不重不漏）
+#     ② `total` 是**筛选之后**的笔数（给全表数会让页码比真实页数多）
+
+@pytest.mark.django_db
+class TestListPaging:
+
+    def _five_flows(self):
+        """一件物品 + 5 笔流水，发生时刻各不相同（保证降序稳定、可分页）"""
+        _, _, item = _setup(quantity=10)
+        now = timezone.now()
+        for i in range(5):
+            flw.record_flow(item.id, -1, occurred_at=now - timedelta(hours=i), reason='eat')
+        return item
+
+    def test_offset_pages_do_not_overlap_or_skip(self):
+        """⭐ 逐页取完、拼起来 == 全量，且**逐行相同**
+
+        这条比「看一眼第 2 页首行」硬得多：它同时验了排序、切片位置与页边界。
+        ⚠️ 两种反面症状都**不报错**：重叠会让某几笔出现两次，
+           漏会让某几笔**永远翻不到** —— 而它们确实在库里。
+        """
+        self._five_flows()
+        client = _client()
+        whole = client.get(BASE, {'limit': 100}).json()['rows']
+        assert len(whole) == 5
+
+        paged: list[dict] = []
+        for offset in (0, 2, 4):
+            body = client.get(BASE, {'limit': 2, 'offset': offset}).json()
+            assert body['total'] == 5          # 每一页报的总数都必须一样
+            paged.extend(body['rows'])
+
+        assert [r['id'] for r in paged] == [r['id'] for r in whole]
+
+    def test_total_counts_the_filtered_rows_not_the_whole_table(self):
+        """⭐ `total` 是**筛选之后**的笔数
+
+        给全表数 ⇒ 页码比真实页数多 ⇒ 用户翻到最后一页看到一张**空表**，
+        读作「我的流水丢了」。
+        """
+        _, _, a = _setup(name='大米', quantity=10)
+        _, _, b = _setup(name='面条', quantity=10)
+        for _ in range(3):
+            flw.record_flow(a.id, -1, reason='eat')
+        for _ in range(2):
+            flw.record_flow(b.id, -1, reason='eat')
+
+        client = _client()
+        assert client.get(BASE).json()['total'] == 5                    # 不筛 = 全部
+        assert client.get(BASE, {'item_id': a.id}).json()['total'] == 3
+        assert client.get(BASE, {'keyword': '面条'}).json()['total'] == 2
+
+    def test_offset_past_the_end_keeps_the_real_total(self):
+        """翻过头：`rows` 为空但 `total` 仍是真数 —— 前端据此把页码拉回范围内
+
+        ⚠️ 若这时 `total` 也跟着变 0，前端会以为「一笔都没有」，
+           而真相是「页码超了」—— 两者该采取的动作完全不同。
+        """
+        self._five_flows()
+        body = _client().get(BASE, {'limit': 2, 'offset': 99}).json()
+        assert body['rows'] == []
+        assert body['total'] == 5
+
+    def test_invalid_offset_falls_back_to_the_first_page(self):
+        """`offset` 是界面自己拼的参数：非法值回落成第 1 页，**不 400**
+
+        为翻页参数整页报错，会把「看流水」变成一片红 —— 而它只是个查看动作。
+        """
+        self._five_flows()
+        body = _client().get(BASE, {'limit': 2, 'offset': 'abc'}).json()
+        assert body['total'] == 5
+        assert len(body['rows']) == 2
+
+    def test_limit_is_clamped_to_at_least_one(self):
+        """`limit=0` / 负数**不返回空数组** —— 否则界面会静默变成一张空表"""
+        self._five_flows()
+        for bad in ('0', '-3'):
+            body = _client().get(BASE, {'limit': bad}).json()
+            assert len(body['rows']) == 1
+
+    def test_limit_above_the_cap_does_not_error(self):
+        """`limit` 超过上限只被夹住，不报错（前端选「100 条/页」用不着 500 全量）"""
+        self._five_flows()
+        body = _client().get(BASE, {'limit': 99999}).json()
+        assert len(body['rows']) == 5
+        assert body['total'] == 5
+
+    def test_meta_exposes_flow_channels_via_api(self):
+        """⭐ 流水渠道的选项来自 `/survival/meta/`，**不再从「当前页的数据」聚合**
+
+        🔴 为什么必须**走接口**断言：声明式 Serializer 只输出显式声明的字段 ——
+           服务层 `get_meta()` 加了键、`SurvivalMetaSerializer` 漏声明，
+           前端拿到的就是 `undefined`（**静默，不报错**）。
+           只断言服务层返回值会**放过**这个坑（同 §56 那条）。
+        ⚠️ 而它一旦缺失，流水页签的渠道下拉就会**随翻页而变**：
+           第 1 页有「手工登记」，翻到第 2 页它就不见了 —— 用户想筛回去却找不到那个选项。
+        """
+        _setup()
+        resp = _client().get('/api/wealth/survival/meta/')
+        assert resp.status_code == 200
+        body = resp.json()
+        options = body['flow_channels']
+        values = [opt['value'] for opt in options]
+        assert values == [
+            'manual', 'stocktake', 'shelter', 'edit', 'create', 'import',
+        ]
+        assert all(opt['label'] for opt in options)

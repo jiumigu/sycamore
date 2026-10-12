@@ -23,6 +23,14 @@
           <el-icon><Setting /></el-icon>
           口径配置
         </el-button>
+        <el-button @click="gotoLiability">
+          <el-icon><CreditCard /></el-icon>
+          负债明细台账
+        </el-button>
+        <el-button @click="gotoReceivable">
+          <el-icon><Wallet /></el-icon>
+          应收借出台账
+        </el-button>
         <el-button @click="handleRefresh">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -61,15 +69,21 @@
       <AssetSnapshotPanel ref="snapshotPanelRef" />
     </el-card>
 
-    <!-- 负债明细台账（逐笔） -->
-    <el-card shadow="never" class="section-card">
-      <LiabilityPanel />
-    </el-card>
+    <!--
+      负债明细台账 / 应收借出台账 —— v3.60.20 拆出为独立页
 
-    <!-- 应收借出台账（逐笔 · 账龄） -->
-    <el-card shadow="never" class="section-card">
-      <ReceivablePanel />
-    </el-card>
+      这两块原先直挂本页主区：10~11 列的逐笔宽表压在中段，把页面推得很长，
+      而「逐笔登记」本身是**偶发动作**，不是每次盘点都要做的事。
+      现收进页头右侧两个按钮 →
+        /wealth/cashflow/liability  （负债明细台账）
+        /wealth/cashflow/receivable （应收借出台账）
+
+      ⚠️ 拆走后本页**不再需要 `debtStore`**，取数已一并撤掉 —— 别补回来。
+         两块台账的数据只服务于它们自己的页面；六项比率走 `/ratio/`，
+         由后端直接读库，**不消费**前端 debtStore。
+         （§45.2 同源判据的另一面：不该取的就不取，
+           别让「顺手拉一下」成为两处口径的温床。）
+    -->
 
     <!-- 财务规划比率（六项；判定区间由后端下发） -->
     <el-card shadow="never" class="section-card">
@@ -128,17 +142,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Refresh, Calendar, DataAnalysis, Setting } from '@element-plus/icons-vue'
+import { Plus, Refresh, Calendar, DataAnalysis, Setting, CreditCard, Wallet } from '@element-plus/icons-vue'
 import { useCashflowStore } from '../stores/cashflowStore'
-import { useDebtStore } from '../stores/debtStore'
 import { useAssetStore } from '../stores/assetStore'
 import { useClassifyStore } from '../stores/classifyStore'
 import { useRatioStore } from '../stores/ratioStore'
 import AssetOverview from '../components/cashflow/AssetOverview.vue'
 import AssetTrend from '../components/cashflow/AssetTrend.vue'
 import HealthMetrics from '../components/cashflow/HealthMetrics.vue'
-import LiabilityPanel from '../components/debt/LiabilityPanel.vue'
-import ReceivablePanel from '../components/debt/ReceivablePanel.vue'
 import AccountPanel from '../components/asset/AccountPanel.vue'
 import AssetSnapshotPanel from '../components/asset/AssetSnapshotPanel.vue'
 import ClassifyRulePanel from '../components/classify/ClassifyRulePanel.vue'
@@ -146,7 +157,6 @@ import RatioPanel from '../components/ratio/RatioPanel.vue'
 
 const router = useRouter()
 const store = useCashflowStore()
-const debtStore = useDebtStore()
 const assetStore = useAssetStore()
 const classifyStore = useClassifyStore()
 const ratioStore = useRatioStore()
@@ -201,16 +211,30 @@ function switchToMonthly() {
 function switchToReview() {
   router.push('/wealth/review')
 }
+
+/**
+ * 两个台账独立页（v3.60.20）。
+ *
+ * 路由挂在 `/wealth/cashflow/` 之下而非 `/wealth/`：侧边栏高亮用
+ * `path.startsWith('/wealth')`，两者都能亮「财务管理」，但挂父路径之下
+ * 才表达得出「这是资产盘点的下一层」（§45.1）。
+ */
+function gotoLiability() {
+  router.push('/wealth/cashflow/liability')
+}
+function gotoReceivable() {
+  router.push('/wealth/cashflow/receivable')
+}
 function handleRefresh() {
   store.fetchOverview()
   store.fetchTrend(trendMonths.value)
-  debtStore.fetchAll()
   assetStore.fetchAll()
   classifyStore.fetchAll()
   // 快照列表归面板自己管，刷新时也要一起重拉
   snapshotPanelRef.value?.refresh()
-  // 比率体系依赖资产快照 + 分类规则 + 负债台账 —— 三者任一变了数就变，
-  // 故刷新时一起重拉
+  // 比率体系依赖资产快照 + 分类规则 + 负债台账 —— 三者任一变了数就变。
+  // ⚠️ 负债台账那份数据由独立页写，本页**不持有** debtStore；
+  //    但它的写入仍会影响比率，故这里照样让比率重算（后端直读库）。
   ratioStore.clearOpeningPosition()
   ratioStore.fetchAll()
 }
@@ -223,8 +247,6 @@ function handleTrendMonthsChange(val: number) {
 onMounted(() => {
   store.fetchOverview()
   store.fetchTrend(12)
-  // 负债 / 应收台账与资产快照各自独立取数：改一笔台账不应触发全页重拉
-  debtStore.fetchAll()
   // 资产科目与按科目的快照（全页唯一的资产录入体系）同样独立
   assetStore.fetchAll()
   // 账单项分类规则与归类结果 —— 改一条规则会让往期数字重算，故自带取数

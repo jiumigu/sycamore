@@ -13,7 +13,7 @@
  *    那由调用方（视图）显式做，不在 store 之间互相调用。
  */
 
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as survivalApi from '../api/survivalApi'
 import { apiErrorText } from '@/shared/utils/apiError'
@@ -34,6 +34,8 @@ export interface FlowFilters {
   date_to?: string
   keyword?: string
   limit?: number
+  /** 从第几条开始 —— 与 `limit` 一起构成真分页（v3.60.26） */
+  offset?: number
 }
 
 /** 去掉空值：`?channel=` 这种空串会被后端当成一个**未知渠道**而 400 */
@@ -59,6 +61,15 @@ export const useSurvivalFlowStore = defineStore('survivalFlow', () => {
   // ─── 状态 ───
 
   const flows = ref<SurvivalFlow[]>([])
+  /**
+   * 当前筛选下的**总笔数**（后端给，v3.60.26）。
+   *
+   * 🔴 它**不是** `flows.length`：`flows` 只是这一页。
+   *    拿 `flows.length` 当总数，页码就会永远只有 1 页 ——
+   *    而分页栏照常渲染，看起来完全正常。
+   * ⚠️ 它**不是**「全表笔数」，是**筛选之后**的笔数（否则最后一页会是空的）。
+   */
+  const total = ref(0)
   const summary = ref<SurvivalFlowSummary | null>(null)
   const loading = ref(false)
   const saving = ref(false)
@@ -103,6 +114,18 @@ export const useSurvivalFlowStore = defineStore('survivalFlow', () => {
   // ─── 读 ───
 
   /**
+   * 取数请求的序号（v3.60.26）—— 只有**最后发出**的那一次有权写状态。
+   *
+   * 🔴 为什么必须有：翻页是**连点**的（点 3、再点 4），两次请求同时在飞，
+   *    而它们回来的顺序**不保证**。旧的那次晚到就会把新的结果盖掉 ——
+   *    表格里是第 3 页的数据、分页栏却高亮在第 4 页，**没有任何一处会报错**
+   *    （同项目最贵的一类错：错得看起来很正常）。
+   * ⚠️ 顺带把「改每页条数时 `el-pagination` 会触发两次回调」
+   *    变成无害：重复请求带的是**同样的参数**，序号守卫只让最后一次写状态。
+   */
+  let fetchSeq = 0
+
+  /**
    * 取列表。
    *
    * ⚠️ **吞掉异常、改记 `listError`**（不再往外抛）：调用方（页签挂载 / 刷新信号）
@@ -110,22 +133,43 @@ export const useSurvivalFlowStore = defineStore('survivalFlow', () => {
    *    往外抛的后果是无人接的 rejection（实测在控制台刷了全局错误）。
    */
   async function fetchFlows(filters: FlowFilters = {}) {
+    const seq = ++fetchSeq
     loading.value = true
     listError.value = ''
     try {
       const resp = await survivalApi.getSurvivalFlows(cleanFilters(filters))
-      // 后端返回裸数组；万一被包成 `{count, results}`，兜底取 results，
-      // 而不是把对象当数组用 —— 后者会静默渲染不出任何一行（项目硬坑②）
-      const rows = (resp.data as SurvivalFlow[]) ?? []
-      flows.value = Array.isArray(rows) ? rows : []
+      // 🔴 过期响应**直接丢掉**：它比正在飞的那次旧，写进去就是
+      //    「表格是上一页的数据、分页栏是这一页的页码」。
+      if (seq !== fetchSeq) return
+      // 🔴 形状是**显式的 `{rows, total}`**（后端 v3.60.26 起刻意改成这样，
+      //    字段名与 DRF 的 `{count, results}` 分开，就是为了不被当成「被包了一层」）。
+      //
+      // ⚠️ 旧代码的兜底是「不是数组就当空数组」—— 那是为「被 DRF 包了」写的防线。
+      //    形状一换，同一条兜底会**反过来**把「形状对不上」静默说成「没有流水」：
+      //    用户看到一张空表，还以为自己的账本空了。
+      //    ⇒ 兜底的方向必须是**说出来**，不是**当成空**（同「取不到 ≠ 没有」）。
+      const payload = resp.data as { rows?: unknown; total?: unknown } | null
+      if (!payload || !Array.isArray(payload.rows)) {
+        flows.value = []
+        total.value = 0
+        loaded.value = false
+        listError.value = '流水列表的返回格式不对（预期 {rows, total}）—— 前后端版本可能不一致'
+        return
+      }
+      flows.value = payload.rows as SurvivalFlow[]
+      total.value = typeof payload.total === 'number' ? payload.total : 0
       loaded.value = true
     } catch (err: unknown) {
+      if (seq !== fetchSeq) return
       // 🔴 失败时**不许**把 loaded 置真：置真等于宣布「取到了，就是空的」
       flows.value = []
+      total.value = 0
       loaded.value = false
       listError.value = apiErrorText(err, '取不到流水')
     } finally {
-      loading.value = false
+      // ⚠️ 只有最后一次请求有权关掉 loading：旧响应回来就关的话，
+      //    新的那次还在飞 —— 用户以为加载完了，看到的却是上一页。
+      if (seq === fetchSeq) loading.value = false
     }
   }
 
@@ -187,6 +231,7 @@ export const useSurvivalFlowStore = defineStore('survivalFlow', () => {
 
   function resetState() {
     flows.value = []
+    total.value = 0
     summary.value = null
     loaded.value = false
     loading.value = false
@@ -197,8 +242,16 @@ export const useSurvivalFlowStore = defineStore('survivalFlow', () => {
   }
 
   return {
-    flows, summary, loading, saving, loaded, refreshToken,
+    flows, total, summary, loading, saving, loaded, refreshToken,
     listError, summaryLoaded, summaryError,
     fetchFlows, fetchSummary, record, recordBatch, reverse, bumpRefresh, resetState,
   }
 })
+
+// 开发期热更新：Vite 只重建 `.vue`，**Pinia 的 store 实例不会重建** ——
+// 改本文件之后，页面上跑的还是旧定义（模板是新的、数据逻辑是旧的，
+// 看起来像「功能没做」。2026-10-10 实例：流水列表「共 笔」是空的 + 空态误报）。
+// ⚠️ 生产构建里 `import.meta.hot` 是 undefined ⇒ 整段被 tree-shake，对线上零影响。
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useSurvivalFlowStore, import.meta.hot))
+}

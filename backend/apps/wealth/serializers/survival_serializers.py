@@ -98,6 +98,13 @@ class SurvivalItemSerializer(serializers.Serializer):
     # ⚠️ 界面显示「一份可用」时必须用 effective 这个值 —— 直接显示 days_per_unit
     #    会让按次计量的物品看起来什么都没填。
     life_mode = serializers.CharField(allow_null=True)
+    # 时长是否来自**配方**（配餐类的果腹/调味/饮水，v3.60.22）——
+    # 界面据此把「计量口径」显示成「见配方」而不是误导性的「未填」。
+    # ⚠️ 它是**独立字段**，不是 `life_mode` 的第四种取值：`life_mode` 说的是
+    #    「填了哪种口径」，本字段说的是「口径在不在物品上」，两个维度不同。
+    # ⚠️ 声明式 Serializer 只输出显式声明的字段 —— 服务层算了但这里漏声明，
+    #    前端拿到的就是 `undefined`（静默，不报错）。
+    uses_recipe = serializers.BooleanField()
     days_per_unit_effective = serializers.FloatField(allow_null=True)
     # 盘点相关
     stocktake_cycle_days = serializers.IntegerField(allow_null=True)
@@ -650,6 +657,11 @@ class SurvivalMetaSerializer(serializers.Serializer):
     essential_levels = SurvivalOptionSerializer(many=True)
     # 衣物可穿次数参考（v3.59.8）—— 录入锚点，算法一个字段都不读它
     wear_reference = SurvivalWearReferenceSerializer(many=True)
+    # 库存流水的渠道（v3.60.26）—— 流水页签「渠道」下拉的选项
+    # ⚠️ 声明式 Serializer **只输出显式声明的字段**：服务层算了但这里漏声明，
+    #    前端拿到的就是 `undefined`（静默，不报错）⇒ 服务层新增键必须在这里跟上，
+    #    并配一条**走接口**的用例（只断言服务层返回值会放过这个坑）。
+    flow_channels = SurvivalOptionSerializer(many=True)
 
 
 class SurvivalSeedResultSerializer(serializers.Serializer):
