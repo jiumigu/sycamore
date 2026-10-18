@@ -47,6 +47,22 @@ export function bulkDeleteBooks(bids: number[]) {
   })
 }
 
+/** 批量改「阅读状态」/「阅读深度」。
+ *
+ *  `payload` 两个字段至少给一个；`status` 不接受「弃读」（后端 400）。
+ *  返回里的 `requested` 是**传进去的编号个数**、`updated` 是**实际改动的行数** ——
+ *  选中的书可能已被别处删掉，两个数要分开看，别把命中数当请求数。 */
+export function bulkUpdateBooks(
+  bids: number[],
+  payload: { status?: string; reading_depth?: number },
+) {
+  return request<{ updated: number; requested: number }>({
+    url: '/books/bulk_update/',
+    method: 'post',
+    data: { bids, ...payload },
+  })
+}
+
 export function getBookStats(params?: { year?: string }) {
   return request<BookStats>({
     url: '/books/stats/',

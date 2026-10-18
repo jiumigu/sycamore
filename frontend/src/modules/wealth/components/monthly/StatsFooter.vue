@@ -58,8 +58,8 @@ defineProps<{
 
 const collapsed = ref(false)
 
+/** 金额格式化 —— 取不到由 formatAmount 统一给「—」，本处不再兜 0 */
 function fmt(val: number | undefined): string {
-  if (val === undefined || val === null) return '0.00'
   return formatAmount(val)
 }
 </script>

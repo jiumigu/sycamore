@@ -93,10 +93,13 @@ class WeeklyTimeCache(models.Model):
     total_hours = models.FloatField(default=0, verbose_name='本周总小时')
     task_count = models.IntegerField(default=0, verbose_name='任务数')
     avg_hours_per_day = models.FloatField(default=0, verbose_name='日均小时')
-    updated_at = models.DateTimeField(auto_now=True)
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
         db_table = 'temporal_weekly_time_cache'
+        db_table_comment = '周度时间缓存：把周工时算完就固化，避免每次都重扫原始表'
+        verbose_name = '周度时间固化统计'
+        verbose_name_plural = '周度时间固化统计'
         unique_together = ['year', 'week']
         ordering = ['year', 'week']
         indexes = [
@@ -121,6 +124,7 @@ class ActivityGroup(models.Model):
 
     class Meta:
         db_table = 'temporal_activity_group'
+        db_table_comment = '[已弃用 v3.57.0] 旧的自建聚合分组层：代码侧不再读写，表保留不删'
         verbose_name = '时间分组'
         verbose_name_plural = '时间分组'
         ordering = ['sort_order', 'id']
@@ -152,6 +156,7 @@ class TaskMeta(models.Model):
 
     class Meta:
         db_table = 'temporal_task_meta'
+        db_table_comment = '活动类型映射：任务名 → 活动类型 / 归因；库里那行才是真源，代码常量只是种子'
         verbose_name = '活动类型映射'
         verbose_name_plural = '活动类型映射'
         # 显式写 name=：不再受 Django 自动命名规则变化影响（6.0 曾去掉升序 `+` 前缀位）。

@@ -257,7 +257,9 @@ const filter = reactive<{ search: string; activityType: string; attribution: str
 
 const EMPTY_SUMMARY: MetaLedgerSummary = {
   total: 0, classified: 0, unclassified: 0, total_hours: 0, unclassified_hours: 0,
-  by_attribution: { 成长: 0, 关系: 0, 维持: 0, 谋生: 0, 流失: 0 },
+  // 键集**从单一真源派生**，不再手写 —— 曾硬编码五个词，加「体验」时会静默漏一格
+  // （渲染时靠 `|| 0` 兜底，看不出来）。v3.60.36 改为派生。
+  by_attribution: Object.fromEntries(ATTRIBUTION_OPTIONS.map((a) => [a, 0] as [string, number])),
 }
 const summary = ref<MetaLedgerSummary>({ ...EMPTY_SUMMARY })
 

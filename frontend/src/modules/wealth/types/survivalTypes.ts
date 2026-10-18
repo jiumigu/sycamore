@@ -83,8 +83,6 @@ export interface SurvivalItem {
   grade_label: string
   status: string
   status_label: string
-  priority: string
-  priority_label: string
   /** 一件（一份）还能撑多少天；配餐类不填，由配方决定 */
   days_per_unit: number | null
   // ── 按次计量（v3.59.3）：四个「原话」字段 ──
@@ -126,14 +124,24 @@ export interface SurvivalItem {
   stocktake_cycle_days: number | null
   /** 补货提醒阈值，与数量同一单位 */
   restock_threshold: number | null
-  /** 数字类专用：一册需要读多少小时 */
-  hours_per_unit: number | null
+  // （`hours_per_unit`「一册需要读多少小时」随「数字」类别退役 —— v3.62.13）
   expire_date: string | null
   purchase_date: string | null
   purchase_cost: number | null
   notes: string
   tags: string[]
   recipe_line_count: number
+  /**
+   * 好恶物档案馆回流的评价（v3.60.32）—— **只读**。
+   *
+   * 🔴 真源唯一在 `treasure`，本模块不加「是不是好东西」字段、也不缓存。
+   *    `null` = 还没评过 ⇒ 界面什么都不显示（不是灰色的「无」）。
+   */
+  treasure_badge: string | null
+  /** 已有评价时那条档案的 id —— 点徽标去**同一条**补理由，不是再建一条 */
+  treasure_record_id: number | null
+  /** 快记浮层的类别预填建议（后端按物品类别猜的）—— 前端不自己映射 */
+  treasure_suggest_category: string
 }
 
 export interface SurvivalRecipeLine {
@@ -277,7 +285,6 @@ export interface SurvivalItemLife extends SurvivalScored {
   days_per_unit_effective: number | null
   /** 后端算好的使用间隔（天），用来把「每 3 天用 1 次」这句话说全 */
   interval_days: number | null
-  hours_per_unit: number | null
   satiety: string
   grade: string
   status: string
@@ -285,7 +292,6 @@ export interface SurvivalItemLife extends SurvivalScored {
   restock_threshold: number | null
   expire_date: string | null
   expire_cap_days: number | null
-  hours_total: number | null
   issues: SurvivalIssue[]
 }
 
@@ -318,8 +324,6 @@ export interface SurvivalCategoryResult extends SurvivalScored {
    *    但它的**口径**是「配餐之外」，不是「零食」—— 界面文案跟口径走。
    */
   snack_days: number | null
-  /** 数字类：还能读多少小时 */
-  hours_total: number | null
   trustworthy: boolean
   items: SurvivalItemLife[]
   recipes: SurvivalRecipeResult[]
@@ -533,7 +537,6 @@ export interface SurvivalMeta {
   satiety_counted: string[]
   grades: SurvivalOption[]
   statuses: SurvivalOption[]
-  priorities: SurvivalOption[]
   roles: SurvivalOption[]
   /** 按次计量的周期单位（天 / 周 / 月），与后端 constants 同一份 */
   use_cycle_units: SurvivalOption[]
@@ -611,7 +614,6 @@ export interface SurvivalItemFormData {
   satiety?: string
   grade?: string
   status?: string
-  priority?: string
   days_per_unit?: number | null
   // 按次计量：两条口径**二选一**，由界面保证不同时提交。
   // 后端判据是「填了 uses_per_unit 就按次算」，所以按天那条必须显式提交 null。
@@ -623,7 +625,6 @@ export interface SurvivalItemFormData {
   use_times?: number | null
   stocktake_cycle_days?: number | null
   restock_threshold?: number | null
-  hours_per_unit?: number | null
   expire_date?: string | null
   purchase_date?: string | null
   purchase_cost?: number | null
@@ -720,7 +721,6 @@ export interface SurvivalSnapshotCategory {
   usable_item_count: number
   item_count: number
   snack_days: number | null
-  hours_total: number | null
   issue_count: number
   trustworthy: boolean
 }

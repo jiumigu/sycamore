@@ -682,7 +682,6 @@ def compute_item_life(item, today: date) -> dict:
         'life_mode': life['mode'],
         'days_per_unit_effective': _round(life['days_per_unit'], 2),
         'interval_days': _round(life['interval_days'], 2),
-        'hours_per_unit': _f(item.hours_per_unit),
         'satiety': item.satiety,
         'grade': item.grade,
         'status': item.status,
@@ -693,7 +692,6 @@ def compute_item_life(item, today: date) -> dict:
         'days': {s: None for s in SURVIVAL_SCENARIOS},
         'expected': None,
         'spread': None,
-        'hours_total': None,
         'issues': [],
     }
 
@@ -704,10 +702,6 @@ def compute_item_life(item, today: date) -> dict:
     if life['error'] is not None:
         row['issues'].append(_issue(life['error'], item=item.name))
         return row
-
-    # 「还能读多少小时」不随消耗速率变化 —— 它是库存属性，不是节奏属性
-    if item.hours_per_unit is not None:
-        row['hours_total'] = _round(qty * _f(item.hours_per_unit))
 
     # ⚠️ 不写 `qty or 0`：数量缺失是数据异常，让它显式 TypeError（500）
     #    比静默算成「0 天」好 —— 后者会被读成「这件东西已经没了」。
@@ -778,7 +772,6 @@ def compute_category(
         'items': [],
         'recipes': [],
         'snack_days': None,
-        'hours_total': None,
         'issues': [],
         'trustworthy': True,
     }
@@ -888,12 +881,6 @@ def compute_category(
         rows = [row for row in item_rows if row['days']['likely'] is not None]
         result['trustworthy'] = not any(row['issues'] for row in item_rows)
         result['days'] = _aggregate_scenarios(rows, aggregate_mode)
-        # 时间消耗类额外给一个「还能读多少小时」的合计（sum/min 同口径）
-        hours = [row['hours_total'] for row in rows if row['hours_total'] is not None]
-        if hours:
-            result['hours_total'] = _round(
-                min(hours) if aggregate_mode == 'min' else sum(hours),
-            )
 
     result.update(pert_triple(result['days']))
     return result
@@ -1117,7 +1104,7 @@ def essential_sort_key(row: dict) -> tuple:
 
 
 def find_bottleneck(category_results: list[dict]) -> tuple[str | None, float | None]:
-    """综合 = 跨类别取最小（吃/穿/用/数字并列，短板决定）
+    """综合 = 跨类别取最小（吃/穿/用/医药并列，短板决定）
 
     返回 (短板类别名, 该类别期望天数)。
     """

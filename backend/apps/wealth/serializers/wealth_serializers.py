@@ -348,12 +348,21 @@ class BalanceInfoSerializer(serializers.ModelSerializer):
 class AccountSummarySerializer(serializers.Serializer):
     """资产汇总
 
-    口径（v3.58.19 纠偏）：
-        total / financial_assets = 活期账户 + 公积金
-        total_assets             = financial_assets + 应收借出
-        net_worth                = total_assets − 负债（与 realnum 同值，realnum 为兼容保留）
+    口径（v3.58.19 纠偏，v3.62.28 补四桶拆解）：
+        financial_assets = 流动资金 + 非流动资金 + 公积金 + 应收借出（均不含自用）
+        total_assets     = financial_assets + 自用资产
+        net_worth        = total_assets − 负债（与 realnum 同值，realnum 为兼容保留）
+
+    🔴 这里声明过什么，接口才下发什么 —— DRF 的 `Serializer` 只输出已声明的键，
+       service 多算的键会被**静默丢弃**。v3.62.28 在 `_build_overview` 里加了
+       `summary['non_liquid']` 却漏了这一行，界面整整一版都显示 `¥0.00`，
+       而其余数字全对 ⇒ 看起来像「本来就没有非流动资金」。
+       ⇒ 改 service 的 summary 时必须同步改这里，并**走一次真接口**验证
+         （只调 service 函数或喂假 JSON 都发现不了）。
     """
     flow_total = serializers.FloatField()
+    # 非流动资金：计入资产但 T+0 取不出来的余额（三张储蓄卡 206,752.88）
+    non_liquid = serializers.FloatField()
     total = serializers.FloatField()
     financial_assets = serializers.FloatField()
     total_assets = serializers.FloatField()
@@ -812,6 +821,22 @@ class AssetAccountFormSerializer(serializers.ModelSerializer):
     （因为要允许多行 NULL），DRF 因此不会自动生成唯一性校验 ——
     必须手写 validate_code，否则重复的 code 会以 IntegrityError(500) 而不是
     400 的形式炸出来。
+
+    🔴 **每个字段都要给中文 error_messages**（v3.62.18 补）。
+    背景：`settings.py` 没设 `LANGUAGE_CODE`，走 Django 默认 `en-us`，
+    于是 DRF 回的是 `Ensure this field has no more than 20 characters.` ——
+    中文界面里冒一句英文，用户看不懂是哪个字段、更不知道怎么办。
+    2026-10-16 的现场：映射码写满 21 个字符（`accumulationfund_ning`），
+    前端提示「保存失败」，用户只能来问「为什么失败」。
+
+    ⚠️ 消息里**自带字段中文名**，因为前端提示条只显示一句话
+    （`shared/utils/apiError.ts` 取错误体的第一句），不会渲染
+    `{"code": [...]}` 的 key —— 不写「映射码」三个字，用户就不知道指谁。
+
+    ⚠️ **不要顺手把 code 的 max_length 调大**：模型改了而迁移没跑，
+    DRF 会放行超长值，MySQL 严格模式下改报 1406（Data too long）⇒ 500。
+    这个字段是「旧表列名」，本就短标识；只是给账户做标记的话留空即可
+    （区分账户靠「科目名 + 机构」）。
     """
 
     class Meta:
@@ -822,10 +847,34 @@ class AssetAccountFormSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id']
         extra_kwargs = {
-            'name': {'required': True, 'allow_blank': False},
-            'code': {'required': False, 'allow_null': True, 'allow_blank': True},
-            'institution': {'required': False, 'allow_null': True, 'allow_blank': True},
-            'note': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'name': {
+                'required': True, 'allow_blank': False,
+                'error_messages': {
+                    'required': '请填写科目名',
+                    'blank': '请填写科目名',
+                    'max_length': '科目名最长 50 个字符',
+                },
+            },
+            'code': {
+                'required': False, 'allow_null': True, 'allow_blank': True,
+                'error_messages': {
+                    'max_length': (
+                        '映射码最长 20 个字符 —— 它只记录对应旧表的哪一列，'
+                        '手工新增的科目留空即可'
+                    ),
+                },
+            },
+            'institution': {
+                'required': False, 'allow_null': True, 'allow_blank': True,
+                'error_messages': {'max_length': '机构最长 50 个字符'},
+            },
+            'note': {
+                'required': False, 'allow_null': True, 'allow_blank': True,
+                'error_messages': {'max_length': '备注最长 200 个字符'},
+            },
+            'account_kind': {
+                'error_messages': {'max_length': '账户形态最长 20 个字符'},
+            },
         }
 
     def validate_category(self, value):

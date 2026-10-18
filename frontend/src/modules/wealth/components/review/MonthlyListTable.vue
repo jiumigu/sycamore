@@ -1,7 +1,35 @@
 <template>
   <div class="monthly-list">
     <div class="monthly-list__header">
-      <h3>历史复盘列表</h3>
+      <h3>
+        历史复盘列表
+        <!--
+          🔴 这条「只登记收支流」的说明原先是列表上方一整条 el-alert（≈70px 竖向）。
+              按 §79 的分流判据：它是**读一次就够的说明**（不是每次进页面要确认的状态），
+              所以收进悬停气泡；而「刷新」这类**出口**留在线下。
+          ⚠️ 锚点必须自带「我能悬停」的样子（问号 / ⓘ 图标 + cursor:help），
+              否则等于把信息删了。
+        -->
+        <el-popover
+          placement="bottom-start"
+          :width="430"
+          trigger="hover"
+          :show-after="150"
+        >
+          <template #reference>
+            <span class="list-help" @click.stop>
+              <el-icon><InfoFilled /></el-icon>
+            </span>
+          </template>
+          <div class="lh-tip">
+            <div class="lh-tip__title">本表只登记「收支流」</div>
+            <div class="lh-tip__body">
+              余额类字段（存款余额 / 公积金 / 借出 / 负债 / 真正在手里的）自 2026-06 起不在此登记，
+              已统一到「资产盘点」——按科目盘一次，这里的「存款余额」就会自动引用那一期。
+            </div>
+          </div>
+        </el-popover>
+      </h3>
       <div class="monthly-list__actions">
         <el-button size="small" @click="$emit('refresh')" :loading="loading">刷新</el-button>
       </div>
@@ -68,7 +96,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { QuestionFilled } from '@element-plus/icons-vue'
+import { QuestionFilled, InfoFilled } from '@element-plus/icons-vue'
 import { formatAmount, formatSignedAmount } from '@/shared/utils/format'
 import type { MonthlyListItem } from '../../types/wealthTypes'
 
@@ -117,6 +145,15 @@ function handleRowClick(row: MonthlyListItem) {
 .monthly-list__empty { padding: 24px; text-align: center; color: var(--el-text-color-placeholder); font-size: 13px; }
 .money-value { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
 .col-help { margin-left: 2px; vertical-align: -2px; color: var(--el-text-color-placeholder); cursor: help; }
+/* 标题旁的气泡锚点：图标 + cursor:help（§79.3 锚点三件套里的两件，标题本身是 <h3> 不需要虚下划线） */
+.list-help {
+  display: inline-flex; align-items: center; vertical-align: -2px;
+  margin-left: 4px; color: var(--el-text-color-placeholder); cursor: help;
+}
+.list-help:hover { color: var(--el-color-primary); }
+/* 气泡内容：插槽在本组件模板里编译 ⇒ 带 scope id，scoped 样式照常命中（§79.4，已实测） */
+.lh-tip { font-size: 12px; line-height: 1.75; color: var(--el-text-color-regular); }
+.lh-tip__title { margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); }
 .src-tag { margin-left: 6px; transform: scale(.85); }
 .text-income { color: #52c41a; }
 .text-expense { color: #f5222d; }

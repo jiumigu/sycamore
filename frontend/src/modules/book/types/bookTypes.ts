@@ -63,6 +63,14 @@ export const STATUS_OPTIONS = [
   '计划阅读', '在读', '精读', '通读', '消遣', '弃读', '已完成', '待重读',
 ]
 
+/** 批量工具条里能选的状态 = 全部状态 − 「弃读」。
+ *
+ *  🔴 弃读在后端是**逐本必填原因**的（`BookCreateUpdateSerializer.validate`），
+ *  批量给一个统一原因会把「为什么弃」写成假话 ⇒ 那条路只走单本编辑。
+ *  后端 `BookBulkUpdateSerializer` 用**同一口径**（它的 `BULK_STATUS_CHOICES`
+ *  也是这么筛的），所以这里即使多加一项，也只会拿到 400，不会静默写脏。 */
+export const BULK_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => s !== '弃读')
+
 export const READING_DEPTH_OPTIONS = [
   { value: 1, label: '速读浏览' },
   { value: 2, label: '重点阅读' },

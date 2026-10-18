@@ -227,24 +227,33 @@ export interface WeeklyStructure {
   weeks: WeeklyStructureWeek[]
 }
 
-export type AttributionType = '成长' | '关系' | '维持' | '谋生' | '流失'
+export type AttributionType = '成长' | '体验' | '关系' | '维持' | '谋生' | '流失'
 export type ActivityType =
   | '睡眠' | '维护性事务' | '深度工作' | '浅层工作' | '主动休息'
-  | '被动消耗' | '社交' | '兴趣记录' | '未归类'
+  | '被动消耗' | '社交' | '兴趣记录' | '主动经历' | '未归类'
 
-export const ATTRIBUTION_OPTIONS: AttributionType[] = ['成长', '关系', '维持', '谋生', '流失']
+// ⚠️ 顺序必须与后端 `temporal/constants.py` 的 `ATTRIBUTION_ORDER` 逐字一致 ——
+//    它同时是「主导归因」两两并列时的取值序（靠前者胜），不只是显示顺序。
+//    演进史：v3.58.11 插「关系」、v3.60.36 插「体验」，两次都只能**纯增量插在「成长」之后**。
+export const ATTRIBUTION_OPTIONS: AttributionType[] = ['成长', '体验', '关系', '维持', '谋生', '流失']
 export const ACTIVITY_TYPE_OPTIONS: ActivityType[] = [
   '深度工作', '浅层工作', '主动休息', '被动消耗', '睡眠',
-  '维护性事务', '社交', '兴趣记录', '未归类',
+  '维护性事务', '社交', '兴趣记录', '主动经历', '未归类',
 ]
+// ⚠️ 与后端 `ACTIVITY_TYPE_COLORS` 大体一致，但「社交」这里是 #C084FC、后端是 #A855F7 ——
+//    既有偏差（不是本轮引入）。改色会动到已经看惯的界面，留待单独确认，本轮不动。
 export const ACTIVITY_TYPE_COLOR_MAP: Record<string, string> = {
   '睡眠': '#64748B', '维护性事务': '#94A3B8', '深度工作': '#6366F1',
   '浅层工作': '#0EA5E9', '主动休息': '#10B981', '被动消耗': '#F87171',
-  '社交': '#C084FC', '兴趣记录': '#EC4899', '未归类': '#CBD5E1',
+  '社交': '#C084FC', '兴趣记录': '#EC4899', '主动经历': '#F59E0B',
+  '未归类': '#CBD5E1',
 }
+// 🔴 单一真源：界面任何地方要「归因 → 颜色」，都必须从这里取。
+//    曾有一份内联副本住在 `TimeStatsView.vue`（每加一个词就漏一处、静默落灰色兜底），
+//    v3.60.36 已收口回来 —— 不要再写第三份。
 export const ATTRIBUTION_COLOR_MAP: Record<string, string> = {
-  '成长': '#10B981', '关系': '#A855F7', '维持': '#6366F1',
-  '谋生': '#0EA5E9', '流失': '#F87171',
+  '成长': '#10B981', '体验': '#F59E0B', '关系': '#A855F7',
+  '维持': '#6366F1', '谋生': '#0EA5E9', '流失': '#F87171',
 }
 
 export interface TrendItem {

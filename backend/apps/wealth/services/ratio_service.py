@@ -61,6 +61,8 @@ from apps.wealth.constants import (
     EMERGENCY_EXPENSE_MONTHS,
     LEGACY_ASSET_ACCOUNTS,
     NECESSITY_IMPULSE,
+    PROVIDENT_FUND_ACCOUNT_KEY,
+    PROVIDENT_FUND_KIND,
     QUALITY_MIN_COVERAGE,
     RATIO_EXPENSE_MONTHS,
     RATIO_INCOME_MONTHS,
@@ -137,18 +139,47 @@ def resolve_asset_source(user_id: int = 1) -> str | None:
     return None
 
 
-def _code_totals(rows: list[tuple[float, object]]) -> dict[str, float]:
-    """[(金额, 科目)] → {科目 code: 金额}。
+def _position_key(account) -> str | None:
+    """单个科目的**取数键** —— 规则见 `_position_accounts` 的 docstring。"""
+    if getattr(account, 'account_kind', None) == PROVIDENT_FUND_KIND:
+        return PROVIDENT_FUND_ACCOUNT_KEY
+    return getattr(account, 'code', None) or getattr(account, 'account_kind', None)
 
-    同一 code 出现多行时**求和**而不是覆盖 —— 覆盖会让第二行静默顶掉第一行，
+
+def _position_accounts(rows: list[tuple[float, object]]) -> dict[str, float]:
+    """[(金额, 科目)] → {取数键: 金额} —— 资产全景的饼图与固定列靠它渲染。
+
+    取数键怎么定（三条规则，顺序不能反）：
+
+      ① **形态为「公积金」的科目 → 合并到 `accumulationfund`**。
+         公积金是**跨科目的语义量**（同一形态可以有多条：用户实测有
+         「公积金浙江」+「公积金福建」），旧表把它压成一个物理列。
+         合并到这里而不是另开一个键，是为了**不让同一笔钱在两个键里
+         各出现一次**（那会让任何 Σaccounts.values() 双计）。
+      ② 其余科目 → 用 `code`（旧表列名，界面按它对齐固定列）。
+      ③ `code` 为空 → 回落 `account_kind`。
+         ⚠️ **绝不 `continue` 丢掉**：旧实现正是那么写的，于是「手工新增、
+         code 留空」的科目金额会从这里静默消失 —— 而 `financial_assets`
+         （走 `rollup_items`）仍把它算进去 ⇒ 饼图各项之和 ≠ 金融资产，
+         而两边都「看着正常」。这正是本项目最忌的**静默失败**。
+
+    同一键出现多行时**求和**而不是覆盖 —— 覆盖会让第二行静默顶掉第一行，
     是「少算了一笔却看不出」的典型形态。
+
+    🔴 v3.62.24 之前的实现（改前务必读这段，别改回去）：
+       `code = account.code; if not code: continue; out[code] += amount`
+       —— 按纯 code 汇总。用户新建「公积金浙江」(code=`accfund_zj`) 后，
+       `accounts` 里只有 `accfund_zj` 而没有 `accumulationfund`，
+       于是界面上「公积金」这一行、饼图那块、公积金占比、趋势线、
+       快照历史列 **5 处一起恒显 0**，且全程不报错（读的是
+       `accounts.get('accumulationfund', 0.0)`）。
     """
     out: dict[str, float] = {}
     for amount, account in rows:
-        code = getattr(account, 'code', None)
-        if not code:
+        key = _position_key(account)
+        if not key:
             continue
-        out[code] = _round(out.get(code, 0.0) + float(amount or 0))
+        out[key] = _round(out.get(key, 0.0) + float(amount or 0))
     return out
 
 
@@ -171,6 +202,12 @@ def _snapshot_position(snap: WealthAssetSnapshot) -> dict:
         'remarks': snap.remarks or '',
         # 应急金分子 = 参与汇总且 is_liquid 的科目合计
         'liquid': roll['liquid_total'],
+        # 非流动资金：计入资产、但 T+0 取不出来的余额（定期/理财/被锁定的存款…）。
+        # 🔴 它存在的唯一理由：让「金融资产」的四行拆解**加得回去**
+        #    （v3.62.28 用户报「应该显示固定、不流动的那份，否则账面数据对不上」）。
+        #    四个桶由 asset_service.rollup_items 按定义互斥划分，
+        #    此处只搬运、不重算 —— 重算就会出现第二把尺子。
+        'non_liquid': roll['non_liquid_total'],
         # 应收 = 应收类科目合计，用于与快照头的 lend 对账
         'receivable': roll['category_totals'].get('应收', 0.0),
         'financial_assets': roll['financial_assets'],
@@ -179,10 +216,12 @@ def _snapshot_position(snap: WealthAssetSnapshot) -> dict:
         'available_net_worth': roll['available_net_worth'],
         'borrow': roll['borrow'],
         'net_worth': roll['net_worth'],
-        # 按科目 code 的金额明细 —— 资产全景的饼图与固定列靠它渲染。
-        # 旧表路径返回**同一形状**，消费方（cashflow_service）才不必为两个
-        # 来源各写一套取值分支（2026-09-29 合并录入链路时补）。
-        'accounts': _code_totals(rows),
+        # 按科目取数的明细 —— 资产全景的饼图与固定列靠它渲染。
+        # 键不是纯 code：公积金按**形态**合并到 `accumulationfund`
+        # （理由见 `_position_accounts`）。旧表路径返回**同一形状**，
+        # 消费方（cashflow_service）才不必为两个来源各写一套取值分支
+        # （2026-09-29 合并录入链路时补；v3.62.24 修公积金取数）。
+        'accounts': _position_accounts(rows),
     }
 
 
@@ -203,6 +242,10 @@ def _legacy_position(cf) -> dict:
         'snapshot_date': cf.btime,
         'remarks': cf.remarks or '',
         'liquid': _round(liquid),
+        # 旧表 8 列装的都是「能动的钱」（活期 + 公积金），没有非流动项 ⇒ 恒 0。
+        # 显式给 0 而不是省略字段，否则前端得为两个来源各写一套取值分支
+        # （与 self_use_total 同一处理方式）。
+        'non_liquid': 0.0,
         'receivable': _round(lend),
         # 旧表没有自用资产概念 —— 显式给 0 而不是省略字段，
         # 否则前端得为两个来源各写一套取值分支。

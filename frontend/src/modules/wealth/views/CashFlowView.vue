@@ -114,17 +114,22 @@
         <div class="config-drawer__header">
           <span class="config-drawer__title">口径配置</span>
           <span class="config-drawer__sub">资产科目主数据 · 账单项分类规则</span>
+          <!--
+            🔴 这条说明**没有删**，只是从抽屉顶部那条 ≈70px 的 el-alert 收进了气泡。
+               按 §79.1 的分流判据：它是**读一次就够的说明**（不是每次开抽屉要确认的状态），
+               而且抽屉本身就是「偶尔才来一趟」的地方 —— 每次都为它滚屏不值得。
+            ⚠️ 锚点自带「我能悬停」的样子（§79.3）：ⓘ 图标 + cursor:help + 悬停转主题色。
+          -->
+          <InfoTip
+            :width="460"
+            title="这两块是配置项，日常无需进入"
+          >
+            资产科目决定「按科目录余额」能录哪些项；分类规则决定账单归到收入性质 /
+            支出刚性 / 现金流哪一类。改动会重算往期归类与六项比率，关闭本抽屉时自动刷新一次。
+          </InfoTip>
         </div>
       </template>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        class="config-drawer__tip"
-        title="这两块是配置项，日常无需进入"
-        description="资产科目决定「按科目录余额」能录哪些项；分类规则决定账单归到收入性质 / 支出刚性 / 现金流哪一类。改动会重算往期归类与六项比率，关闭本抽屉时自动刷新一次。"
-      />
 
       <el-tabs v-model="configTab" class="config-drawer__tabs">
         <el-tab-pane label="资产科目" name="account">
@@ -154,6 +159,7 @@ import AccountPanel from '../components/asset/AccountPanel.vue'
 import AssetSnapshotPanel from '../components/asset/AssetSnapshotPanel.vue'
 import ClassifyRulePanel from '../components/classify/ClassifyRulePanel.vue'
 import RatioPanel from '../components/ratio/RatioPanel.vue'
+import InfoTip from '@/shared/components/InfoTip.vue'
 
 const router = useRouter()
 const store = useCashflowStore()
@@ -296,6 +302,12 @@ onMounted(() => {
   align-items: baseline;
   gap: 10px;
 }
+/* 锚点落在 flex 行里：gap 已给间距 ⇒ 抵消组件自带的 margin-left（那是为行内场景准备的）；
+   `align-items: baseline` 对 inline-flex 取的是**图标底边**当基线 ⇒ 会浮成上标，改回 center。 */
+.config-drawer__header :deep(.info-tip__trigger) {
+  margin-left: 0;
+  align-self: center;
+}
 .config-drawer__title {
   font-size: 18px;
   font-weight: 600;
@@ -305,7 +317,7 @@ onMounted(() => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
-.config-drawer__tip { margin-bottom: 12px; }
+/* 原 `.config-drawer__tip`（顶部那条说明 alert）已随「说明进气泡」一并退役，见模板注释 */
 
 /* 顶部卡片等高对齐 */
 .cashflow-top-row {

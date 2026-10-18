@@ -4,6 +4,7 @@ import * as wealthApi from '../api/wealthApi'
 import type {
   ClassifyRuleItem, ClassifyRuleSummary, ClassifyRuleFormData,
   ClassifyPreview, ClassifySummary, UnclassifiedCandidates, SeedClassifyResult,
+  BillCategoryOptions,
 } from '../types/wealthTypes'
 
 /**
@@ -32,6 +33,15 @@ export const useClassifyStore = defineStore('classify', () => {
   const periods = ref<string[]>([])
   /** 当前查看的期；'' = 全周期 */
   const yearmon = ref<string>('')
+
+  /**
+   * 快速记账的「分类 / 子分类」候选值。
+   *
+   * 🔴 这是分类体系的**唯一来源** —— 不允许任何组件在自己家里再写一份
+   *    分类数组（`QuickBillForm.vue` 原来那份 17 项硬编码就是这么来的，
+   *    跟真实账本完全对不上）。
+   */
+  const billOptions = ref<BillCategoryOptions | null>(null)
 
   const loading = ref(false)
   const saving = ref(false)
@@ -112,6 +122,25 @@ export const useClassifyStore = defineStore('classify', () => {
   async function fetchAll() {
     await Promise.all([fetchRules(), fetchRuleSummary(), fetchPeriods()])
     await fetchResults()
+  }
+
+  /**
+   * 拉取快速记账的「分类 / 子分类」候选。
+   *
+   * ⚠️ **刻意不缓存**：候选是**账本的派生结果**，而账本每天都在长 ——
+   *    今天用自由输入记过一个新子分类，明天它就该出现在候选里。
+   *    所以调用方要在**每次打开录入界面时**拉一次（`DayDetailModal` 就是这么做的），
+   *    而不是在页面初始化时拉一次了事。
+   * ⚠️ 失败时**保留上一次的候选**（不清空）：拉不到新候选就退化成旧候选，
+   *    总好过把下拉清空让人以为分类体系没了。
+   */
+  async function fetchBillOptions() {
+    try {
+      const resp = await wealthApi.getBillCategoryOptions()
+      billOptions.value = (resp.data as BillCategoryOptions) ?? null
+    } catch (e) {
+      console.error('获取记账分类候选失败:', e)
+    }
   }
 
   /** 切换查看期（'' = 全周期） */
@@ -211,12 +240,14 @@ export const useClassifyStore = defineStore('classify', () => {
     unclassified.value = null
     periods.value = []
     yearmon.value = ''
+    billOptions.value = null
   }
 
   return {
-    rules, ruleSummary, summary, unclassified, periods, yearmon,
+    rules, ruleSummary, summary, unclassified, periods, yearmon, billOptions,
     loading, saving, includeInactive,
     fetchRules, fetchRuleSummary, fetchPeriods, fetchSummary, fetchUnclassified,
+    fetchBillOptions,
     fetchResults, fetchAll, setPeriod, setIncludeInactive,
     saveRule, removeRule, toggleRule, seedRules, previewRule,
     resetState,

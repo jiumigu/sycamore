@@ -112,6 +112,24 @@ class PropertyItemSerializer(serializers.Serializer):
     overdue_months = serializers.IntegerField()
     issues = PropertyIssueSerializer(many=True)
 
+    # ── 好恶物档案馆回流的评价徽标（v3.60.32）──
+    # ⚠️ `None` = 还没评过 ⇒ 界面**什么都不显示**（不是灰色的「无」）。
+    # 🔴 它是**只读**的、不参与任何计算，也不影响上面任何一个数 ——
+    #    「status 状态 / condition 状况 / 评价」是三把正交的尺子：
+    #    状况正常的冰箱可以是 👎（型号选错），状况坏了的空调仍可以是 👍（用了 12 年）。
+    treasure_badge = serializers.CharField(read_only=True, allow_null=True)
+    # 那条档案的 id —— 已评价时点徽标是「打开那条去补理由」，不是再建一条。
+    treasure_record_id = serializers.IntegerField(read_only=True, allow_null=True)
+    # 快记浮层的类别预填建议（后端按物件类别猜的）—— 前端不自己映射。
+    treasure_suggest_category = serializers.CharField(read_only=True, allow_null=True)
+    # ⚠️ 三个都必须是 `read_only` + `allow_null`，缺一不可：
+    #    · `read_only`：它们是**回流**出来的只读标识，入参送上来也不该被采信；
+    #    · `allow_null`：本序列化器**同时被用在 dict 上** —— `/properties/preview/`
+    #      传进来的是预览用的 dict，**没有**这三个键。只写 `CharField()` 时 DRF 取不到键
+    #      只能抛 `KeyError` ⇒ 整个试算接口 **500**（v3.60.32 引入，v3.60.33 修复）。
+    #      另两个字段当时带了 `allow_null` 所以只是返回 None，唯独这一个漏了 ⇒
+    #      「同一批字段里漏写一个参数」不会报错，只会让某个接口整条挂掉。
+
 
 class PropertyItemFormSerializer(serializers.ModelSerializer):
     """物件新增 / 编辑（入参）—— 状态与日期的耦合在这里收口。

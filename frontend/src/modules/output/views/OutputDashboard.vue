@@ -1,7 +1,7 @@
 <template>
   <div class="output-page">
-    <!-- 归档提示 -->
-    <el-alert title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
+    <!-- 归档提示（仅在当前仍处于归档状态时显示，重新启用后自动消失） -->
+    <el-alert v-if="ready && isArchived" title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
     <div class="page-header">
       <h2>📊 个人良品率</h2>
       <el-tag size="small" type="info" effect="plain">把自我要求从道德问题变成质量管理问题</el-tag>
@@ -183,6 +183,10 @@ import { useOutputStore } from '../stores/outputStore'
 import { CATEGORY_OPTIONS, QUALITY_OPTIONS } from '../types/outputTypes'
 import type { OutputRecord } from '../types/outputTypes'
 import OutputForm from '../components/OutputForm.vue'
+import { useMenuArchive } from '@/shared/composables/useMenuArchive'
+
+// 归档横幅的判据唯一实现在 useMenuArchive（存档态含用户偏好，非写死的 defaultArchived）
+const { ready, isArchived } = useMenuArchive('output')
 
 const store = useOutputStore()
 

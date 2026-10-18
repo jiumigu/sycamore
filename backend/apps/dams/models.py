@@ -31,6 +31,7 @@ class DamsFileResource(models.Model):
     class Meta:
         managed = True
         db_table = 'dams_file_resource'
+        db_table_comment = '文件资源：本地磁盘文件的索引；标记重复 / 已整理不动文件本身'
         verbose_name = '文件资源'
         verbose_name_plural = '文件资源'
         ordering = ['-updated_at']
@@ -53,6 +54,7 @@ class DamsAccessLog(models.Model):
     class Meta:
         managed = True
         db_table = 'dams_access_log'
+        db_table_comment = '文件访问日志：每次访问记一条，访问次数由它累计'
         verbose_name = '访问日志'
         verbose_name_plural = '访问日志'
         ordering = ['-accessed_at']

@@ -70,6 +70,7 @@ class Book(models.Model):
 
     class Meta:
         db_table = 'book_read_list'
+        db_table_comment = '书籍阅读记录：一张表承载在读 / 已读 / 弃读；列名多为旧式命名（bid / btype / openop / closedop）'
         ordering = ['-readDate']
         verbose_name = '书籍阅读记录'
         verbose_name_plural = '书籍阅读记录'

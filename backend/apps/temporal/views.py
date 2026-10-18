@@ -11,7 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from django.db.models import Count, DateField, Max, Sum
+from django.db.models import Count, DateField, Max, Min, Sum
 from django.db.models.functions import Cast
 
 from .constants import ATTRIBUTION_ORDER, CONTRIB_EXCLUDED_TASK_NAMES
@@ -223,9 +223,9 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         work（牛马工作）：按 L3 任务名「牛马工作」聚合单日小时数（v3.58.14 替换原 sleep 指标；
         改走 task_name 而非 L2 类型，故与 attr_hours['谋生'] 不等价——后者含其他谋生类任务）。
 
-        dominant_attr（主导归因）：不按量值着色，而是给每天算五个 L1 归因的小时数，
+        dominant_attr（主导归因）：不按量值着色，而是给每天算六个 L1 归因的小时数，
         取最多者作为当天「主导归因」（并列按 ATTRIBUTION_ORDER 的价值序取靠前者）；
-        五者全为 0 的日子 attr 返回 null，前端显示为「未归类」灰格。
+        六者全为 0 的日子 attr 返回 null，前端显示为「未归类」灰格。
 
         🔴 v3.60.27：睡眠类任务**不计入本图**（名单 `constants.CONTRIB_EXCLUDED_TASK_NAMES`）。
         它们的 L2 = 主动休息 ⇒ 归因 = 维持，每天 8h 会让热力图几乎天天是「维持」色，
@@ -578,9 +578,25 @@ class WeeklyTimeTrackingView(APIView):
 
     def get(self, request):
         """获取多年周度时间追踪数据（从固化表读取）"""
-        start_year = int(request.GET.get('start_year', date.today().year - 5))
-        end_year = int(request.GET.get('end_year', date.today().year + 4))
-        benchmark = float(request.GET.get('benchmark', 30))
+        # ⚠️ 默认年份范围**由固化表数据决定**，不用「今年 − 5」：
+        #    滚动下界会把最早几年静默挡掉（2020 的 40 周就是这么消失的）。
+        bounds = WeeklyTimeCache.objects.aggregate(lo=Min('year'), hi=Max('year'))
+        default_start = bounds['lo'] if bounds['lo'] is not None else date.today().year - 5
+        default_end = bounds['hi'] if bounds['hi'] is not None else date.today().year + 4
+
+        raw_start = request.GET.get('start_year')
+        raw_end = request.GET.get('end_year')
+        raw_benchmark = request.GET.get('benchmark')
+        try:
+            start_year = int(raw_start) if raw_start not in (None, '') else default_start
+            end_year = int(raw_end) if raw_end not in (None, '') else default_end
+            benchmark = float(raw_benchmark) if raw_benchmark not in (None, '') else 30.0
+        except (TypeError, ValueError):
+            # ⚠️ 参数写错**必须说出来**，静默回退默认值会让「写错了」看起来像「这段时间没数据」
+            return Response(
+                {'detail': 'start_year / end_year 必须是整数、benchmark 必须是数字'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         cache_data = WeeklyTimeCache.objects.filter(
             year__gte=start_year,
@@ -603,6 +619,9 @@ class WeeklyTimeTrackingView(APIView):
             'benchmark': benchmark,
             'data': result,
             'weeks_per_year': {year: len(result[year]) for year in result},
+            # 固化表里**真实存在**的年份范围 —— 让调用方能区分
+            # 「这段时间确实没数据」与「被请求区间挡掉了」
+            'data_range': {'start_year': bounds['lo'], 'end_year': bounds['hi']},
         })
 
 

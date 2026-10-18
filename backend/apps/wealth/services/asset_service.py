@@ -37,7 +37,11 @@
 from django.db import transaction
 from django.db.models import Count
 
-from apps.wealth.constants import ASSET_CATEGORIES, LEGACY_ASSET_ACCOUNTS
+from apps.wealth.constants import (
+    ASSET_CATEGORIES,
+    LEGACY_ASSET_ACCOUNTS,
+    PROVIDENT_FUND_KIND,
+)
 from apps.wealth.models import (
     WealthAssetAccount,
     WealthAssetSnapshot,
@@ -231,9 +235,33 @@ def rollup_items(rows: list[tuple[float, WealthAssetAccount]], borrow: float = 0
     rows: [(金额, 科目对象), ...]
     category_totals 恒返回 ASSET_CATEGORIES 全部键（缺失补 0）——
     前端按固定顺序渲染，不必自己补空行。
+
+    🔴 「金融资产」的拆解必须**按定义**加总等于 `financial_assets`
+    （v3.62.28 —— 用户报「应该显示固定、不流动的那份，否则账面数据对不上」）：
+
+        金融资产 = 流动资金 + 非流动资金 + 公积金 + 应收借出
+
+    四个桶按「先看类别 → 再看形态 → 最后看 is_liquid」的顺序**互斥划分**，
+    ⇒ 不管用户怎么拨 `is_liquid`，等式恒成立。这条判据的价值在于
+    **它不依赖任何用户能改的开关**（§102.1）—— 换个说法：我们不是
+    「想办法让等式成立」，而是「按定义分类，它就不可能不成立」。
+
+    改前的实现只有 `liquid_total` 一个桶，于是 `is_liquid=False` 的余额
+    （实测三张储蓄卡 206,752.88）**不属于任何一行** ⇒ 界面上拆项之和比
+    金融资产少一截，而两边各自都「看着正常」。这正是本项目最忌的
+    **静默失败**：不是算错，是有一块根本不出现。
+
+    另外两处口径在这里被**收紧**（改前会与旧表路径不一致）：
+      · 应收类科目即使 `is_liquid=True` 也只进 `receivable_total`，
+        不再计入 `liquid_total` —— 借出去的钱不构成应急金，旧表路径
+        `cashflow_service.sum_liquid_accounts` 本来就不含它。
+      · 公积金形态同理，只进 `provident_total`。
     """
     category_totals = {c: 0.0 for c in ASSET_CATEGORIES}
     liquid_total = 0.0
+    non_liquid_total = 0.0
+    provident_total = 0.0
+    receivable_total = 0.0
     excluded_total = 0.0
     counted = 0
 
@@ -245,8 +273,20 @@ def rollup_items(rows: list[tuple[float, WealthAssetAccount]], borrow: float = 0
             continue
         counted += 1
         category_totals[account.category] = category_totals.get(account.category, 0.0) + amt
-        if account.is_liquid:
+
+        # 自用资产的合计单独成项（`financial_assets` 不含它），
+        # 所以四个桶也只覆盖「非自用」的部分 —— 否则四桶之和会大于金融资产。
+        if account.category == SELF_USE_CATEGORY:
+            continue
+        # ⚠️ 顺序不能反：类别 → 形态 → is_liquid。
+        if account.category == RECEIVABLE_CATEGORY:
+            receivable_total += amt
+        elif getattr(account, 'account_kind', None) == PROVIDENT_FUND_KIND:
+            provident_total += amt
+        elif account.is_liquid:
             liquid_total += amt
+        else:
+            non_liquid_total += amt
 
     financial_assets = sum(
         v for k, v in category_totals.items() if k != SELF_USE_CATEGORY
@@ -257,6 +297,9 @@ def rollup_items(rows: list[tuple[float, WealthAssetAccount]], borrow: float = 0
 
     return {
         'liquid_total': _round(liquid_total),
+        'non_liquid_total': _round(non_liquid_total),
+        'provident_total': _round(provident_total),
+        'receivable_total': _round(receivable_total),
         'category_totals': {k: _round(v) for k, v in category_totals.items()},
         'financial_assets': _round(financial_assets),
         'self_use_total': _round(self_use_total),

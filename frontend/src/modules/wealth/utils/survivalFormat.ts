@@ -34,11 +34,8 @@ export function formatDays(value: number | null | undefined, empty = EMPTY): str
   return formatDayQuantity(value)
 }
 
-/** 小时展示：≥ 100 取整，否则保留一位（读得出量级即可） */
-export function formatHours(value: number | null | undefined, empty = EMPTY): string {
-  if (value === null || value === undefined) return empty
-  return value >= 100 ? `${Math.round(value)} 小时` : `${Number(value.toFixed(1))} 小时`
-}
+// （`formatHours` 随「数字」类别退役 —— v3.62.13。它只服务「还能读多少小时」，
+//   而那个数来自「一册读多少天 × 每册多少小时」，已被判定为不可预估。）
 
 /** 餐数展示 */
 export function formatMeals(value: number | null | undefined, empty = EMPTY): string {

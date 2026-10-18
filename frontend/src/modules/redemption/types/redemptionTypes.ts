@@ -36,7 +36,7 @@ export interface PoolInject {
  * ③ 已移除 `category_level2` —— v0.3 起停写，全库非空行数为 0。
  */
 export type AttrField = 'task_name' | 'activity_type' | 'task_type'
-export type Attribution = '成长' | '关系' | '维持' | '谋生' | '流失'
+export type Attribution = '成长' | '体验' | '关系' | '维持' | '谋生' | '流失'
 
 export interface AttrRule {
   id: number
@@ -97,8 +97,14 @@ export interface SyncResult {
 }
 
 /** 归因类别配色 */
+// ⚠️ 这是**本模块自己的标签视觉体系**（color 文字色 + bg 浅底成对），与 temporal 的
+//    `ATTRIBUTION_COLOR_MAP`（单色填充、用于热力格）**用途不同 ⇒ 刻意不同色**。
+//    这不是漂移，别去「统一」它们。
+//    🔴 但**词表本身是同一份**（真源 `temporal/constants.py`）：加 L1 词时这里与
+//       temporal 侧必须**同时**加 —— 漏一处，该词在赎回页会静默落到下面那个 `|| 兜底`。
 export const ATTRIBUTION_META: Record<string, { color: string; bg: string }> = {
   成长: { color: '#7C3AED', bg: '#F3E8FF' },
+  体验: { color: '#EA580C', bg: '#FFEDD5' },
   关系: { color: '#0D9488', bg: '#CCFBF1' },
   维持: { color: '#2563EB', bg: '#DBEAFE' },
   谋生: { color: '#D97706', bg: '#FEF3C7' },

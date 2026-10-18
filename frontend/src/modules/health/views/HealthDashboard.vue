@@ -7,14 +7,16 @@
         <el-tag type="success" class="module-tag">身心健康</el-tag>
       </div>
       <div class="header-actions">
-        <el-select v-model="filterYear" size="default" style="width: 110px" placeholder="全部年份" clearable @change="refreshData">
-          <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
-        </el-select>
         <el-button type="primary" @click="openCreate">
           <el-icon><Plus /></el-icon> 添加记录
         </el-button>
-        <el-button @click="refreshData">
+        <el-button @click="refresh">
           <el-icon><Refresh /></el-icon> 刷新
+        </el-button>
+        <!-- 长期不变的那几块（进度条 / 统计卡 / 里程碑地图 / 年度对比）搬去了总览页，
+             本页只做「每天要干的活」：录入与查明细。—— 按钮样式与「贡献图」对齐。 -->
+        <el-button size="default" @click="$router.push('/health/overview')">
+          📈 步数总览
         </el-button>
         <el-button size="default" @click="$router.push('/health/contrib')">
           📊 贡献图
@@ -22,106 +24,54 @@
       </div>
     </div>
 
-    <!-- 超大进度条 -->
-    <el-card class="section-card progress-card">
-      <div class="progress-header">
-        <div class="progress-title">目标：在有限生命中走完 <strong>10,000 万步</strong>（1亿步）</div>
-        <div class="progress-subtitle" v-if="store.summary">
-          已完成 <strong>{{ formatNumber(store.summary.total_steps) }}</strong> 步 /
-          <strong>{{ formatNumber(store.summary.target_steps) }}</strong> 步
-          （{{ store.summary.progress_percent }}%）
-        </div>
-      </div>
-      <div class="progress-bar-wrap">
-        <div class="progress-bar" v-if="store.summary">
-          <div class="progress-fill" :style="{ width: Math.min(store.summary.progress_percent, 100) + '%' }">
-            <div class="progress-glow"></div>
-          </div>
-          <div class="progress-milestone-dots">
-            <div
-              v-for="i in 50"
-              :key="i"
-              class="milestone-dot"
-              :class="{
-                completed: store.summary && i <= store.summary.completed_milestones,
-                current: store.summary && i === store.summary.completed_milestones + 1,
-              }"
-              :style="{ left: (i / 50 * 100) + '%' }"
-              :title="`第${i}个里程碑 (${formatNumber((i-1)*2)}万 - ${formatNumber(i*2)}万步)`"
-            ></div>
-          </div>
-        </div>
-      </div>
-      <div class="progress-info" v-if="store.summary && store.summary.current_milestone">
-        当前里程碑：第{{ store.summary.current_milestone.number }}个
-        （{{ formatNumber(store.summary.current_milestone.start / 10000) }}万 -
-        {{ formatNumber(store.summary.current_milestone.end / 10000) }}万步）
-        · 还需 <strong>{{ formatNumber(store.summary.next_milestone_distance) }}</strong> 步达成
-        · 里程碑内进度 {{ store.summary.current_milestone.progress_in_milestone }}%
-      </div>
-    </el-card>
-
-    <!-- 统计卡片 -->
-    <el-row :gutter="16" class="stats-row">
-      <el-col :span="6" v-for="card in statCards" :key="card.key">
-        <el-card class="stat-card" shadow="hover">
-          <div class="stat-content">
-            <div class="stat-icon" :style="{ background: card.bg }">
-              <el-icon :color="card.color" :size="20"><component :is="card.icon" /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ card.value }}</div>
-              <div class="stat-label">{{ card.label }}</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 里程碑地图 + 年度步数对比 -->
-    <el-row :gutter="16" class="chart-row equal-height-row">
-      <el-col :span="12">
-        <el-card class="section-card equal-height-card">
-          <template #header>
-            <div class="section-header">
-              <span>🎯 里程碑地图</span>
-              <router-link to="/health/milestones">
-                <el-button size="small" text>查看全部 →</el-button>
-              </router-link>
-            </div>
-          </template>
-          <div class="milestone-grid">
-            <div
-              v-for="m in milestonePreview"
-              :key="m.number"
-              class="milestone-cell"
-              :class="{
-                completed: m.is_completed,
-                current: m.is_current,
-              }"
-              :title="`第${m.number}个里程碑 (${formatNumber(m.start/10000)}万-${formatNumber(m.end/10000)}万步)`"
-            >
-              <div class="cell-number">{{ m.number }}</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="12">
-        <el-card class="section-card equal-height-card">
-          <template #header><span>📊 年度步数对比</span></template>
-          <div ref="yearlyChartRef" class="chart-box"></div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 记录列表 -->
+    <!-- 运动记录 -->
     <el-card class="section-card">
       <template #header>
         <div class="section-header">
           <span>📝 运动记录</span>
         </div>
       </template>
-      <el-table v-loading="store.loading" :data="displayRecords" style="width: 100%" size="small" stripe>
+
+      <!-- 筛选栏：年份 / 类型 / 日期范围 / 备注关键字 + 重置。
+           ⚠️ 每个条件的 `@change` 都走 `resetAndFetch()`（**回第 1 页**再取）——
+              拿着第 20 页去筛新条件，必然得到一张空表（v3.62.14 §93.3 的坑）。 -->
+      <div class="filter-bar">
+        <el-select
+          v-model="filterYear" size="default" style="width: 112px"
+          placeholder="全部年份" clearable @change="resetAndFetch"
+        >
+          <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
+        </el-select>
+
+        <el-select
+          v-model="filterHtype" size="default" style="width: 118px"
+          placeholder="全部类型" clearable @change="resetAndFetch"
+        >
+          <el-option v-for="t in HTYPE_OPTIONS" :key="t.value" :label="t.label" :value="t.value" />
+        </el-select>
+
+        <el-date-picker
+          v-model="dateRange" type="daterange" size="default"
+          value-format="YYYY-MM-DD" range-separator="→"
+          start-placeholder="开始日期" end-placeholder="结束日期"
+          style="width: 240px" @change="resetAndFetch"
+        />
+
+        <el-input
+          v-model="filterKeyword" size="default" style="width: 190px"
+          placeholder="搜索备注，回车确认" clearable
+          @keyup.enter="resetAndFetch" @clear="resetAndFetch"
+        >
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+
+        <el-button size="default" @click="resetFilters">重置</el-button>
+      </div>
+
+      <!-- 🔴 `store.records` 就是**当前页**那 N 条 —— 分页交给后端。
+           这里曾写 `displayRecords`（在本地对这 N 条再切一次），
+           而后端只给了第 1 页 ⇒ 页码有 38 页、第 2 页起全空（v3.62.14 修）。 -->
+      <el-table v-loading="store.loading" :data="store.records" style="width: 100%" size="small" stripe>
         <el-table-column label="日期" width="110">
           <template #default="{ row }">{{ formatTime(row.time) }}</template>
         </el-table-column>
@@ -139,14 +89,16 @@
         </el-table-column>
       </el-table>
       <el-pagination
-        v-if="store.totalCount > pageSize"
+        v-if="store.totalCount > 0"
         v-model:current-page="currentPage"
-        :page-size="pageSize"
+        v-model:page-size="pageSize"
+        :page-sizes="PAGE_SIZE_OPTIONS"
         :total="store.totalCount"
-        layout="prev, pager, next"
+        layout="total, sizes, prev, pager, next"
         small
         class="pagination"
         @current-change="handlePageChange"
+        @size-change="handleSizeChange"
       />
     </el-card>
 
@@ -193,20 +145,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Edit, Delete, Star, TrendCharts, Calendar, Medal } from '@element-plus/icons-vue'
+import { Plus, Refresh, Edit, Delete, Search } from '@element-plus/icons-vue'
 import { useHealthStore } from '../stores/healthStore'
-import { HTYPE_OPTIONS, MILESTONE_SIZE, TOTAL_MILESTONES, TARGET_STEPS, HTYPE_LABELS } from '../types/healthTypes'
-import * as echarts from 'echarts'
+import { HTYPE_OPTIONS, HTYPE_LABELS } from '../types/healthTypes'
 import * as healthApi from '../api/healthApi'
 
 const store = useHealthStore()
 
-// Filters
+// ─── 筛选栏 ───
 const filterYear = ref<number | undefined>(undefined)
+const filterHtype = ref<number | undefined>(undefined)
+const filterKeyword = ref('')
+/** `el-date-picker` 的 range 值：`['YYYY-MM-DD', 'YYYY-MM-DD']`；清空时为 `null` */
+const dateRange = ref<[string, string] | null>(null)
+
 const currentPage = ref(1)
-const pageSize = 10
+/** 每页条数：默认 20，可在分页条上切换（10 / 20 / 30 / 50） */
+const PAGE_SIZE_OPTIONS = [10, 20, 30, 50]
+const pageSize = ref(20)
 
 const yearOptions = computed(() => {
   const years: number[] = []
@@ -215,33 +173,53 @@ const yearOptions = computed(() => {
   return years
 })
 
-const displayRecords = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return store.records.slice(start, start + pageSize)
-})
+// 🔴 **页码与筛选必须一起发给后端** —— 分页只有一把尺子。
+//
+// 这个接口走 DRF 全局 `StandardPagination`，响应是 `{count, results}`：
+// `results` 只是**当前页**。曾经这里不传 `page`，于是 `store.records` 永远只有
+// 第 1 页那 10 条，而 `totalCount` 是 373 ⇒ 分页条照实渲染 **38 页**，
+// 点第 2 页起却全空（v3.62.14 修）。
+//
+// ⚠️ `page_size` 也显式传：后端默认值改了这一页就会错位，尺子握在自己手里。
+function buildRecordParams(): Record<string, unknown> {
+  const params: Record<string, unknown> = { page: currentPage.value, page_size: pageSize.value }
+  if (filterYear.value) params.year = filterYear.value
+  if (filterHtype.value) params.htype = filterHtype.value
+  if (filterKeyword.value) params.search = filterKeyword.value
+  // 日期范围走后端 `start` / `end`（半开区间，含结束日整天）——
+  // 不在这里做「前端过滤已取的那一页」，那会变成「总数与内容两把尺子」。
+  if (dateRange.value && dateRange.value.length === 2) {
+    params.start = dateRange.value[0]
+    params.end = dateRange.value[1]
+  }
+  return params
+}
 
-// Stat cards
-const statCards = computed(() => {
-  const s = store.summary
-  if (!s) return []
-  return [
-    { key: 'total', label: '累计步数', value: formatNumber(s.total_steps), icon: 'Star', bg: '#fff7e6', color: '#fa8c16' },
-    { key: 'milestone', label: '里程碑', value: `${s.completed_milestones}/${s.total_milestones}`, icon: 'Medal', bg: '#f0fff0', color: '#52c41a' },
-    { key: 'daily', label: '日均步数', value: formatNumber(s.daily_avg), icon: 'TrendCharts', bg: '#e6f7ff', color: '#1890ff' },
-    { key: 'predict', label: s.prediction ? '预估完成' : '运动天数', value: s.prediction ? s.prediction.target_date : `${s.days_active}天`, icon: 'Calendar', bg: '#fff0f6', color: '#eb2f96' },
-  ]
-})
+/** 只重取「记录」那一块（翻页 / 删改后用；不打扰筛选栏本身） */
+async function loadRecords() {
+  await store.fetchRecords(buildRecordParams())
+}
 
-// Milestone preview
-const milestonePreview = computed(() => {
-  return (store.milestones?.milestones || []).slice(0, 50)
-})
+/** 筛选条件变了 ⇒ **回第 1 页**再取（旧页码在新条件下没有意义） */
+async function resetAndFetch() {
+  currentPage.value = 1
+  await loadRecords()
+}
 
-// Chart refs
-const yearlyChartRef = ref<HTMLElement>()
-let yearlyChart: echarts.ECharts | null = null
+function resetFilters() {
+  filterYear.value = undefined
+  filterHtype.value = undefined
+  filterKeyword.value = ''
+  dateRange.value = null
+  resetAndFetch()
+}
 
-// Form state
+/** 手动刷新 ⇒ 也回第 1 页（刷新按钮的语义是「看最新的」，最新的一条排在最前） */
+async function refresh() {
+  await resetAndFetch()
+}
+
+// ─── 表单 ───
 const formVisible = ref(false)
 const isEdit = ref(false)
 const editingId = ref<number | null>(null)
@@ -258,14 +236,6 @@ const formRules = {
   steps: [{ required: true, message: '请输入运动量', trigger: 'blur' }],
   htype: [{ required: true, message: '请选择运动类型', trigger: 'change' }],
   time: [{ required: true, message: '请选择日期', trigger: 'change' }],
-}
-
-// Helpers
-function formatNumber(n: number | undefined | null): string {
-  if (n === undefined || n === null) return '0'
-  if (n >= 100000000) return (n / 100000000).toFixed(2) + '亿'
-  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
-  return n.toLocaleString()
 }
 
 function formatTime(t: string | undefined | null): string {
@@ -305,7 +275,10 @@ async function handleSubmit() {
     }
     ElMessage.success(isEdit.value ? '已更新' : '已添加')
     formVisible.value = false
-    await refreshData()
+    // 新增 ⇒ 回第 1 页（新记录按时间倒序排在最前，那儿才看得到它）；
+    // 编辑 ⇒ **留在原页**（把人从第 5 页弹回开头 = 另一种「看不到刚才那条」）
+    if (isEdit.value) await loadRecords()
+    else await resetAndFetch()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.error || '操作失败')
   } finally {
@@ -318,7 +291,13 @@ async function handleDelete(row: any) {
     await ElMessageBox.confirm(`确定删除 ${formatTime(row.time)} ${HTYPE_LABELS[row.htype] || ''}？`, '提示', { type: 'warning' })
     await healthApi.deleteHealth(row.hid)
     ElMessage.success('已删除')
-    await refreshData()
+    // 🔴 删掉本页最后一条 ⇒ 留原页会显示空表（页码还在、数据没了）。
+    //    `store.totalCount` 此刻还是**删除前**的数，减 1 才是删完的总数。
+    //    ⚠️ 这里不能走 `resetAndFetch()`：它会把人从第 20 页弹回第 1 页 ——
+    //       那是另一种「看不到刚才那条」。
+    const lastPage = Math.max(1, Math.ceil(Math.max(0, store.totalCount - 1) / pageSize.value))
+    if (currentPage.value > lastPage) currentPage.value = lastPage
+    await loadRecords()
   } catch { /* cancelled */ }
 }
 
@@ -326,58 +305,26 @@ function resetForm() {
   formRef.value?.resetFields()
 }
 
-function handlePageChange(p: number) {
-  currentPage.value = p
+async function handlePageChange(p: number) {
+  // 🔴 改页码必须**重新取数** —— 后端分页时 `store.records` 里只有当前页，
+  //    只改 `currentPage` 不重新请求 = 表里还是上一页的内容（或空）。
+  // ⚠️ 顺便夹住页码：DRF 对**超出范围**的页码回 404（不是空数组），
+  //    点到一个不存在的页会得到一条报错，而不是「暂无数据」。
+  const lastPage = Math.max(1, Math.ceil(store.totalCount / pageSize.value))
+  currentPage.value = Math.min(p, lastPage)
+  await loadRecords()
 }
 
-// Charts
-function initCharts() {
-  nextTick(() => {
-    initYearlyChart()
-  })
-}
-
-function initYearlyChart() {
-  if (!yearlyChartRef.value) return
-  if (!yearlyChart) yearlyChart = echarts.init(yearlyChartRef.value)
-  const data = (store.yearlyComparison || []).slice(-10)
-  const years = data.map(d => d.year)
-  const steps = data.map(d => d.total_steps)
-  yearlyChart.setOption({
-    tooltip: { trigger: 'axis', valueFormatter: (v: number) => formatNumber(v) + '步' },
-    grid: { left: '3%', right: '4%', bottom: '8%', top: '5%', containLabel: true },
-    xAxis: { type: 'category', data: years, axisLabel: { fontSize: 11 } },
-    yAxis: { type: 'value', name: '步数', axisLabel: { formatter: (v: number) => v >= 100000000 ? (v / 100000000).toFixed(1) + '亿' : v >= 10000 ? (v / 10000).toFixed(0) + '万' : v } },
-    series: [{
-      type: 'bar', data: steps, barWidth: '50%',
-      itemStyle: { color: '#1890ff', borderRadius: [4, 4, 0, 0] },
-      label: { show: true, position: 'top', formatter: (p: any) => p.value >= 100000000 ? (p.value / 100000000).toFixed(1) + '亿' : p.value >= 10000 ? (p.value / 10000).toFixed(0) + '万' : p.value, fontSize: 10 },
-    }],
-  })
-  yearlyChart.resize()
-}
-
-async function refreshData() {
+async function handleSizeChange() {
+  // 🔴 每页条数变了 ⇒ 「第几页」不再指向同一批数据（第 5 页在 20 条/页与
+  //    50 条/页下完全是两段）⇒ 必须回第 1 页重取，不能只改 pageSize 让它自己算。
   currentPage.value = 1
-  const params: Record<string, unknown> = {}
-  if (filterYear.value) params.year = filterYear.value
-  await Promise.all([
-    store.fetchSummary(),
-    store.fetchMilestones(),
-    store.fetchYearlyComparison(),
-    store.fetchRecords(Object.keys(params).length ? params : undefined),
-  ])
-  initCharts()
+  await loadRecords()
 }
-
-watch(() => store.yearlyComparison, initCharts, { deep: true })
-window.addEventListener('resize', () => {
-  yearlyChart?.resize()
-})
 
 onMounted(async () => {
-  await store.fetchAll()
-  initCharts()
+  // 记录那一块要带上 `page` + `page_size` —— 否则后端只给第 1 页（见 `buildRecordParams`）
+  await loadRecords()
 })
 </script>
 
@@ -401,79 +348,11 @@ onMounted(async () => {
     .section-header { display: flex; justify-content: space-between; align-items: center; }
   }
 
-  .progress-card {
-    .progress-header {
-      text-align: center; margin-bottom: 20px;
-      .progress-title { font-size: 15px; color: #606266; margin-bottom: 4px; }
-      .progress-subtitle { font-size: 13px; color: #909399; }
-    }
-
-    .progress-bar-wrap {
-      padding: 0 4px; margin-bottom: 8px;
-      .progress-bar {
-        position: relative; height: 32px; background: #f0f0f0; border-radius: 16px; overflow: visible;
-        .progress-fill {
-          position: absolute; left: 0; top: 0; height: 100%; background: linear-gradient(90deg, #52c41a, #1890ff, #fa8c16);
-          border-radius: 16px; transition: width 0.8s ease; min-width: 32px;
-          .progress-glow { position: absolute; right: 0; top: -2px; width: 8px; height: 36px; background: rgba(255,255,255,0.4); border-radius: 4px; filter: blur(2px); }
-        }
-        .progress-milestone-dots {
-          position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-          .milestone-dot {
-            position: absolute; top: 50%; transform: translate(-50%, -50%);
-            width: 6px; height: 6px; border-radius: 50%; background: #d9d9d9; transition: all 0.3s;
-            &.completed { background: #52c41a; width: 8px; height: 8px; }
-            &.current { background: #fa8c16; width: 12px; height: 12px; box-shadow: 0 0 6px rgba(250,140,22,0.6); animation: pulse 1.5s infinite; }
-          }
-        }
-      }
-    }
-
-    .progress-info { text-align: center; font-size: 12px; color: #909399; }
-  }
-
-  .stats-row { margin-bottom: 18px;
-    .stat-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-      .stat-content { display: flex; align-items: center; gap: 14px; padding: 6px 4px;
-        .stat-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .stat-info {
-          .stat-value { font-size: 20px; font-weight: 700; color: #1F2937; line-height: 1.3; }
-          .stat-label { font-size: 12px; color: #6B7280; }
-        }
-      }
-    }
-  }
-
-  .chart-row { margin-bottom: 18px;
-    .chart-box { height: 280px; width: 100%; }
-    &.equal-height-row {
-      .el-col { display: flex; }
-      .equal-height-card { flex: 1; }
-    }
-  }
-
-  .milestone-grid {
-    display: grid;
-    grid-template-columns: repeat(10, 1fr);
-    gap: 4px;
-    padding: 4px;
-
-    .milestone-cell {
-      aspect-ratio: 1;
-      display: flex; align-items: center; justify-content: center;
-      border-radius: 6px; font-size: 11px; font-weight: 600; color: #bfbfbf;
-      background: #f5f5f5; cursor: pointer; transition: all 0.2s;
-      &.completed { background: #52c41a; color: #fff; }
-      &.current { background: #fff7e6; color: #fa8c16; border: 2px solid #fa8c16; box-shadow: 0 0 6px rgba(250,140,22,0.3); }
-      &:hover { transform: scale(1.1); }
-    }
+  .filter-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px dashed #ebeef5;
   }
 
   .convert-hint { font-size: 12px; color: #909399; line-height: 1.5; }
-}
-
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 6px rgba(250,140,22,0.4); }
-  50% { box-shadow: 0 0 12px rgba(250,140,22,0.8); }
 }
 </style>

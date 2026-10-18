@@ -83,10 +83,7 @@ class SurvivalItemSerializer(serializers.Serializer):
     grade_label = serializers.CharField()
     status = serializers.CharField()
     status_label = serializers.CharField()
-    priority = serializers.CharField()
-    priority_label = serializers.CharField()
     days_per_unit = serializers.FloatField(allow_null=True)
-    hours_per_unit = serializers.FloatField(allow_null=True)
     # 按次计量（v3.59.3）：四个「原话」字段照原样下发，界面自己拼
     # 「每 3 天用 1 次」，不在前端做任何换算（换算是计算层独一份的活）。
     uses_per_unit = serializers.FloatField(allow_null=True)
@@ -115,6 +112,18 @@ class SurvivalItemSerializer(serializers.Serializer):
     notes = serializers.CharField()
     tags = serializers.ListField(child=serializers.CharField(), required=False)
     recipe_line_count = serializers.IntegerField()
+    # 好恶物档案馆回流的评价徽标（v3.60.32）：`None` = 还没评过 ⇒ 不显示任何东西。
+    # ⚠️ 声明式 Serializer 只输出**显式声明**的字段 —— 服务层算了但这里漏声明，
+    #    前端拿到的是 `undefined`（静默，不报错）。
+    treasure_badge = serializers.CharField(read_only=True, allow_null=True)
+    # 那条档案的 id：已评价时点徽标要去**同一条**补理由，不是再建一条。
+    treasure_record_id = serializers.IntegerField(read_only=True, allow_null=True)
+    # 快记浮层的类别预填建议（后端按物品类别猜的）—— 前端不自己映射。
+    treasure_suggest_category = serializers.CharField(read_only=True, allow_null=True)
+    # ⚠️ 三个都要 `read_only` + `allow_null`：`allow_null` 是给「拿 dict / 对象序列化」兜底的 ——
+    #    键不在上面时 DRF 只能抛 `KeyError`，整条接口 500。
+    #    本 app 的 `/items/preview/` 走的是另一个序列化器（`SurvivalItemPreviewSerializer`），
+    #    所以这里目前不会炸；但同一个坑留着 —— 谁把它用在 dict 上谁就踩，与属性资产的实案同理。
 
 
 class SurvivalRecipeLineSerializer(serializers.Serializer):
@@ -287,7 +296,6 @@ class SurvivalItemLifeSerializer(SurvivalScoredSerializer):
     life_mode = serializers.CharField(allow_null=True)
     days_per_unit_effective = serializers.FloatField(allow_null=True)
     interval_days = serializers.FloatField(allow_null=True)
-    hours_per_unit = serializers.FloatField(allow_null=True)
     satiety = serializers.CharField()
     grade = serializers.CharField()
     status = serializers.CharField()
@@ -295,7 +303,6 @@ class SurvivalItemLifeSerializer(SurvivalScoredSerializer):
     restock_threshold = serializers.FloatField(allow_null=True)
     expire_date = serializers.CharField(allow_null=True)
     expire_cap_days = serializers.IntegerField(allow_null=True)
-    hours_total = serializers.FloatField(allow_null=True)
     issues = SurvivalIssueSerializer(many=True, required=False)
 
 
@@ -324,7 +331,6 @@ class SurvivalCategoryResultSerializer(SurvivalScoredSerializer):
     usable_item_count = serializers.IntegerField()
     item_count = serializers.IntegerField()
     snack_days = serializers.FloatField(allow_null=True)
-    hours_total = serializers.FloatField(allow_null=True)
     trustworthy = serializers.BooleanField()
     items = SurvivalItemLifeSerializer(many=True, required=False)
     recipes = SurvivalRecipeResultSerializer(many=True, required=False)
@@ -644,7 +650,6 @@ class SurvivalMetaSerializer(serializers.Serializer):
     satiety_counted = serializers.ListField(child=serializers.CharField())
     grades = SurvivalOptionSerializer(many=True)
     statuses = SurvivalOptionSerializer(many=True)
-    priorities = SurvivalOptionSerializer(many=True)
     roles = SurvivalOptionSerializer(many=True)
     # 按次计量的周期单位（天 / 周 / 月）
     use_cycle_units = SurvivalOptionSerializer(many=True)
@@ -755,8 +760,8 @@ class SurvivalItemFormSerializer(serializers.ModelSerializer):
         model = SurvivalItem
         fields = [
             'id', 'category_id', 'name', 'quantity', 'unit_id',
-            'satiety', 'grade', 'status', 'priority',
-            'days_per_unit', 'hours_per_unit',
+            'satiety', 'grade', 'status',
+            'days_per_unit',
             'uses_per_unit', 'use_cycle_num', 'use_cycle_unit', 'use_times',
             'stocktake_cycle_days', 'restock_threshold',
             'expire_date', 'purchase_date', 'purchase_cost',
@@ -767,11 +772,9 @@ class SurvivalItemFormSerializer(serializers.ModelSerializer):
             'name': {'required': True, 'allow_blank': False},
             'satiety': {'required': False, 'allow_blank': True},
             'grade': {'required': False, 'allow_blank': True},
-            'priority': {'required': False, 'allow_blank': True},
             'notes': {'required': False, 'allow_blank': True},
             'tags': {'required': False},
             'days_per_unit': {'required': False, 'allow_null': True},
-            'hours_per_unit': {'required': False, 'allow_null': True},
             'uses_per_unit': {'required': False, 'allow_null': True},
             'use_cycle_num': {'required': False, 'allow_null': True},
             'use_cycle_unit': {'required': False, 'allow_null': True},
@@ -1097,7 +1100,6 @@ class SurvivalSnapshotCategorySerializer(serializers.Serializer):
     usable_item_count = serializers.IntegerField()
     item_count = serializers.IntegerField()
     snack_days = serializers.FloatField(allow_null=True)
-    hours_total = serializers.FloatField(allow_null=True)
     issue_count = serializers.IntegerField()
     trustworthy = serializers.BooleanField()
 

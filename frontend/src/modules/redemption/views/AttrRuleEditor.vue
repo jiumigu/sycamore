@@ -3,7 +3,7 @@
     <el-alert
       type="info" :closable="false" show-icon
       title="外挂归因规则"
-      description="把 ATracker 任务映射到五类归因：任务名称 / 任务类型按名字精确匹配，活动类型(L2) 按 task_name 反查任务台账取得；重叠时取高优先级。规则不写进 ATracker 表，只存在于赎回模块。⚠️ 这里是规则的唯一管理口：时间统计台账里按任务名改归因写入的规则也会出现在下方列表；按 L2 活动类型 / 任务类型的规则会同时覆盖多个任务名，只能在停用或删除。优先级 0–99（台账按任务名写入的规则固定 100，高于此处手工规则）。"
+      description="把 ATracker 任务映射到六类归因：任务名称 / 任务类型按名字精确匹配，活动类型(L2) 按 task_name 反查任务台账取得；重叠时取高优先级。规则不写进 ATracker 表，只存在于赎回模块。⚠️ 这里是规则的唯一管理口：时间统计台账里按任务名改归因写入的规则也会出现在下方列表；按 L2 活动类型 / 任务类型的规则会同时覆盖多个任务名，只能在停用或删除。优先级 0–99（台账按任务名写入的规则固定 100，高于此处手工规则）。"
     />
 
     <!-- 新增规则 -->
@@ -70,7 +70,9 @@ import * as rapi from '../api/redemptionApi'
 import type { AttrRule, AttrField, Attribution } from '../types/redemptionTypes'
 import { ATTRIBUTION_META } from '../types/redemptionTypes'
 
-const ATTRIBUTIONS: Attribution[] = ['成长', '关系', '维持', '谋生', '流失']
+// 从 ATTRIBUTION_META 的键派生（顺序 = 对象插入序，与后端价值序一致）——
+// 这里曾硬编码五项，加「体验」时会**静默漏一个选项**（界面看不出少，只是选不到该归因）。
+const ATTRIBUTIONS: Attribution[] = Object.keys(ATTRIBUTION_META) as Attribution[]
 const rules = ref<AttrRule[]>([])
 const saving = ref(false)
 

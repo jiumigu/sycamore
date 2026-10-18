@@ -26,13 +26,26 @@ export const useAssetStore = defineStore('asset', () => {
   const accountSummary = ref<AssetAccountSummary | null>(null)
   const snapshots = ref<AssetSnapshotRow[]>([])
 
+  /**
+   * **快照**请求的 loading。
+   *
+   * 🔴 它只代表「快照在取数」这一件事，**不是「这个 store 在忙」**。
+   *    2026-10-16 实例：`AccountPanel`（科目表）曾拿它当自己的 `v-loading`，
+   *    于是**任何快照请求**（刷新按钮 / 保存 / 页面挂载）都会在科目表上盖一层
+   *    遮罩；那层遮罩**会吃掉点击**，表现成「点『编辑』毫无反应」，
+   *    而且点击**不会补发** —— 用户必须再点一次才有效。
+   *    口径：**每张表的遮罩只跟这张表自己的取数走**（见 `accountsLoading`）。
+   */
   const loading = ref(false)
+  /** **科目**请求的 loading —— 只服务 `AccountPanel` 那张表 */
+  const accountsLoading = ref(false)
   const saving = ref(false)
   /** 快照列表期数（月度数据用「最近 N 期」而非分页） */
   const snapshotLimit = ref(24)
 
   // ─── 取数 ───
   async function fetchAccounts(includeInactive = true) {
+    accountsLoading.value = true
     try {
       const [listResp, summaryResp] = await Promise.all([
         wealthApi.getAssetAccounts({ include_inactive: includeInactive ? 1 : 0 }),
@@ -43,6 +56,8 @@ export const useAssetStore = defineStore('asset', () => {
       accountSummary.value = (summaryResp.data as AssetAccountSummary) ?? null
     } catch (e) {
       console.error('获取资产科目失败:', e)
+    } finally {
+      accountsLoading.value = false
     }
   }
 
@@ -152,7 +167,7 @@ export const useAssetStore = defineStore('asset', () => {
 
   return {
     accounts, accountSummary, snapshots,
-    loading, saving, snapshotLimit,
+    loading, accountsLoading, saving, snapshotLimit,
     fetchAccounts, fetchSnapshots, fetchAll,
     saveAccount, removeAccount, seedAccounts,
     saveSnapshot, removeSnapshot, loadSnapshot,

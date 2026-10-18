@@ -130,7 +130,7 @@
 | `services/cashflow_service.py` | 现金盘点（资产全景/趋势/快照CRUD/复制上月；旧「对账」已于 v3.60.14 删除） |
 | `services/debt_service.py` | 负债与应收逐笔台账（还款优先级/账龄分桶/逾期/快照对账） |
 | `services/asset_service.py` | 资产科目主数据与按科目的资产快照（roll-up 汇总/种子科目/回填/跨模块取数 `net_worth_by_yearmon`；旧表双跑校验已删） |
-| `services/classify_service.py` | 账单项分类（`match_classify_rule` **全项目唯一匹配实现** / 规则 CRUD / 三维度汇总与覆盖率 / 未归类候选 / 影响预览） |
+| `services/classify_service.py` | 账单项分类（`match_classify_rule` **全项目唯一匹配实现** / 规则 CRUD / 三维度汇总与覆盖率 / 未归类候选 / 影响预览 / `get_bill_category_options` **快速记账候选值的唯一口径** —— 账本真实层级 ∪ 口径配置登记值，前端不许再写分类常量） |
 | `services/expense_estimate.py` | 月均支出三点估算 `E=(O+4M+P)÷6`（应急金与比率的**共用分母**唯一实现） |
 | `services/ratio_service.py` | 六项规划比率（取数 / 逐月趋势 / 锚定月 / 资产位置 / 口径元信息），**不含阈值** |
 | `services/ratio_grade.py` | 判档唯一实现 `grade_ratio`（按 `constants.RATIO_BANDS` 判 good/warn/danger/normal），**不含阈值字面量** |
@@ -206,6 +206,7 @@
 | GET | /classify/rules/periods/ | 有账单数据的年月列表（**裸数组**，倒序） |
 | GET | /classify/results/?yearmon= | 归类汇总（三个维度 + 各维度覆盖率 + 排除项；不传 = 全周期） |
 | GET | /classify/results/unclassified/ | **未归类候选**（按 分类/子分类 聚合，金额降序，附建议规则） |
+| GET | /classify/bill-options/ | **快速记账的「分类 / 子分类」候选值**（账本真实层级 ∪ 口径配置登记值；按笔数降序；含 `subcategories_all` 与 `ungrouped`。⚠️ **静态路径，必须排在 `include(router.urls)` 之前**） |
 | GET | /ratios/ | 六项规划比率总览（?anchor=YYYY-MM 锚定月） |
 | GET | /ratios/trend/ | 逐月趋势（?months=；缺月为 `available=false`，前端画断点） |
 | GET | /ratios/anchors/ | 可选锚定月列表（**裸数组**） |
@@ -286,7 +287,7 @@
 | `net_worth` | `total_assets − borrow` | borrow 在快照头上（负债不是资产，不进科目表） |
 | `available_net_worth` | `financial_assets − borrow` | 「能变成钱的净值」，剔除自用资产 |
 
-### 四条强制约定
+### 五条强制约定
 
 1. **`category` 与 `is_liquid` 是两个正交维度。** `category` 回答「这是什么资产」（财务规划的配置视角），
    `is_liquid` 回答「能不能马上用」（应急金分子）。公积金是「`category=流动性` 但 `is_liquid=False`」
@@ -299,6 +300,14 @@
    会与明细对不上。对应口径：**金额是历史事实、不可变；分类是当前视角、随科目主数据联动。**
 4. **科目被任何快照引用后不可删除**（FK `PROTECT` + 视图转 400），只能 `is_active=False` 停用。
    否则删科目会把历史快照悄悄挖空，往期净资产凭空变化。
+5. **表单校验消息必须中文化、且自带字段中文名**（v3.62.18）。`config/settings.py` 没设
+   `LANGUAGE_CODE` ⇒ DRF 走默认 `en-us`，字段级错误会回
+   `{"code": ["Ensure this field has no more than 20 characters."]}`；
+   而前端提示条**只显示一句话、不渲染 key**（`shared/utils/apiError`）⇒ 消息里要写
+   「映射码」而不是 `code`。写法见 `AssetAccountFormSerializer.Meta.extra_kwargs`。
+   ⚠️ **不许为了迁就用户输入而放宽 `code.max_length`**：改列要迁移，**未跑的窗口期内**
+   DRF 按模型放行、库里仍是 `varchar(20)` ⇒ MySQL 严格模式报 1406（500），比现在的 400 更糟。
+   这个字段的语义是「旧表列名」，本就短标识；用户想区分账户，靠「科目名 + 机构」即可（§96.5）。
 
 ### 与旧表的关系：并行 + 不自动迁移（「双跑」已于 v3.60.7 退役）
 
@@ -421,6 +430,30 @@ cd backend && ../.venv/bin/python manage.py migrate wealth
 `migrate`；测试库结构由 `backend/conftest.py` 的 session 级镜像 DDL 保证
 （DDL 须与 `sqlmigrate wealth 0018` 输出逐字对齐）。
 
+### 快速记账的候选值（v3.62.17）
+
+`GET /classify/bill-options/` → `services/classify_service.get_bill_category_options()`。
+
+**候选 = 账本真实出现过的值 ∪ 口径配置里登记过（`is_active=True`）的值** —— 缺一不可：
+
+| 来源 | 给什么 | 少了它会怎样 |
+|---|---|---|
+| 账本 `wealth_bill_list` | 分类→子分类的**真实层级** + 按笔数的排序 | 选不到「早午晚餐」这类高频子分类 |
+| 口径配置 `wealth_classify_rule` | 用户**登记过**但账本尚未出现的值 | 新登记的分类记账时选不到 |
+
+🔴 **层级只能在账本里取**：`rule_field` 下 `category` 与 `subcategory` 是**两个平行的匹配
+字段**，一条子分类规则**不声明**它属于哪个分类 —— 父子关系只存在于账本数据的共现关系里。
+⇒ 所以「联动」也由后端下发的 `subcategories`（分类 → 该分类下的子分类）驱动，前端不自己配对。
+
+🔴 **为什么不能「只用口径配置」**：规则表里 `subcategory` 匹配值实测 **14 个**，而账本里
+用过 **60 个** —— 最高频的「早午晚餐(3026) / 日常用品(573) / 水果-牛奶(573) / 线上生鲜(249) /
+话费(246)」**一个都不在规则表里**，因为它们被「分类 = 食品酒水 / 日常生活」的分类级规则
+整体覆盖。只取口径配置 = 候选从 60 砍到 14，是**功能倒退**。
+
+⚠️ `subcategories_all`（跨分类去重的全局表）也**由后端算好**下发 ——
+不让前端把 `subcategories` 自己拍平，因为拍平就得在前端再决定一次顺序（顺序也是口径）。
+⚠️ `subcategories` 的**键序按 `categories` 排**（不能拿 `set` 拼 —— 迭代顺序不可预测）。
+
 ### 与其他阶段的关系
 
 `classify_dimension_totals()` 是给比率体系（P2-A）取数用的轻量入口 ——
@@ -435,11 +468,18 @@ cd backend && ../.venv/bin/python manage.py migrate wealth
 
 ## 生存资源盘点（v3.59.0 一期 / v3.59.1 二期 / v3.59.3 实盘盘点 / v3.59.7 必需品对账，P3-A）
 
-盘的是**物**（吃 / 穿 / 用 / 数字 / 医药），回答两个问题：
+盘的是**物**（吃 / 穿 / 用 / 医药），回答两个问题：
 
 > 按现在的消耗方式，这些东西还能撑多久；哪一类先断；断的是钱这条腿还是物这条腿。
 >
 > 以及（v3.59.7）：**「我漏了什么」** —— 天数答不了这件事，因为没录入的东西不在分母里。
+
+⚠️ 默认类别种子里的「**数字**」（书与课程：一册能读多少天 / 每册多少小时）
+已于 v3.62.13 退役 —— 判据是「一册能读多少天」**不是一个可观测的量**
+（研读与通读能差十倍），与本节「把问题换成可观测的量」正好相反。
+书籍本来就有自己的家（`book` app 记读没读完、`temporal` 记投入小时）。
+连带退役的还有 `consume_mode='time_based'`、`SurvivalItem.hours_per_unit` /
+`priority`、`SurvivalSnapshotCategory.hours_total` —— 全库实测 0 条有值。
 
 与同 app 里的金融资产体系**刻意分开命名**：`WealthAsset*` 是钱，`Survival*` 是物。
 `wealth_asset_snapshot` 这个表名早已被金融侧占用，照抄必撞。
@@ -1146,7 +1186,8 @@ cd backend && ../.venv/bin/python manage.py migrate wealth
 
 ⇒ 四卡上的「穿 24.1 年」**不会**因为升级而变，还要在页面上走两步：
 
-1. 页头「**初始化默认类别**」→ 首次会建出 5 个类别（含医药）；类别已存在时会弹一次
+1. 页头「**初始化默认类别**」→ 首次会建出 **4** 个类别（吃 / 穿 / 用 / 医药；
+   v3.62.13 起不再建「数字」）；类别已存在时会弹一次
    「覆盖类别口径」确认 —— **要点「覆盖」**，「穿」「用」才会从求和改成取最小；
 2. 缺口对账卡里的「**初始化基准清单**」→ 写入 29 项基准项（缺类别时被跳过的项会列出来，
    不静默略过）。
@@ -1187,8 +1228,9 @@ cd backend && ../.venv/bin/python manage.py migrate wealth
   目前都只有 `manual`。枚举位已留、逻辑未写 ——
   做之前要先想清楚：自动生成的那一份**不可编辑**、库存还会被直接校准，
   必须明确失败时的处理，否则会造出一批改不掉的假历史 + 被悄悄改坏的库存
-- 数字类（书）**不重复建模书单**：只建「物品行」表达可消费时长；
-  若要读已有 `book` app 数据，三期再做只读聚合
+- （原「数字类（书）不重复建模书单」一条已随该类别退役作废 —— v3.62.13。
+  书与课程不进这张表：生存资源盘点回答的是「断粮断药能撑多久」，
+  不是「还有几本书没看」。）
 - **必需品缺口接进 `Notification`**（v3.59.7）：现在只在面板上显示，不会主动提醒。
   做时要分「核心项未闭合」与「已告急」两类 —— 合成一个「物资告警」会让人分不清
   该去补数据还是该去补货
@@ -1336,3 +1378,116 @@ python manage.py wealth_seed_property_categories --overwrite  # 覆盖图标 / �
 - **自定义折旧方式**（双倍余额递减等）：刻意只保留直线法 + 残值 0，
   **不提供残值率之类的可调参数** —— 可调参数会让两台空调的净值不可比。
 - **`icon` 字段目前没有编辑入口**：类别弹窗刻意不放（见上）。
+
+---
+
+## 身上之物（v3.62.4，P4-B）
+
+> 设计稿 `docs/身上之物-功能设计-v0.1-20261014.md`；改动清单 `docs/P4-B-身上之物-改动清单-20261014.md`。
+
+给「我该有一副合适的眼镜、现在还没有」一个能落下的地方。**它不记数量、只记结论** ——
+办到哪一步了、现在顶着用的那件称不称心、想找什么样的。
+
+| 管什么 | 表前缀 | 单位 | 一句话判据 |
+|---|---|---|---|
+| 钱 | `Wealth*` | 元 | 账上有多少 |
+| 消耗物 | `Survival*` | 天 | 会被用完 |
+| 耐用品 | `WealthProperty*` | 年 / 元 | 会被用坏 |
+| **身上之物** | **`WealthBody*`** | **无** | **该不该有 · 找到了没有** |
+
+🔴 **不出现任何「数量」字段**。一旦允许填数量，它立刻退化成物品清单的第二个录入口 ——
+而「数量」这层语义在别的模块已有唯一真源（同一事实只能一把尺子）。
+
+### 数据模型（2 张 managed 表，一段迁移 `wealth/0028_body_need`）
+
+| 表 | 关键点 |
+|---|---|
+| `wealth_body_part` | 部位主数据（眼/耳/鼻/口/脸/头发/手/指甲/身体四肢/脚/私处）；唯一键 `(user_id, name)` 名 `wealth_body_part_user_name_uniq`；`sort_order` 决定清单里的分组顺序 |
+| `wealth_body_need` | 「位」本体；FK `part` 用 **`PROTECT`**（其下有位不许删）；`property` / `survival_item` 两个 FK 均 **`SET_NULL`**；索引显式命名 `wealth_body_need_user_part_idx` / `wealth_body_need_status_idx` |
+
+- ⚠️ **没有 `icon` 字段**（设计稿有，刻意不加）：全仓查过，`WealthPropertyCategory.icon` **零渲染**，
+  再加一个没人读的字段就是又一个「文件存在 ≠ 功能在用」。将来要在列表画图标，那时连迁移一起加。
+- ⚠️ `conftest.py` 已同步两条 `CREATE TABLE IF NOT EXISTS`，DDL 与 `sqlmigrate wealth 0028`
+  **逐字对齐**（含约束名 / 索引名 / 无 `ON DELETE`）。部位表排在位表**之前**（FK 依赖）。
+- **seed 随迁移跑一次**（部位 11 条 + 位 6 条），带反向函数；**绝不写「表空就补」**
+  —— 用户删掉的部位不该自己回来。反向函数只删「仍是初始状态」的那些行。
+
+### 三把尺子正交，互不推导（本模块最要紧的口径）
+
+| 尺子 | 字段 | 取值 | 它量的 |
+|---|---|---|---|
+| 进度 | `find_status` | 待寻 / 寻找中 / 已找到 | 事办到哪一步了 |
+| 满意 | `satisfaction` | 凑合 / 还行 / 称心（**可空**） | 现在顶着用的那件好不好 |
+| 归属 | `property` / `survival_item` | 二选一（**可空**） | 现在用的是哪一件 |
+
+四种「进度 × 满意」组合都是真实存在的（已找到但只凑合 ⇒ 事**没结**），强行合并必错一种。
+⇒ `is_pending()` 的判据是「**不是 `settled`**」，**不是**「满意没到 good」。
+
+### 算法真源 `services/body_calc.py`（唯一实现）
+
+一、**两种「空」必须分开说**。`satisfaction` 为空有两种意思，混起来就会把「还没买」
+   写成「还没评」。`resolve_blank_reason()` 的判据是**「有没有挂东西」**，不是「进度到哪一步」：
+
+   | 情形 | 原因码 | `short` | `label` |
+   |---|---|---|---|
+   | 还没挂任何东西 | `no_item` | `—` | 还没有任何东西在用 |
+   | 挂了东西、还没评过 | `unrated` | `未评` | 有东西在用，但还没评过称不称心 |
+
+   🔴 `null` 不许重载两种含义（同 `property_calc.zero_reason`）。后端算原因码、前端只查表。
+   原因码走 `BODY_BLANK_REASONS` 下发，**每条同时给 `short` 与 `label`** ——
+   否则前端得自己把长句截成短句，那就是第二份映射。
+
+二、**`summarize()` 不落库**。顶部「N 件还没搞定」运行时从清单算，
+   且 `pending_count` 必须等于 `?pending=1` 的行数（用例 `test_pending_count_equals_pending_list_length` 钉死）。
+   ⚠️ 前端 `BodyNeedTable` 另写了一遍 `find_status !== 'settled'` ⇒ **加一档状态时两边都要改**。
+
+三、**元信息不查库**。`get_meta()` 只下发常量：`find_statuses` / `satisfactions` /
+   `blank_reasons` / `metric_meta` / `part_seeds_available` / `subtitle` / `satisfaction_note`。
+   枚举与显示名**随接口下发、前端零副本**。`metric_meta` 恒 `bands: []`、`direction: 'neutral'`
+   —— 这里没有阈值、也没有高低方向。
+
+### 🔴 两个关联源互斥：必须合并原值再判
+
+「一件东西不可能既在物件资产又在物品清单」。**可空列上的约束 DRF 会静默放过**，
+所以互斥要手写（`BodyNeedFormSerializer.validate()` 与 `body_service._resolve_link()` 各一次）。
+
+⚠️ 更深一层：PATCH **只送一个**字段时，必须**把库里那行的原值合并进来再判**，
+否则旧的另一侧就漏过了 —— 两处都挂上、谁也没报错。
+
+### 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET / POST | `/api/wealth/body/parts/` | 部位列表（**裸数组**）/ 新建 |
+| PATCH / DELETE | `/api/wealth/body/parts/<id>/` | 改 / 删（其下有「位」⇒ 400） |
+| POST | `/api/wealth/body/parts/seed/` | 初始化默认部位（幂等，**只建部位、不预设任何位**；`overwrite` 覆盖说明与排序，**不碰任何一条位**） |
+| GET / POST | `/api/wealth/body/needs/` | 位列表（裸数组，支持 `?part=` `?find_status=` `?pending=1` `?search=`）/ 新建 |
+| PATCH / DELETE | `/api/wealth/body/needs/<id>/` | 改 / 删（物理删除） |
+| GET | `/api/wealth/body/summary/` | `{total, todo, searching, settled, pending_count}` |
+| GET | `/api/wealth/body/meta/` | 枚举 + 口径 + 两种空的说明（**不查库**） |
+
+- **全部 `pagination_class = None`**（裸数组，位的量级是个位数到十几条）。
+- `body/summary/` 与 `body/meta/` 走**静态路径且排在 router 之前**（项目既有约定，
+  否则会被 `body/needs/<pk>/` 之类的动态路由吃掉）。
+- **读接口不写库**：`GET` 无行回 `id=null` 的虚拟对象、**不做任何兜底补种**。
+
+### 明确未做（刻意留下）
+
+- **「不想找了」这个状态** ⇒ 它会变成**兜底桶**（同时装「真的不需要」与「暂时懒得找」）。
+  出口是删掉那条「位」，或把「不急」写进「想找什么样的」。反向钉子在元信息用例里
+  （`given_up` / `unwanted` / `skip` / `abandoned` 一律不许出现）。
+- **一个位挂多件** ⇒ 本轮拍板「先挂单件」。「日常镜 + 墨镜」本就该是**两个位**（部位都挂「眼」）。
+- 候选池 / 比价 / 购物链接 / 五档评分 / 名称模糊匹配后自动写 / 把价格天数搬过来显示 /
+  与「生存基准清单」互相关联 ⇒ 各自的理由见改动清单第六节。
+
+### 🔴 待手动执行（AI 不代跑）
+
+```bash
+cd backend
+mysqldump -h127.0.0.1 -uroot -p'Syca@2026..' --default-character-set=utf8mb4 sycamore > ../db_backups/sycamore_before_0028_$(date +%Y%m%d_%H%M).sql
+../.venv/bin/python manage.py migrate wealth
+```
+
+⚠️ **新表落库 ⇒ 旧代码路径也会 SELECT 它**：迁移没跑 = 这个页签整块显示「数据还没就绪」
+（`parts` / `needs` / `summary` 三个接口 500，`meta` 仍 200），**不是**「一条都没有」。
+

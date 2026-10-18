@@ -82,6 +82,7 @@ class Goal(models.Model):
 
     class Meta:
         db_table = 'goals_goal'
+        db_table_comment = '目标：一张表同时管年度 / 季度 / 月度 / 长期 / 项目五种粒度；进度由里程碑算出'
         verbose_name = '目标'
         verbose_name_plural = '目标'
         ordering = ['-created_at']
@@ -130,6 +131,7 @@ class Milestone(models.Model):
 
     class Meta:
         db_table = 'goals_milestone'
+        db_table_comment = '里程碑：目标下的阶段成果；完成时触发奖励发放（幂等）'
         verbose_name = '里程碑'
         verbose_name_plural = '里程碑'
         ordering = ['order_num', 'id']
@@ -154,6 +156,7 @@ class Action(models.Model):
 
     class Meta:
         db_table = 'goals_action'
+        db_table_comment = '行为记录：目标 / 里程碑下的打卡项，打卡记录存在 JSON 列里'
         verbose_name = '行为记录'
         verbose_name_plural = '行为记录'
         ordering = ['-created_at']
@@ -196,6 +199,7 @@ class GoalReview(models.Model):
 
     class Meta:
         db_table = 'goals_review'
+        db_table_comment = '目标回顾：周 / 月 / 里程碑完成时的复盘'
         verbose_name = '目标回顾'
         verbose_name_plural = '目标回顾'
         ordering = ['-review_date']
@@ -251,6 +255,7 @@ class OutputRecord(models.Model):
 
     class Meta:
         db_table = 'goals_output_record'
+        db_table_comment = '产出记录：用于统计良品率（良品 / 不良品 / 废品）'
         verbose_name = '产出记录'
         verbose_name_plural = '产出记录'
         ordering = ['-created_at']

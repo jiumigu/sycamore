@@ -33,6 +33,9 @@
         <span v-if="meta.unit" class="metric-tooltip__unit">单位：{{ meta.unit }}</span>
       </div>
 
+      <!-- 一句话说明（调用方给）：先回答「这是什么」，再讲「怎么算」 -->
+      <div v-if="hint" class="metric-tooltip__hint">{{ hint }}</div>
+
       <div class="metric-tooltip__formula">{{ meta.formula }}</div>
 
       <ul v-if="meta.note.length" class="metric-tooltip__note">
@@ -75,8 +78,18 @@ const props = withDefaults(defineProps<{
   /** 后端下发的口径元信息；为 null 时**不渲染**（而不是渲染一个空气泡） */
   meta: RatioMeta | null | undefined
   width?: number
+  /**
+   * 一句话说明（可选）：渲染在标题下、公式上。
+   *
+   * 🔴 本组件仍然**不持有任何文案** —— 这句话由调用方传入（如比率卡的
+   *    `item.hint`）。判据不变：口径只有一份，组件只负责排版。
+   * ⚠️ 只在**卡片「有值」时**才该传 —— 卡片**没值**时那句 hint 是「下一步该做什么」
+   *    （如「先补一期资产盘点」），属于**出口**，必须留在页面上（§79.2 / §79.5）。
+   */
+  hint?: string
 }>(), {
   width: 320,
+  hint: '',
 })
 
 /**
@@ -130,6 +143,10 @@ const bands = computed(() => {
 }
 .metric-tooltip__unit {
   color: var(--el-text-color-secondary);
+}
+.metric-tooltip__hint {
+  margin-bottom: 6px;
+  color: var(--el-text-color-regular);
 }
 .metric-tooltip__formula {
   padding: 6px 8px;

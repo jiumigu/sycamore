@@ -66,11 +66,14 @@ class LifeSample(models.Model):
     related_diary = models.JSONField('关联日记', default=list, blank=True)
 
     # 系统字段
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
 
     class Meta:
         db_table = 'life_sample'
+        db_table_comment = '人生样本索引：与 Obsidian 笔记一一对应的元数据；正文在 Obsidian，不在这里'
+        verbose_name = '人生样本'
+        verbose_name_plural = '人生样本'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['obsidian_path'], name='idx_ls_obsidian_path'),
@@ -117,10 +120,13 @@ class ObsidianConfig(models.Model):
     enabled = models.BooleanField('启用集成', default=False)
     vault_path = models.CharField('仓库路径', max_length=500, blank=True)
     samples_folder = models.CharField('样本文件夹', max_length=200, default='05_人生样本(LifeSamples)')
-    updated_at = models.DateTimeField(auto_now=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
 
     class Meta:
         db_table = 'obsidian_config'
+        db_table_comment = 'Obsidian 集成配置：单例；仓库路径与样本文件夹'
+        verbose_name = 'Obsidian 集成配置'
+        verbose_name_plural = 'Obsidian 集成配置'
 
     def __str__(self) -> str:
         return f"Obsidian: {'已启用' if self.enabled else '未启用'}"

@@ -267,6 +267,15 @@ def _build_overview(cf: WealthCashFlow, expense_estimate: dict | None = None,
         不给则按旧表 8 列口径现算（旧路径与 `test_cashflow_metrics` 的内存
         对象走这条），口径测试因此不受切源影响。
     """
+    # ⚠️ 这是**旧表 8 列的固定形状**，不是「当前所有科目」——
+    #    界面（饼图 / 汇总列 / 趋势线 / 快照历史列）按这些键取数，
+    #    用户自建的其它科目（证券账户、定期存款…）**不在这里**，
+    #    因此也不出现在这几个展示位上。
+    #    ⇒ 要让新科目上界面，得把展示层改成「按科目动态」，那是独立一轮，
+    #      别指望在这里 `**pos['accounts']` 一下就好 ——
+    #      前端那几处是写死的键名与中文标签，键传过去也没人认。
+    #    ✅ 唯一例外是公积金：它是**跨科目的语义量**，在 `_position_accounts`
+    #      里按形态合并到 `accumulationfund`（正是这 8 键之一），所以能显示。
     accounts = {
         'zplay': cf.zplay or 0,
         'wechat': cf.wechat or 0,
@@ -285,12 +294,14 @@ def _build_overview(cf: WealthCashFlow, expense_estimate: dict | None = None,
         # 口径由 asset_position 给定：新体系下「金融资产」含应收借出、
         # 「总资产」含自用资产，与下面这条旧公式不等价，故不重算。
         flow_total = float(metrics.get('liquid') or 0)
+        non_liquid = float(metrics.get('non_liquid') or 0)
         lend = float(metrics.get('receivable') or 0)
         financial_assets = float(metrics.get('financial_assets') or 0)
         total_assets = float(metrics.get('total_assets') or 0)
         net_worth = float(metrics.get('net_worth') or 0)
     else:
         flow_total = sum_liquid_accounts(cf)
+        non_liquid = 0.0       # 旧表 8 列没有非流动项（见 ratio_service._legacy_position）
         lend = float(cf.lend or 0)
         financial_assets = flow_total + accumulationfund   # wealth_cash_flow.total 的既有口径
         total_assets = financial_assets + lend             # 总资产：补回应收借出
@@ -342,6 +353,11 @@ def _build_overview(cf: WealthCashFlow, expense_estimate: dict | None = None,
         'accounts': accounts,
         'summary': {
             'flow_total': round(flow_total, 2),
+            # 非流动资金 —— 「金融资产」四行拆解里补的那一格（v3.62.28）。
+            # 🔴 它是「加得回去」的前提：改前 is_liquid=False 的余额
+            #    （三张储蓄卡 206,752.88）不属于任何一行，导致拆项之和
+            #    比金融资产少一截，而两边各自都「看着正常」。
+            'non_liquid': round(non_liquid, 2),
             'total': round(financial_assets, 2),
             'financial_assets': round(financial_assets, 2),
             'total_assets': round(total_assets, 2),

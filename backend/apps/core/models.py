@@ -11,6 +11,9 @@ class SystemPreset(models.Model):
         ('diary_tags', '日记流预设标签'),
         ('ask_tags', 'AI 问答库标签'),
         ('book_tags', '图书预设标签'),
+        # 作品的「发到哪」（v3.62.0）：出口去向是用户自己维护的短清单，
+        # 复用本表而不是新开一张 —— 它本来就是「供各模块下拉/点选」的容器。
+        ('work_channels', '作品出口去向'),
     ]
 
     preset_type = models.CharField('预设类型', max_length=50, choices=PRESET_TYPE_CHOICES, unique=True)
@@ -19,6 +22,7 @@ class SystemPreset(models.Model):
 
     class Meta:
         db_table = 'core_system_preset'
+        db_table_comment = '系统预设：一类一行（唯一），供各模块前端下拉 / 点选；标签预设、快捷短语、作品出口去向都放这里'
         unique_together = ['preset_type']
         verbose_name = '系统预设'
         verbose_name_plural = '系统预设'
@@ -54,6 +58,7 @@ class UserProfile(models.Model):
 
     class Meta:
         db_table = 'core_user_profile'
+        db_table_comment = '用户配置：单用户系统（user_id = 1），全局开关与路径都在这一行'
         verbose_name = '用户配置'
         verbose_name_plural = '用户配置'
 
@@ -81,6 +86,7 @@ class Notification(models.Model):
 
     class Meta:
         db_table = 'core_notification'
+        db_table_comment = '系统通知：来源模块 + 来源对象指向业务记录，业务记录删了通知仍在'
         ordering = ['-created_at']
         verbose_name = '系统通知'
         verbose_name_plural = '系统通知'
@@ -100,6 +106,7 @@ class MenuPreference(models.Model):
 
     class Meta:
         db_table = 'core_menu_preference'
+        db_table_comment = '菜单偏好：侧边栏「常用 / 归档」的持久化；menu_key 与前端菜单配置逐字对应'
         ordering = ['sort_order', 'menu_key']
         verbose_name = '菜单偏好'
         verbose_name_plural = '菜单偏好'
@@ -120,6 +127,7 @@ class MenuGroup(models.Model):
 
     class Meta:
         db_table = 'core_menu_group'
+        db_table_comment = '菜单分组：侧边栏分组的显示名、排序与是否显示'
         ordering = ['sort_order', 'group_key']
         verbose_name = '菜单分组'
         verbose_name_plural = '菜单分组'

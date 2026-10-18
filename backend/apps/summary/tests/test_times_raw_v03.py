@@ -21,8 +21,34 @@ class TestTimesRawExcludesDrain:
                 task_name=name, start_time=datetime.fromisoformat('2026-08-01 09:00:00'),
                 duration_hours=h, year=2026, mon='08', day=1,
             )
-        # 仅 ATTRIBUTION_COUNTED = {成长,关系,谋生,维持} = 10+2+4+2 = 18（流失与未归类不计）
+        # 仅 ATTRIBUTION_COUNTED = {成长,体验,关系,谋生,维持} = 10+2+4+2 = 18
+        # （流失与未归类不计；本用例里没有「体验」任务）
         assert ProgressAggregator._times_raw(2026) == 18.0
         assert ProgressAggregator._times_raw(2026, 8) == 18.0
         # 其它年份应无数据
         assert ProgressAggregator._times_raw(2025) == 0.0
+
+    def test_experience_is_counted(self):
+        """🔴 v3.60.36：「体验」**计入**时间投入（与 成长/关系/谋生/维持 同档）
+
+        钉住这个选择的后果：若哪天有人把它从 ATTRIBUTION_COUNTED 里拿掉，
+        过去所有旅游时长会**回溯性地**掉出计分（≈139.8h ≈ 4.7 点），
+        而且不会有任何地方报错 —— 分数只是悄悄变小。
+        """
+        TaskMeta.objects.create(task_name='旅游观景', activity_type='主动经历', default_attribution='体验')
+        TemporalTask.objects.create(
+            task_name='旅游观景', start_time=datetime.fromisoformat('2026-08-01 09:00:00'),
+            duration_hours=7.0, year=2026, mon='08', day=1,
+        )
+        assert ProgressAggregator._times_raw(2026) == 7.0
+
+    def test_drain_still_excluded_after_adding_experience(self):
+        """回归：加「体验」不得顺手把「流失」也放进来（同一天两条，只算体验那条）"""
+        TaskMeta.objects.create(task_name='旅游观景', activity_type='主动经历', default_attribution='体验')
+        TaskMeta.objects.create(task_name='刷短视频', activity_type='被动消耗', default_attribution='流失')
+        for name, h in [('旅游观景', 7), ('刷短视频', 3)]:
+            TemporalTask.objects.create(
+                task_name=name, start_time=datetime.fromisoformat('2026-08-02 09:00:00'),
+                duration_hours=h, year=2026, mon='08', day=2,
+            )
+        assert ProgressAggregator._times_raw(2026) == 7.0

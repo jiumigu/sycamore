@@ -13,8 +13,8 @@
 |-------|-------|------|
 | RedemptionPeriod | redemption_period | **单例（pk=1）**：窗口起止、现金池本金、暂停状态、阶段一基线 |
 | RedemptionPoolInject | redemption_pool_inject | 现金池中途注入流水（赔偿 / 借款 / 额外收入 / 其他） |
-| RedemptionAttrRule | redemption_attr_rule | **时间归因外挂规则**：ATracker 任务属性 → L1 归因五词 |
-| RedemptionWeekSnapshot | redemption_week_snapshot | 周归因快照（五类小时 + 覆盖率 + 成长占比 + 单位赎回成本），`unique_together(year, week)` |
+| RedemptionAttrRule | redemption_attr_rule | **时间归因外挂规则**：ATracker 任务属性 → L1 归因六词 |
+| RedemptionWeekSnapshot | redemption_week_snapshot | 周归因快照（六类小时 + 覆盖率 + 成长占比 + 单位赎回成本）。⚠️ **当前无写入/读取方**（阶段二预留），v3.60.36 加「体验」时未加列 —— 启用前须补 `experience_hours`，`unique_together(year, week)` |
 
 ⚠️ **绝不向 ATracker 的 `managed=False` 外部表加列** —— 归因只能靠 `RedemptionAttrRule` 外挂映射。
 
@@ -29,7 +29,7 @@
 | `compute_avg_daily_self_net` | 近 30 日日均净支出 |
 | `compute_support_until` | 按当前支出速度能撑到哪天 |
 | `match_attribution_rule` | **归因匹配唯一实现**（全项目共用，见下） |
-| `compute_time_attribution` | 五类归因小时 |
+| `compute_time_attribution` | 六类归因小时（键集由 `ATTRIBUTION_CHOICES_LIST` 派生，加词自动跟随） |
 | `compute_unit_cost` | 单位赎回成本 |
 | `compute_redemption_stats` | 汇总（`include_time=False` 时不查时间侧） |
 | `sync_to_scenario` | 把结果同步进 wealth 的推演场景（`mode='preview'` 为试算） |

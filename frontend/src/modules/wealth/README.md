@@ -22,7 +22,7 @@
 | `Legend.vue` | 收支等级图例 |
 | `WeekDetailModal.vue` | 周明细弹窗（⚠️「明细加载失败」与「本周无账单记录」是**两个状态**，由 store 的 `weekDetailError` 区分 —— 取不到不许显示成「没有」；失败给重试） |
 | `monthly/` | 月度日历子组件（CalendarHeader/CalendarGrid/StatsFooter/DayDetailModal） |
-| `common/QuickBillForm.vue` | 快速记账表单 |
+| `common/QuickBillForm.vue` | 快速记账表单（⚠️ 分类/子分类的候选**只有一个来源**：`GET /wealth/classify/bill-options/`。本组件**不自己取数、不持有任何分类常量** —— 取数时机由 `DayDetailModal` 决定；换分类会清空已选子分类） |
 | `common/LunarUtil.js` | 农历/节气/节日计算 |
 | `regular/RegularStatsCards.vue` | 定期统计卡 |
 | `regular/ExpiringAlert.vue` | 到期提醒列表 |
@@ -74,7 +74,7 @@
 | `cashflowStore.ts` | 资产盘点快照（全景/趋势/历史列表，月度粒度） |
 | `debtStore.ts` | 负债与应收逐笔台账（随时增删改，与快照分离） |
 | `assetStore.ts` | 资产科目主数据 + 按科目的资产快照（走 asset/* 接口；资产位置的唯一真源在服务层 `ratio_service.resolve_asset_*`，v3.60.5 起两条消费链已合并） |
-| `classifyStore.ts` | 账单项分类规则 + 三维度归类结果（规则一改结果即重算，含未归类候选与影响预览） |
+| `classifyStore.ts` | 账单项分类规则 + 三维度归类结果（规则一改结果即重算，含未归类候选与影响预览）+ **快速记账的候选值 `billOptions`**（v3.62.17；⚠️ 取数失败**保留上一次候选**、不清空 —— 清空等于用户当场没法记账） |
 | `ratioStore.ts` | 六项财务规划比率（总览 + 逐月趋势 + 锚定月 + 期初位置 + 口径元信息；**不含任何阈值**） |
 | `survivalStore.ts` | 生存资源盘点（五类分析 + 主数据 CRUD + **快照与趋势** + **工作表与实盘盘点历史** + **必需品基准与缺口对账** + **组合** + 口径元信息；派生 `activeCategoryResult` / `hasIssues` / `snapshotComparison` / `dueItems` / `restockItems` / `essentialSummary` / `essentialShortest` / `essentialUnclosed`；**不含任何阈值、不做任何折算、不重算分档**） |
 | `propertyStore.ts` | 物件资产（类别 / 台账 / 四卡 / 口径元信息；`available` 判据是「四卡拿到了」而不是「列表非空」—— 表没建时要说「迁移没跑」，不能说「一件家当都没有」；**不含任何算法、不做任何折算**） |
@@ -126,6 +126,10 @@ Vite 的热更新只重建 `.vue` 组件，而 **Pinia 的 store 实例是按 id
 - 账龄桶的标签与顺序**由后端下发**（`summary.aging`），前端只做渲染与着色，不重定义天数阈值。
 - 新面板的金额/人名/利率全部走 `shared/utils/privacy` 的统一实现，**不内联 `privacyMode ? '***' : x`**。
 - 接口失败的文案一律走 `shared/utils/apiError` 的 `apiErrorText()`（**唯一实现**，v3.60.18）。
+  🔴 v3.62.18 收敛掉 3 处**自己写**的 `apiError`（`AccountPanel` / `AssetSnapshotPanel` / `ClassifyRulePanel`）——
+  其中 2 处只认 `{"detail": …}`，DRF 的**字段级错误**（`{"code": ["…"]}`）一律被吞成「保存失败」。
+  字段级错误会**带字段名前缀**输出（`code：映射码最长 20 个字符…`）；
+  ⚠️ 但正解是**后端给中文 `error_messages` 且消息自带字段中文名** —— 提示条只显示一句话，不渲染 key（§96）。
   🔴 **5xx 不许把后端原文读给用户看**：`DEBUG=True` 下 500 回的是一整页 HTML Traceback（实测 20KB+），
   塞进提示条不只是「让用户读栈」—— 那坨文本会把提示条撑满整屏、**盖住后面的按钮**（实测点不动）。
   4xx（「会变成负数」这类**用户能改的**）必须原样透出，但统一截断到 120 字。
@@ -175,6 +179,27 @@ Vite 的热更新只重建 `.vue` 组件，而 **Pinia 的 store 实例是按 id
   看着像已生效。
 - 三维度覆盖率的分母**各不相同**（收入总额 / 支出总额 / 收支合计），
   所以三个百分比之间**不可比较**，UI 上也分开呈现、各自标注分母。
+
+### 快速记账的候选值从哪来（v3.62.17）
+
+**只有一个来源**：`GET /wealth/classify/bill-options/`（后端 `get_bill_category_options`）。
+`QuickBillForm.vue` 里原来那份 **17 项硬编码分类数组**（餐饮 / 交通 / 购物 / 居住…）
+已整个删除 —— 与账本真实口径（食品酒水 / 日常生活 / 行车交通…）对不上，
+全表 6588 行里只碰巧命中 3 行。**别再加回来。**
+
+| 该管的事 | 谁管 |
+|---|---|
+| 候选有哪些值、什么顺序 | 后端（账本笔数 ∪ 口径配置登记值） |
+| 联动（分类 → 该分类下的子分类） | 后端下发 `subcategories` |
+| 未选分类时的全局候选 | 后端下发 `subcategories_all`（🔴 **不许前端自己拍平 `subcategories`** —— 拍平就得再决定一次顺序，顺序也是口径） |
+| **什么时机取数** | 容器 `DayDetailModal` —— `watch(() => props.visible)` 每次打开刷一次 |
+| 只读与联动清空 | `QuickBillForm.vue`（换分类 ⇒ 清子分类） |
+
+🔴 **`el-dialog` 的插槽只在首次打开时渲染一次** ⇒ 弹窗内子组件的 `onMounted` 一生只跑一次，
+把取数挂在那里，第二次打开拿到的还是上一次的候选。必须挂容器的 `watch(visible)`。
+
+⚠️ `filterable` + `allow-create` 两个都要留：① 被停用过的分类名历史账单还在用；
+② 分类体系是长出来的，允许「先记账、后补规则」。
 
 ### 这一页的脱敏判据
 
@@ -315,7 +340,6 @@ E = (O + 4M + P) ÷ 6      O=最小月  M=中位数  P=最大月
 | `meal` | 配餐：主食位求和 → 与必配位取最小 | 配方卡（早/正餐各自能撑多少顿） |
 | `depreciation` | 按「一件还能穿多久」逐件折算 → 类内取最先穿坏的 | 物品表 + **衣物录入参考**（v3.59.8） |
 | `on_demand` | 按「一份用多久」逐件折算 → 类内取最先耗尽的 | 物品表 |
-| `time_based` | 按册数与节奏折算可读时长 | 物品表 |
 
 ⚠️ **「走哪条路」与「类内怎么聚合」是两件事**：前者看 `consume_mode`，
 后者看类别的 `aggregate_mode`。上表第二列写的是各模式的**默认**口径
@@ -633,7 +657,7 @@ v3.60.3 从「主表 + 展开子表」改成「一套网格 + 行合并」：
 「没有 `uses_per_unit` ⇒ 三个频次字段一律置空」，客户端送什么都一样；
 这边的显式 `null` 只是把话说清楚，不是不变量本身。
 
-⚠️ **读侧仍然是 `''`**（后端 `_item_row` 里 `or ''`）：与 `satiety` / `grade` / `priority`
+⚠️ **读侧仍然是 `''`**（后端 `_item_row` 里 `or ''`）：与 `satiety` / `grade`
 这些可选 CharField 同一惯例，**别按「可空」去改读侧类型**。
 
 ⚠️ 保存失败时的提示：`extractMessage` 现在会在**拿不到字段级原因、且状态码 ≥ 500** 时
@@ -1236,3 +1260,88 @@ scoped 样式够不着它 —— 用 class 会一行样式都不生效，而且�
   `hasText: /^1$/` 会**找不到**（超时）⇒ 脚本改用 `button.btn-next` / `.btn-prev` 翻页。
 - 🔴 **布尔的 `small` 已弃用**（每次渲染一条告警）⇒ 四处统一 `size="small"`；
   盘点记录的 `:total` 用记录数、`:data` 用行 —— 量溢出时别拿行数当页数。
+
+---
+
+## 身上之物：我该有什么、找到了没有（v3.62.4，P4-B）
+
+> 设计稿 `docs/身上之物-功能设计-v0.1-20261014.md`；改动清单 `docs/P4-B-身上之物-改动清单-20261014.md`。
+
+「物件资产」里的**第三个页签**（台账 / 物品清单 / **身上之物**）。管的不是数量，
+是「我该有一副合适的眼镜、现在还没有」这类事 —— 一句话结论：办到哪一步了、
+现在顶着用的那件称不称心、想找什么样的。
+
+### 文件
+
+| 文件 | 干什么 |
+|---|---|
+| `types/bodyTypes.ts` | 类型 + **两个只查表的展示辅助**：`blankReasonShort()` / `blankReasonLabel()` |
+| `api/bodyApi.ts` | 11 个接口 |
+| `stores/bodyStore.ts` | **独立 store**（不塞进 `propertyStore`，两个模块各取各的数、互不拖累） |
+| `components/body/BodyNeedSummary.vue` | 顶部「还有 N 件没搞定」+ 四个筛选档 |
+| `components/body/BodyNeedTable.vue` | 清单表（进度 / 满意**行内可改**，徽标只读可跳） |
+| `components/body/BodyNeedFormDialog.vue` | 新增 / 编辑（含跨两表的「用的是哪一件」） |
+| `components/body/BodyPartDialog.vue` | 部位维护（含「初始化默认部位」两段式确认） |
+
+### 🔴 前端的判据：只查表，不自己猜
+
+「满意」这一格有两种空，**原因码由后端下发**（`no_item` → `—` / `unrated` → `未评`），
+前端只做两件事：`blankReasonShort(meta, code)` 取短名、`blankReasonLabel(meta, code)` 取长句。
+**绝不按「值是否为空」自己判** —— 那会把「还没买」和「还没评」混成一格。
+
+⇒ 这也是为什么这两个辅助函数都收 `meta` 作参数：**枚举与显示名全部随接口下发，前端零副本**。
+（`bodyStore` 里 `blankReasonByValue` / `findStatusLabels` / `satisfactionLabels` 都是这么来的。）
+
+### 顶部计数与筛选**同源**
+
+`BodyNeedSummary` 的大数字是 `store.pendingCount`（后端 `summary.pending_count`），
+点它（`toggle('pending')`）后清单走 `?pending=1` —— **念的数和点进去看到的行数逐条相等**。
+「再点一次取消」是同一个 `toggle` 干的。
+
+⚠️ `BodyNeedTable` 里另写了一遍 `find_status !== 'settled'`（与后端 `is_pending` 同源但**是两处代码**）。
+一条后端用例钉着它们相等；**加一档状态时两边都要改**。
+
+### 行内可改，失败要**回读**
+
+进度 / 满意两列是行内 `el-select`，改完立刻 `PATCH`。失败时**必须 `await store.refreshAll()`** ——
+不回读的话，界面上停着用户刚选的那一档，而库里根本没变（「以为改了」）。
+
+### ⚠️ `el-select` 在弹窗里必须 `:teleported="false"`
+
+`BodyNeedFormDialog` 里**四处**下拉（部位 / 进度 / 满意 / 用的是哪一件）全都带了它。
+不加的话浮层会被挂到 `body` 上，与输入框分家 —— 滚动或关闭弹窗时浮层留在原地。
+实测确认：弹窗内 `.el-select-dropdown` 计数为 4、`body > .el-select-dropdown:visible` 计数为 **0**。
+
+### 「用的是哪一件」：一个下拉横跨两张表
+
+两个来源（物件资产 / 物品清单）合到一个下拉里，用**前缀字符串**承载跨表的类型：
+`property-12` / `item-34`，提交前 `resolveLink()` 拆回两个字段。
+⇒ 提交时**两个关联字段一起送**（一个给值、另一个给 `null`），避免只送一个时旧值残留。
+
+### 撤销评分送的是 `null`、不是空串
+
+实测请求体就是 `{"satisfaction": null}`。服务端也做了空串归一 ——
+**两头都收口，是为了不让「空」有第二种存法**。
+
+### 🔴 页签切分带出来的一处口径串台（顺手修掉）
+
+`PropertySummaryCards`（物件资产合计卡）与那句「不在净资产内」的说明，此前位于**两个页签之外** ⇒
+切到「身上之物」后它们会跟着显示，等于「身上之物的页面上挂着物件资产的合计」。
+本轮把这两块收进 `ledger` pane 内部，并实测确认：切页签后
+`propertyCardsVisible: false` / `netWorthNoteVisible: false` / `bodySummaryVisible: true`。
+
+⚠️ **页头按钮已按页签分流**（`v-if="activeTab === 'body'"` → 「新增一位」，否则「新增物件」）。
+以后再往这页加页签，**同一个按钮不要长出第三种含义**，该拆就拆。
+
+### 部位维护为什么是**弹窗**不是第四个页签
+
+部位是**低频**主数据（一两个月才动一次），而页签栏已经三项。
+按「按读的频率分流」：常态版面留给清单，维护入口收成右侧一个链接。
+「初始化默认部位」做成**两段式** —— 先补缺，若 `created === 0` 再问要不要覆盖说明与排序。
+
+### 迁移没跑时页面说什么
+
+`bodyStore.describeError` 把 `doesn't exist` / `1146` 翻成
+「请先执行迁移 `wealth/0028_body_need`」，`PropertyView` 顶部渲染 `el-alert`「身上之物的数据还没就绪」。
+⇒ 实测未迁移态：三个接口 500，但界面上说的是**「表还没建」而不是「一条都没有」**，
+合计卡计数为 0（不渲染）、页头按钮回落成「新增物件」、`pageerror` 为 0。

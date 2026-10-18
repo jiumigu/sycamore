@@ -240,15 +240,6 @@
           </el-form-item>
         </template>
 
-        <el-form-item v-if="isTimeBased" label="一册耗时">
-          <el-input-number
-            v-model="form.hours_per_unit"
-            :min="0.1"
-            :step="1"
-            :precision="1"
-          />
-          <span class="survival-item-dialog__suffix">小时；用来同时给出「还能读多少小时」</span>
-        </el-form-item>
       </template>
 
       <!-- 衣物录入参考（v3.59.8）—— 判据见文件头 -->
@@ -346,17 +337,6 @@
         <el-select v-model="form.grade" size="small" clearable class="survival-item-dialog__half">
           <el-option
             v-for="option in gradeOptions"
-            :key="option.value"
-            :label="option.label"
-            :value="option.value"
-          />
-        </el-select>
-      </el-form-item>
-
-      <el-form-item v-if="isTimeBased" label="优先级">
-        <el-select v-model="form.priority" size="small" clearable class="survival-item-dialog__half">
-          <el-option
-            v-for="option in priorityOptions"
             :key="option.value"
             :label="option.label"
             :value="option.value"
@@ -479,7 +459,6 @@ const form = reactive({
   unit_id: null as number | null,
   satiety: '',
   grade: '',
-  priority: '',
   status: 'stocked',
   /** 'day' 按天 / 'cycle' 按次 —— 两条口径互斥 */
   measure: 'day' as 'day' | 'cycle',
@@ -490,7 +469,6 @@ const form = reactive({
   use_times: null as number | null,
   stocktake_cycle_days: null as number | null,
   restock_threshold: null as number | null,
-  hours_per_unit: null as number | null,
   expire_date: null as string | null,
   notes: '',
 })
@@ -499,7 +477,8 @@ const category = computed(() => store.categories.find((c) => c.id === form.categ
 const mode = computed(() => category.value?.consume_mode ?? 'on_demand')
 const isMeal = computed(() => mode.value === 'meal')
 const isDepreciation = computed(() => mode.value === 'depreciation')
-const isTimeBased = computed(() => mode.value === 'time_based')
+// （`isTimeBased` 随「数字」类别退役 —— v3.62.13。它守的是「一册耗时」与
+//   「优先级（必读/通读）」两个字段，而那个类别下的计量方式被判定为不可预估。）
 
 /**
  * 这件物品的时长**是不是由配方说了算**（v3.60.25）。
@@ -561,10 +540,9 @@ const usesHint = computed(() => (
 const satietyOptions = computed(() => store.meta?.satiety ?? [])
 const gradeOptions = computed(() => store.meta?.grades ?? [])
 const statusOptions = computed(() => store.meta?.statuses ?? [])
-const priorityOptions = computed(() => store.meta?.priorities ?? [])
 /** 周期单位（天 / 周 / 月）—— 与后端 constants 同一份，前端不硬编码文案 */
 const useCycleUnits = computed(() => store.meta?.use_cycle_units ?? [])
-/** 消耗模式的中文名（配餐供餐 / 折旧消耗 / 按需消耗 / 时间消耗）也来自后端 */
+/** 消耗模式的中文名（配餐供餐 / 折旧消耗 / 按需消耗）也来自后端 */
 const modeLabel = computed(
   () => store.meta?.consume_modes.find((m) => m.value === mode.value)?.label ?? '',
 )
@@ -667,7 +645,6 @@ function onUnitCreated(unit: SurvivalUnit) {
 /** 「一件可用天数」那格的示例 —— 只讲这一格怎么填，不讲口径去了哪 */
 const lifeHint = computed(() => {
   if (isDepreciation.value) return '一件大衣还能穿 3 年 → 填 1095'
-  if (isTimeBased.value) return '一册书按我的节奏能读几天'
   return '一份能用多少天：一包纸巾用 10 天 → 填 10'
 })
 
@@ -734,9 +711,7 @@ function onCategoryChange() {
   form.use_cycle_num = 1
   form.use_cycle_unit = 'day'
   form.use_times = 1
-  form.hours_per_unit = null
   form.grade = ''
-  form.priority = ''
   // 配餐类默认「果腹」—— 它是唯一能顶一顿饭的角色，而这个类别全是吃饭的
   form.satiety = isMeal.value ? 'filling' : ''
 }
@@ -750,7 +725,6 @@ function resetForm() {
   form.status = 'stocked'
   form.satiety = isMeal.value ? 'filling' : ''
   form.grade = ''
-  form.priority = ''
   form.measure = 'day'
   form.days_per_unit = null
   form.uses_per_unit = null
@@ -759,7 +733,6 @@ function resetForm() {
   form.use_times = 1
   form.stocktake_cycle_days = null
   form.restock_threshold = null
-  form.hours_per_unit = null
   form.expire_date = null
   form.notes = ''
 }
@@ -779,7 +752,6 @@ watch(visible, (open) => {
   form.unit_id = item.unit_id
   form.satiety = item.satiety
   form.grade = item.grade
-  form.priority = item.priority
   form.status = item.status
   // 口径跟着已存的那条走；两条都没填时落回「按天」（更常见的那条）
   form.measure = item.life_mode === 'cycle' ? 'cycle' : 'day'
@@ -790,7 +762,6 @@ watch(visible, (open) => {
   form.use_times = item.use_times ?? 1
   form.stocktake_cycle_days = item.stocktake_cycle_days
   form.restock_threshold = item.restock_threshold
-  form.hours_per_unit = item.hours_per_unit
   form.expire_date = item.expire_date
   form.notes = item.notes
 })
@@ -932,7 +903,6 @@ function buildPayload(categoryId: number): SurvivalItemFormData {
     satiety: isMeal.value ? form.satiety : '',
     grade: form.grade,
     status: form.status,
-    priority: isTimeBased.value ? form.priority : '',
     // 口径归配方的物品不提交任何单件口径 —— 每天消耗多少由配方决定，
     // 两处都填会互相矛盾。而**没编进配方**的吃类物品要照常提交：
     // 那是它们唯一的入口（v3.60.25）。
@@ -950,7 +920,6 @@ function buildPayload(categoryId: number): SurvivalItemFormData {
     use_times: !byRecipe.value && byCycle.value ? form.use_times : null,
     stocktake_cycle_days: form.stocktake_cycle_days,
     restock_threshold: form.restock_threshold,
-    hours_per_unit: isTimeBased.value ? form.hours_per_unit : null,
     expire_date: form.expire_date,
     notes: form.notes,
   }

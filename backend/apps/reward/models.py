@@ -33,6 +33,7 @@ class GiftList(models.Model):
 
     class Meta:
         db_table = 'reward_gift_list'
+        db_table_comment = '礼物清单：想兑换的东西与兑换状态'
         verbose_name = '礼物清单'
         verbose_name_plural = '礼物清单'
         ordering = ['priority', '-created_at']
@@ -56,6 +57,7 @@ class RewardPool(models.Model):
 
     class Meta:
         db_table = 'reward_pool'
+        db_table_comment = '奖励池：单例（全局只有一行）；余额与累计收支'
         verbose_name = '奖励池'
         verbose_name_plural = '奖励池'
 
@@ -91,6 +93,7 @@ class RewardTransaction(models.Model):
 
     class Meta:
         db_table = 'reward_transaction'
+        db_table_comment = '奖励流水：append-only；每笔都记余额前后，可逐笔对账'
         verbose_name = '奖励流水'
         verbose_name_plural = '奖励流水'
         ordering = ['-created_at']

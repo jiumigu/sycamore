@@ -59,8 +59,8 @@ defineEmits<{
 const year = computed(() => props.review?.year ?? new Date().getFullYear())
 const month = computed(() => props.review?.month ?? new Date().getMonth() + 1)
 
+/** 金额格式化 —— 取不到由 formatAmount 统一给「—」，本处不再兜 0 */
 function fmt(v: number | null | undefined): string {
-  if (v === null || v === undefined) return '0.00'
   return formatAmount(v)
 }
 

@@ -1,10 +1,14 @@
+from datetime import datetime, timedelta
+
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from django.db.models import DateField, Sum
 from django.db.models.functions import Cast
+from django.utils import timezone
 
 from .models import HealthRecord, MenstrualRecord, WeightGoal, WeightGoalAdjustment, WeightMilestone, WeightRecord, UserBodyInfo
 from .serializers import (
@@ -17,6 +21,22 @@ from .serializers import (
     WeightRecordSerializer,
 )
 from .services import HealthStatsService, WeightService
+
+
+def _parse_day(raw, field_name):
+    """`YYYY-MM-DD` → **当天 00:00 的 aware datetime**；格式不合法直接 400。
+
+    ⚠️ 刻意不返回 `date`：调用方要拿它跟 `HealthRecord.time`（`DateTimeField`）比较。
+    ⚠️ 空值（`None` / `''`，即前端清空筛选）返回 `None` —— 由调用方表示「这一端不限」，
+       不是错误。
+    """
+    if not raw:
+        return None
+    try:
+        d = datetime.strptime(raw, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        raise ValidationError({field_name: '日期格式应为 YYYY-MM-DD'})
+    return timezone.make_aware(datetime.combine(d, datetime.min.time()))
 
 
 class HealthRecordViewSet(viewsets.ModelViewSet):
@@ -45,6 +65,24 @@ class HealthRecordViewSet(viewsets.ModelViewSet):
         htype = params.get('htype')
         if htype:
             qs = qs.filter(htype=int(htype))
+
+        # 日期范围（供筛选栏用）：`start` / `end` 均为 `YYYY-MM-DD`，
+        # **两端各自独立** —— 只填 start = 那天起；只填 end = 到那天为止。
+        #
+        # 🔴 必须是**半开区间** `[start 00:00, end+1天 00:00)`，不能写 `time__date__lte=end`：
+        #    ① 这张表是**无时区 DATETIME**（`managed=False`）；`__date` 查询会让
+        #       MySQL 做 `CONVERT_TZ` —— 本模块为绕开那个坑，其余按「天」取数的
+        #       地方（如 `daily_detail`）也一律走 datetime 范围比较。
+        #    ② 写成 `time__lte=end 00:00` 会把**结束日一整天**丢掉（当天 00:00 之后全不算）。
+        # ⚠️ `time` 为 NULL 的行会被 `time__gte` 自然排除（SQL 里 NULL 参与比较得 NULL）——
+        #    符合预期：没有时间的记录不该出现在「某段日期」的结果里。
+        start_dt = _parse_day(params.get('start'), 'start')
+        if start_dt:
+            qs = qs.filter(time__gte=start_dt)
+        end_dt = _parse_day(params.get('end'), 'end')
+        if end_dt:
+            # `Asia/Shanghai` 无夏令时 ⇒ `+1 day` 就是次日 00:00，无需再换算
+            qs = qs.filter(time__lt=end_dt + timedelta(days=1))
 
         return qs
 

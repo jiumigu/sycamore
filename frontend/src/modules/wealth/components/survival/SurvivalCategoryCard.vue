@@ -54,9 +54,6 @@
           配餐外另 {{ formatDays(result.snack_days) }}
         </span>
       </el-tooltip>
-      <span v-if="result.hours_total !== null" class="survival-card__foot-item">
-        可读 {{ formatHours(result.hours_total) }}
-      </span>
     </div>
 
     <!-- 短板只在算得出来时才说，算不出来时上方已显示原因 -->
@@ -71,7 +68,7 @@
 import { computed } from 'vue'
 import { Bottom, Box, Food, Handbag, Notebook, Reading } from '@element-plus/icons-vue'
 import MetricTooltip from '../common/MetricTooltip.vue'
-import { formatDays, formatHours, formatSpread } from '../../utils/survivalFormat'
+import { formatDays, formatSpread } from '../../utils/survivalFormat'
 import type { SurvivalCategoryResult } from '../../types/survivalTypes'
 import type { RatioMeta } from '../../types/wealthTypes'
 

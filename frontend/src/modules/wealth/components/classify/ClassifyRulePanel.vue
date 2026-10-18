@@ -3,6 +3,21 @@
     <div class="panel-header">
       <div class="panel-header__left">
         <h3>账单项分类规则</h3>
+        <!--
+          🔴 这条说明**没有删**，只是从页头下方那条 ≈80px 的 el-alert 收进了气泡。
+             按 §79.1 的分流判据：它是**读一次就够的说明**，不是每次进页面要确认的状态。
+             ⚠️ 收进气泡的只有「说明」—— 下方「新增规则」弹窗里那条
+                「三个标签至少要设一个」的 warning alert 是**校验提示**（出口性质），
+                必须留在页面上，不要一起去收（§79.2）。
+        -->
+        <InfoTip
+          :width="460"
+          title="分类是「当前视角」，不是历史事实 —— 改规则会让往期数字一起变"
+        >
+          金额是已经发生的事实，分类是「你今天怎么看这笔钱」。所以这里不存分类结果，
+          每次都按当前规则实时算。改动前请先点「影响预览」看会动多少；
+          若只是想暂时不生效，用「停用」而不是删除。
+        </InfoTip>
         <span class="panel-header__hint">
           一张规则表同时管三件事：收入是主动还是被动、支出是固定还是可变、现金流归到五类中的哪一类
         </span>
@@ -38,21 +53,11 @@
       </div>
     </div>
 
-    <el-alert
-      class="explain-alert"
-      type="info"
-      :closable="false"
-      show-icon
-    >
-      <template #title>
-        分类是「当前视角」，不是历史事实 —— 改规则会让往期数字一起变
-      </template>
-      <div class="explain-alert__body">
-        金额是已经发生的事实，分类是「你今天怎么看这笔钱」。所以这里不存分类结果，
-        每次都按当前规则实时算。改动前请先点「影响预览」看会动多少；
-        若只是想暂时不生效，用「停用」而不是删除。
-      </div>
-    </el-alert>
+    <!--
+      原「分类是『当前视角』」说明 alert 就在此处（≈80px 竖向），v3.62.16 起收进
+      页头标题旁的 ⓘ 气泡（见上方 panel-header__left 里的 <InfoTip>）。
+      内容一字未减，只是换了住址 —— 别当成「这段说明被删了」。
+    -->
 
     <!-- ── 覆盖率：三个维度各自算账，分母不同 ── -->
     <div v-if="summary" class="coverage-block">
@@ -480,6 +485,8 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, ArrowDown } from '@element-plus/icons-vue'
+import InfoTip from '@/shared/components/InfoTip.vue'
+import { apiErrorText } from '@/shared/utils/apiError'
 import { useClassifyStore } from '../../stores/classifyStore'
 import { usePrivacyMask } from '@/shared/composables/usePrivacyMask'
 import { formatAmount } from '@/shared/utils/format'
@@ -649,7 +656,7 @@ async function handlePreview() {
   try {
     preview.value = await store.previewRule({ ...form })
   } catch (e) {
-    ElMessage.error(apiError(e, '预览失败'))
+    ElMessage.error(apiErrorText(e, '预览失败'))
   } finally {
     previewing.value = false
   }
@@ -669,7 +676,7 @@ async function handleSave() {
     showDialog.value = false
     ElMessage.success('已保存 —— 归类结果已按新规则重算')
   } catch (e) {
-    ElMessage.error(apiError(e, '保存失败'))
+    ElMessage.error(apiErrorText(e, '保存失败'))
   }
 }
 
@@ -679,7 +686,7 @@ async function handleToggle(row: ClassifyRuleItem) {
     await store.toggleRule(row)
     ElMessage.success(row.is_active ? '已停用' : '已启用')
   } catch (e) {
-    ElMessage.error(apiError(e, '操作失败'))
+    ElMessage.error(apiErrorText(e, '操作失败'))
   }
 }
 
@@ -698,7 +705,7 @@ async function handleDelete(row: ClassifyRuleItem) {
     await store.removeRule(row.id)
     ElMessage.success('已删除')
   } catch (e) {
-    ElMessage.error(apiError(e, '删除失败'))
+    ElMessage.error(apiErrorText(e, '删除失败'))
   }
 }
 
@@ -723,22 +730,10 @@ async function handleSeed(command: string) {
       )
     }
   } catch (e) {
-    ElMessage.error(apiError(e, '初始化失败'))
+    ElMessage.error(apiErrorText(e, '初始化失败'))
   }
 }
 
-function apiError(e: unknown, fallback: string): string {
-  const data = (e as { response?: { data?: unknown } })?.response?.data
-  if (typeof data === 'string') return data
-  const detail = (data as { detail?: string })?.detail
-  if (typeof detail === 'string') return detail
-  // 字段级错误（如 {'match_value': ['...']}）也要能显示出来，否则用户只看到「保存失败」
-  const firstList = data && typeof data === 'object'
-    ? Object.values(data as Record<string, unknown>)[0]
-    : null
-  if (Array.isArray(firstList) && typeof firstList[0] === 'string') return firstList[0]
-  return fallback
-}
 </script>
 
 <style scoped>
@@ -751,10 +746,15 @@ function apiError(e: unknown, fallback: string): string {
 .panel-header__hint { font-size: 12px; color: var(--el-text-color-secondary); }
 .panel-header__right { display: flex; align-items: center; gap: 8px; }
 
-.explain-alert { margin-bottom: 12px; }
-.explain-alert__body {
-  font-size: 12px; line-height: 1.6; margin-top: 2px;
-  color: var(--el-text-color-regular);
+/* 原 `.explain-alert`（页头下方那条说明 alert）已随「说明进气泡」退役，见模板注释 */
+
+/* 锚点落在 flex 行里（`panel-header__left`）：两侧各有考虑 ——
+   gap 已经给了间距，抵消组件自带、为「非 flex 行内」准备的 margin-left；
+   `align-items: baseline` 对 inline-flex 元素取的是**图标底边**当基线 ⇒ 图标会浮成上标，
+   故这里改回 `center`（按文字视觉中心对齐）。 */
+.panel-header__left :deep(.info-tip__trigger) {
+  margin-left: 0;
+  align-self: center;
 }
 
 .coverage-block { margin-bottom: 14px; }

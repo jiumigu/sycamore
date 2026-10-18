@@ -237,7 +237,17 @@ class TestNoAbsoluteThresholds:
         assert row['overdue_months'] > 0
         assert row['remaining_months'] < 0            # 负多少就是超期多少
         assert row['current_value'] == '0.00'         # 早折完了 —— 0 是结论，不是「算不出」
-        assert [k for k in row if 'suggest' in k or 'health' in k or 'risk' in k] == []
+        # ⚠️ 这里用**子串扫描**是故意的：为的是拦住「以后谁新增了一个 verdict 字段、
+        #    没人注意到」这类事。因此发现误报时**显式放行**，而不是把它放宽成白名单。
+        #    `treasure_suggest_category` 命中 'suggest' 却不是结论 ——
+        #    它是好恶物档案馆**快记浮层的类别预填值**（后端按物件类别猜的），
+        #    既不回答「超期了该怎么办」，也不是给这件东西下的判断（v3.60.32 新增）。
+        verdict_like = [
+            k for k in row
+            if ('suggest' in k or 'health' in k or 'risk' in k)
+            and k != 'treasure_suggest_category'
+        ]
+        assert verdict_like == []
 
 
 @pytest.mark.django_db

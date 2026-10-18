@@ -94,15 +94,10 @@ export function getTaskCalendar(params?: Record<string, unknown>) {
   return request({ url: '/temporal/tasks/calendar/', method: 'get', params })
 }
 
-// ─── 周度时间追踪 ───
-
-export function getWeeklyTracking(params?: Record<string, unknown>) {
-  return request({ url: '/temporal/weekly-tracking/', method: 'get', params })
-}
-
-export function refreshWeeklyCache() {
-  return request({ url: '/temporal/weekly-tracking/refresh/', method: 'post' })
-}
+// ⚠️ 原「周度时间追踪」两个封装（`getWeeklyTracking` / `refreshWeeklyCache`，指向已废弃的
+//    30h 达标表接口）已删 —— 唯一调用方 `WeeklyTrackingView.vue` 已一并移除。
+//    替代品是 `getWeeklyStructure`（168h 周结构，实时聚合源表）。
+//    后端 `/temporal/weekly-tracking/` 按 v0.3 设计稿**刻意保留**，别再把它接回前端。
 
 export function createTask(data: Record<string, unknown>) {
   return request({ url: '/temporal/tasks/', method: 'post', data })

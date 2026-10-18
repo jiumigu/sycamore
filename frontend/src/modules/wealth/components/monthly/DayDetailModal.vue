@@ -78,13 +78,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { maskAmountByType } from '@/shared/utils/privacy'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
 import { formatAmount } from '@/shared/utils/format'
 import type { DailyDetail, BillCreateData } from '../../types/wealthTypes'
 import { getLunarInfo } from '../common/LunarUtil'
 import QuickBillForm from '../common/QuickBillForm.vue'
+import { useClassifyStore } from '../../stores/classifyStore'
+
+const classifyStore = useClassifyStore()
 
 const privacyStore = usePrivacyStore()
 
@@ -127,6 +130,20 @@ function fmt(val: number): string {
 function handleClose() {
   emit('close')
 }
+
+/**
+ * 每次打开弹窗都刷新一次「分类 / 子分类」候选。
+ *
+ * ⚠️ **必须在这里拉，不能靠 `QuickBillForm` 的 `onMounted`**：
+ *    `el-dialog` 的插槽内容只在**首次打开**时渲染，之后只是显示/隐藏 ——
+ *    `onMounted` 一生只跑一次，第二次打开拿到的还是上一次的候选。
+ *
+ * ⚠️ 也**不能只在 store 初始化时拉一次**：候选是**账本的派生结果**，
+ *    账本每天都在长 —— 上一次用自由输入记下的新子分类，这一次打开就该能选到。
+ */
+watch(() => props.visible, (visible) => {
+  if (visible) classifyStore.fetchBillOptions()
+}, { immediate: true })
 
 function handleBillSubmit(data: BillCreateData) {
   emit('submitBill', data)

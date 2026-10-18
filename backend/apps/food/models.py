@@ -63,6 +63,7 @@ class FoodRecord(models.Model):
 
     class Meta:
         db_table = 'food_record'
+        db_table_comment = '美食记录：省份 + 城市必填，地图与列表按它筛'
         verbose_name = '美食记录'
         verbose_name_plural = '美食记录'
         ordering = ['-eat_date', '-id']

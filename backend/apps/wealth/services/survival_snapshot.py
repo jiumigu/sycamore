@@ -157,7 +157,6 @@ def take_snapshot(
             usable_item_count=int(row.get('usable_item_count') or 0),
             item_count=int(row.get('item_count') or 0),
             snack_days=_dec(row.get('snack_days')),
-            hours_total=_dec(row.get('hours_total'), digits=1),
             issue_count=len(row.get('issues') or []) + recipe_issue_count,
             trustworthy=bool(row.get('trustworthy', True)),
         )
@@ -214,7 +213,6 @@ def _snapshot_row(snapshot: SurvivalSnapshot, with_categories: bool = False) -> 
                 'usable_item_count': c.usable_item_count,
                 'item_count': c.item_count,
                 'snack_days': _f(c.snack_days),
-                'hours_total': _f(c.hours_total),
                 'issue_count': c.issue_count,
                 'trustworthy': c.trustworthy,
             }

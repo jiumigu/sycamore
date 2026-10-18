@@ -350,7 +350,9 @@ class TestDeltasAndComparison:
         category, _ = _stock(quantity=10)
         snap.take_snapshot(snapshot_date=DAY1)
 
-        category.consume_mode = 'time_based'
+        # v3.62.13：原来换成 `time_based`，该模式随「数字」类别退役了。
+        # 这条用例钉的是「换了算法要标出来」，与换成了哪个模式无关。
+        category.consume_mode = 'depreciation'
         category.save()
         snap.take_snapshot(snapshot_date=DAY2)
 
@@ -364,20 +366,23 @@ class TestDeltasAndComparison:
         _stock(quantity=10)
         snap.take_snapshot(snapshot_date=DAY1)
 
+        # v3.62.13：原先这里造的是「数字」（书与课程），该类别已退役 ——
+        # 改用「医药」。这条用例钉的是「多出一个类别要算配置变更」，
+        # 与是哪个类别无关；钉「数字不会被重新建出来」的是种子那条用例。
         second = SurvivalCategory.objects.create(
-            user_id=1, name='数字', consume_mode='time_based', aggregate_mode='sum',
+            user_id=1, name='医药', consume_mode='on_demand', aggregate_mode='min',
         )
         unit = SurvivalUnit.objects.create(
-            user_id=1, category=second, name='册', base_unit='册', to_base_rate=1,
+            user_id=1, category=second, name='盒', base_unit='件', to_base_rate=1,
         )
         SurvivalItem.objects.create(
-            user_id=1, category=second, name='书', quantity=5, unit=unit,
-            days_per_unit=7, hours_per_unit=6, status='stocked',
+            user_id=1, category=second, name='创可贴', quantity=5, unit=unit,
+            days_per_unit=7, status='stocked',
         )
         snap.take_snapshot(snapshot_date=DAY2)
 
         comparison = snap.get_trend()['comparison']
-        assert '数字' in comparison['changed_categories']
+        assert '医药' in comparison['changed_categories']
         assert comparison['comparable'] is False
 
     def test_config_diff_ignores_untouched_category(self):

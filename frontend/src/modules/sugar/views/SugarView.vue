@@ -132,8 +132,8 @@
           <el-col :span="16">
             <el-form-item label="快乐程度">
               <div class="happiness-slider">
-                <el-slider v-model="form.level_of_happiness" :min="5" :max="20" show-stops />
-                <span class="happiness-label">{{ form.level_of_happiness }} — {{ happinessText }}</span>
+                <el-slider v-model="form.level_of_happiness" :min="happinessMin" :max="happinessMax" show-stops />
+                <span class="happiness-label">{{ happinessPreview }}</span>
               </div>
             </el-form-item>
           </el-col>
@@ -145,13 +145,18 @@
         </el-row>
 
         <el-form-item label="发生日期">
-          <el-date-picker
-            v-model="form.event_date"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="默认当天"
-            style="width:100%"
-          />
+          <div class="date-row">
+            <el-date-picker
+              v-model="form.event_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="默认当天"
+              class="date-picker"
+            />
+            <el-button link type="primary" size="small" @click="form.event_date = todayStr">
+              回到今天
+            </el-button>
+          </div>
         </el-form-item>
 
         <el-form-item label="快乐类型" prop="joy_type">
@@ -219,7 +224,7 @@ import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { Plus, Refresh, DataAnalysis } from '@element-plus/icons-vue'
 import { useSugarStore } from '../stores/sugarStore'
-import { CATEGORY_OPTIONS, JOY_TYPE_OPTIONS } from '../types/sugarTypes'
+import { CATEGORY_OPTIONS, JOY_TYPE_OPTIONS, happinessLabelOf } from '../types/sugarTypes'
 import type { SugarRecord } from '../types/sugarTypes'
 import SugarCard from '../components/SugarCard.vue'
 import { getRewardPool } from '@/modules/reward/api/rewardApi'
@@ -266,6 +271,18 @@ const form = reactive({
   event_date: '',
 })
 
+// ─── 「今天」只此一把尺子 ───
+//
+// 🔴 必须用**本地**日期（getFullYear/getMonth/getDate 都是本地时区，项目 Asia/Shanghai）。
+//    曾经用的是 `new Date().toISOString().slice(0, 10)` —— 那是 **UTC**，
+//    在东八区 00:00–08:00 之间会算出「昨天」⇒ 凌晨打开弹窗，默认值比当天少一天。
+//    现在录入默认值与提交兜底**共用这一份**，不再有第二把尺子。
+const todayStr = computed(() => {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+})
+
 const showTagInput = ref(false)
 const newTag = ref('')
 const tagInputRef = ref<HTMLInputElement>()
@@ -289,28 +306,26 @@ async function loadPresetTags() {
   }
 }
 
-const happinessTexts: Record<number, string> = {
-  5: '一般般', 6: '还行', 7: '还不错', 8: '挺开心', 9: '很开心', 10: '超开心',
-  11: '特别开心', 12: '非常开心', 13: '极度开心', 14: '幸福爆棚', 15: '人生巅峰',
-  16: '无与伦比', 17: '心花怒放', 18: '飘飘欲仙', 19: '天堂般', 20: '无可超越',
-}
+// ─── 快乐程度：档位词与区间一律取自后端下发的表（前端零副本） ───
+//
+// 这里曾经有一张 16 个词的 `happinessTexts`（12 → 「非常开心」），
+// 而列表卡片显示的是后端 `reward_label`（12 → 「很高兴」）——
+// 同一个分数在弹窗与列表说两个词。现在两处都读 `happiness_bands`。
+//
+// ⚠️ 下面两个 `?? 5 / ?? 20` 只是「表还没到」时的占位（挂载即拉，毫秒级）；
+//    真正的区间由后端下发，以后改区间不必动前端。
+const happinessMin = computed(() => store.happinessBands?.min ?? 5)
+const happinessMax = computed(() => store.happinessBands?.max ?? 20)
 
-const happinessText = computed(() => {
-  return happinessTexts[form.level_of_happiness] || '开心'
+const happinessPreview = computed(() => {
+  const level = form.level_of_happiness
+  const label = happinessLabelOf(store.happinessBands, level)
+  return label ? `${level} — ${label}` : String(level)
 })
 
 const rewardAmount = computed(() => form.level_of_happiness)
 
 const SUGGESTED_TAGS = ['惊喜', '感动', '成就', '小确幸', '美食', '友情', '家庭', '自然', '成长', '放松']
-
-const expectedReward = computed(() => {
-  const v = form.level_of_happiness
-  if (v <= 7) return '1'
-  if (v <= 10) return '3'
-  if (v <= 13) return '5'
-  if (v <= 16) return '8'
-  return '10'
-})
 
 function resetForm() {
   form.content = ''
@@ -318,6 +333,7 @@ function resetForm() {
   form.joy_type = ''
   form.tagList = []
   form.notes = ''
+  form.event_date = todayStr.value
   showTagInput.value = false
   newTag.value = ''
 }
@@ -371,7 +387,7 @@ async function handleSubmit() {
     title: form.content.trim(),
     level_of_happiness: form.level_of_happiness,
     reward_amount: form.level_of_happiness,
-    time: form.event_date || new Date().toISOString().slice(0, 10),
+    time: form.event_date || todayStr.value,
     category: null,
     joy_type: form.joy_type || '',
     tags: form.tagList.length ? form.tagList.join(',') : null,
@@ -384,7 +400,10 @@ async function handleSubmit() {
       ElMessage.success('更新成功')
     } else {
       await store.createNewSugar(data)
-      ElMessage.success(`已记录 +${expectedReward.value} 元奖励`)
+      // 奖励金额 = 快乐程度（后端 `perform_create` 的口径，与按钮上的「得 N 元奖励」同源）。
+      // 这里曾经写的是另一套「1/3/5/8/10」的分档映射 —— 那句提示会说谎
+      // （选 12 分时提示「+5 元」，实际入库 +12）。
+      ElMessage.success(`已记录 +${form.level_of_happiness} 元奖励`)
     }
     dialogVisible.value = false
     await refreshAll()
@@ -435,6 +454,8 @@ async function refreshAll() {
 onMounted(() => {
   refreshAll()
   loadPresetTags()
+  // 档位表（录入弹窗的实时预览用）；取不到只影响那一个词，不影响列表
+  store.fetchHappinessBands()
 })
 </script>
 
@@ -591,6 +612,15 @@ onMounted(() => {
     border-color: #409eff;
     color: #409eff;
   }
+}
+
+.date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+
+  .date-picker { flex: 1; }
 }
 
 .dialog-footer { display: flex; justify-content: flex-end; gap: 12px; }

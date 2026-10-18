@@ -3,7 +3,7 @@
  *
  * 🔴 这个文件承担本模块前端**唯一**的两处换算：
  *    ① 年 ↔ 月（界面按年填、接口按「月」收发）
- *    ② 金额 null → 「—」
+ *    ② 金额：字符串 → 数值，再交给项目统一的符号口径
  *    别处不许再写 `* 12` / `/ 12`，也不许再写一个 `?? 0`
  *    —— 口径一旦有两份，改一处必然漏另一处，而漏掉是**静默**的。
  *
@@ -108,13 +108,18 @@ export function toNumberOrNull(value: string | number | null | undefined): numbe
 }
 
 /**
- * 金额 → `¥1,234.50`；**null → 「—」**。
+ * 金额 → `¥1,234.50`；**null / 空串 → 「—」**。
  *
- * 🔴 绝不能直接调 `formatAmount(value)`：它对 null 返回 `0.00`，
- *    那会把「算不出来」显示成「真的折完了」—— 两件事该采取的行动相反
- *    （一个该补数据，一个该换新），而界面上长得一模一样。
- * ⚠️ 走 `formatSignedAmount`（项目统一口径：货币符号在前、正负号紧随其后），
- *    隐私掩码在它内部完成，本模块不碰掩码。
+ * 本函数只剩两件事：① 把响应里的**字符串**金额归一成 number 或 null；
+ * ② 走 `formatSignedAmount`（项目统一口径：货币符号在前、正负号紧随其后，
+ *    隐私掩码在它内部完成）。
+ *
+ * ℹ️ `null → 「—」` 这个判断**上游已经做了**（2026-10-18 起
+ *    `formatAmount` / `formatSignedAmount` 不再把缺值渲染成 `0.00`），
+ *    这里保留只是为了先拦住**空串**（`toNumberOrNull('') → null`），
+ *    不是补一个上游没做的兜底 —— 两边口径一致，改一处不会分叉。
+ * ⚠️ 别跳过 `toNumberOrNull` 直接把接口字段丢进去：接口里金额是**字符串**，
+ *    而这两个函数的签名只要 number。
  */
 export function formatMoneyOrDash(value: string | number | null | undefined): string {
   const parsed = toNumberOrNull(value)

@@ -215,23 +215,42 @@ DEFAULT_MENU_GROUPS = [
     {'key': 'overview', 'name': '总览', 'sort': 1},
     {'key': 'temporal', 'name': '时间感知', 'sort': 2},
     {'key': 'goals', 'name': '目标与项目', 'sort': 3},
-    {'key': 'health', 'name': '身心健康', 'sort': 4},
-    {'key': 'nourishment', 'name': '精神滋养', 'sort': 5},
-    {'key': 'wealth', 'name': '财富管理', 'sort': 6},
-    {'key': 'connection', 'name': '连接与足迹', 'sort': 7},
-    {'key': 'tools', 'name': '工具箱', 'sort': 8},
-    {'key': 'system', 'name': '系统运维', 'sort': 9},
+    # 自我运转（v3.61.0）：独立分组，不挂在「目标与项目」下 ——
+    # 目标量「要到哪里去」，自我运转量「这一阶段里有没有在动」。
+    {'key': 'selfrun', 'name': '自我运转', 'sort': 4},
+    {'key': 'health', 'name': '身心健康', 'sort': 5},
+    {'key': 'nourishment', 'name': '精神滋养', 'sort': 6},
+    {'key': 'wealth', 'name': '财富管理', 'sort': 7},
+    {'key': 'connection', 'name': '连接与足迹', 'sort': 8},
+    {'key': 'tools', 'name': '工具箱', 'sort': 9},
+    {'key': 'system', 'name': '系统运维', 'sort': 10},
 ]
 
 
 def ensure_default_menu_groups() -> None:
-    """首次使用惰性 seed 默认分组（表空时写入）"""
-    if MenuGroup.objects.exists():
-        return
-    MenuGroup.objects.bulk_create([
-        MenuGroup(group_key=g['key'], group_name=g['name'], sort_order=g['sort'])
-        for g in DEFAULT_MENU_GROUPS
-    ])
+    """惰性补齐**缺失**的默认分组。
+
+    ⚠️ 与旧版「表空才 seed」的差别：老库也能拿到后来新增的分组 ——
+       否则改 `DEFAULT_MENU_GROUPS` 只对新库生效，老库表现为**静默部分修复**
+       （新分组永远不出现，还不报错）。
+    🔴 只 INSERT 缺失项，**绝不 UPDATE 已有行** —— 用户会在「菜单管理」里
+       上下拖分组（这个库就是：`wealth` 已被拖到第 2 位），覆盖 = 把他的排序弄乱。
+    ⚠️ sort 与老库已有分组撞号时**不管**（1..9 已被占满，插不进空位）：
+       后端 `MenuGroup.Meta.ordering = ['sort_order', 'group_key']`，
+       前端再按 sort 稳定排序，撞号时按 `group_key` 字母序 ——
+       `selfrun` 落在 `temporal` 之前，正好紧跟在「目标与项目」后面。
+    """
+    existing = set(MenuGroup.objects.values_list('group_key', flat=True))
+    # 逐个 create（不用 bulk_create）：bulk_create 不跑 pre_save，
+    # auto_now_add / auto_now 会双双落空（created_at 直接是 NULL）。
+    for g in DEFAULT_MENU_GROUPS:
+        if g['key'] in existing:
+            continue
+        MenuGroup.objects.create(
+            group_key=g['key'],
+            group_name=g['name'],
+            sort_order=g['sort'],
+        )
 
 
 class MenuPreferenceSerializer(serializers.ModelSerializer):

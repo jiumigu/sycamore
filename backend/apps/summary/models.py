@@ -17,6 +17,7 @@ class QuarterlyAnswer(models.Model):
 
     class Meta:
         db_table = 'summary_quarterly_answer'
+        db_table_comment = '季度问答：决策工作台的问题与我给的答案；按年 + 季 + 问题标识唯一'
         unique_together = ['year', 'quarter', 'question_key']
         ordering = ['-year', '-quarter', 'created_at']
         verbose_name = '季度问答'
@@ -42,6 +43,7 @@ class SevenDimConfig(models.Model):
 
     class Meta:
         db_table = 'summary_seven_dim_config'
+        db_table_comment = '七维封顶配置：版本化历史，同一时刻只有 is_active 那条生效'
         ordering = ['-created_at']
         verbose_name = '七维封顶配置'
         verbose_name_plural = '七维封顶配置'

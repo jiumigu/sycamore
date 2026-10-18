@@ -14,6 +14,14 @@ const routes: RouteRecordRaw[] = [
   // 收件箱
   { path: '/inbox', name: 'inbox', component: () => import('@/modules/inbox/views/InboxDashboard.vue'), meta: { title: '收件箱' } },
 
+  // 作品（v3.62.0）：一件从经历里长出来、以后还能再用的东西。
+  // ⚠️ 挂在**总览**组而不是新开顶级分组 —— 它是「你留下了什么」的结果页，
+  //    与「汇总总览」量的是同一件事的两面（那边量做了多少，这边量留下什么）。
+  // ⚠️ 它和「自我运转」的接合点只有一处：KPI「留下件数」的取数器读它。
+  //    打勾的七个入口（里程碑 / 收件箱 / 读书 / 日记 / 摘录 / AI 问答 / 档案馆）
+  //    都在**各自**的页面里 —— 本页只做收口（`WorkCapture` 是那个唯一的勾）。
+  { path: '/works', name: 'works', component: () => import('@/modules/works/views/WorkView.vue'), meta: { title: '作品' } },
+
   // 时间感知
   {
     path: '/temporal/daily',
@@ -85,10 +93,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '健康管理' },
       },
       {
+        path: 'overview',
+        name: 'health-overview',
+        component: () => import('@/modules/health/views/overview/HealthOverviewView.vue'),
+        meta: { title: '生命步数总览' },
+      },
+      {
+        // 旧的「里程碑地图」页已并入总览页（v3.62.15）—— 留一条软着陆，
+        // 免得旧书签 / 历史记录撞 404。内容没丢，只是换了住址。
         path: 'milestones',
-        name: 'health-milestones',
-        component: () => import('@/modules/health/views/MilestoneMap.vue'),
-        meta: { title: '里程碑地图' },
+        redirect: '/health/overview',
       },
       {
         path: 'weight',
@@ -209,6 +223,89 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/modules/redemption/views/RedemptionHub.vue'),
     meta: { title: '三年赎回期' },
   },
+  // 自我运转（v3.61.0，P5-A）—— 独立的**顶级分组**（不挂在「目标与项目」下：
+  // 目标量「要到哪里去」，自我运转量「这一阶段里有没有在动」）。
+  // 🔴 子页面路由挂在父路径之下（§45）：侧边栏高亮用 `route.path.startsWith(...)`，
+  //    每一项各自精确命中、不会互相抢。
+  // 🔴 **每一格都是一个独立页面**（页签与路由同源）：从侧边栏点「本月状态」，
+  //    落在的是本月那一格 —— 不许三项都渲染成同一屏。
+  //    侧边栏只列生命周期里**常用的四项**（制定配置 / 本周 / 本月 / 历史复盘）；
+  //    「阶段总结」「设置」是模块内的深层页，只从页签进（刻意不占菜单项）。
+  // 🔴 父路由**刻意不给 component**：父与子若指向同一个组件，
+  //    组件内的 `<router-view>` 会递归渲染自己（栈溢出）。
+  // 🔴 这 8 条子路由指向**同一个组件**：它是一个仪式，切子页只换面板，
+  //    不该把页头那两把尺子和阶段信息重建一遍。
+  //    （侧边栏 4 条 = 生命周期的四段；「制定配置」下再挂 3 条页内子页面。）
+  // ⚠️ 没有进行中的阶段时，**只有「制定配置」渲染向导** ——
+  //    其余各页各自说清「这一页为什么还是空的」，并给出「去制定配置」的出口。
+  //    （曾经的写法是「无阶段时任一子页整页渲染向导」，结果是三个菜单点下去
+  //      一模一样，连标题都被回落成「自我运转」——用户报的就是这个。）
+  {
+    path: '/selfrun',
+    redirect: { name: 'selfrun-week' },
+    children: [
+      {
+        path: 'setup',
+        name: 'selfrun-setup',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '制定配置' },
+      },
+      // 「制定配置」的**三个页内子页面**（v3.61.2）—— 入口是主视图右侧那三个按钮。
+      // ⚠️ path 挂在 `/selfrun/setup/` 之下而非 `/selfrun/`（§45）：
+      //    侧边栏高亮用 `route.path.startsWith('/selfrun/setup')`，仍精确亮「制定配置」；
+      //    而挂父路径之下才表达得出「这是制定配置的下一层」（父子关系写在 path 里）。
+      // 🔴 三条都指向**同一个组件**：`SelfRunHub` 按 `route.name` 决定这一格渲染哪一块。
+      // ⚠️ 刻意**不占侧边栏菜单项** —— 它们是「制定配置」里的三块，
+      //    不是与它并列的第四、五、六页（并列就等于同一件事有两个入口）。
+      {
+        path: 'setup/templates',
+        name: 'selfrun-setup-templates',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: 'KPI 模板库' },
+      },
+      {
+        path: 'setup/targets',
+        name: 'selfrun-setup-targets',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '按期修订' },
+      },
+      {
+        path: 'setup/logs',
+        name: 'selfrun-setup-logs',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '配置变更留痕' },
+      },
+      {
+        path: 'week',
+        name: 'selfrun-week',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '本周状态' },
+      },
+      {
+        path: 'month',
+        name: 'selfrun-month',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '本月状态' },
+      },
+      {
+        path: 'review',
+        name: 'selfrun-review',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '历史复盘' },
+      },
+      {
+        path: 'summary',
+        name: 'selfrun-summary',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '阶段总结' },
+      },
+      // ⚠️ 原第 6 条 `settings`（「设置」）**已删** —— 它与「制定配置」页里的
+      //    「本阶段 KPI（即时生效）」是同一张表、同一批按钮，纯重复入口。
+      //    两条路由指向同一个 tab 时，用户点进去看到的永远是同一个页面。
+    ],
+  },
+
+  // 数字资产
   {
     path: '/dams',
     redirect: '/dams/dashboard',

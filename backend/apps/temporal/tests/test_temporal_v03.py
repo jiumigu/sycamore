@@ -178,7 +178,8 @@ class TestMigrateCommandIdempotent:
         assert TemporalTask.objects.filter(category_level1='工作').count() == 3
         # 映射正确
         assert TaskMeta.objects.get(task_name='牛马工作').activity_type == '浅层工作'
-        assert TaskMeta.objects.get(task_name='迷谷知松').activity_type == '兴趣记录'
+        # ⚠️ v3.60.37 起「迷谷知松」的种子由「兴趣记录」订正为「深度工作」（与库中长期值对齐）
+        assert TaskMeta.objects.get(task_name='迷谷知松').activity_type == '深度工作'
 
     def test_dedup_not_broken_by_meta_ordering(self):
         """回归：Meta.ordering 不应让 DISTINCT 去重静默失效（虚增计数）
@@ -275,7 +276,8 @@ class TestContribDominantAttr:
         """
         assert dict(ACTIVITY_TYPE_PRESETS)['社交'] == '关系'
         assert TASK_TO_L2['人际交往'] == ('社交', '关系')
-        assert [a for a in ATTRIBUTION_ORDER if a != '关系'] == ['成长', '维持', '谋生', '流失']
+        # ⚠️ v3.60.36 又插了「体验」（同在「成长」之后）⇒ 排除**两个**后插的词再看原四词。
+        assert [a for a in ATTRIBUTION_ORDER if a not in ('体验', '关系')] == ['成长', '维持', '谋生', '流失']
 
     def test_relation_wins_when_largest(self):
         """关系小时最多的那天，主导归因应着「关系」色，且进入 breakdown"""
@@ -286,6 +288,44 @@ class TestContribDominantAttr:
         d = self._get()['2026-08-06']
         assert d['attr'] == '关系'
         assert d['breakdown']['关系'] == 3
+
+    def test_experience_slot_and_order_invariance(self):
+        """v3.60.36 第六格「体验」：旅游类改挂体验，且**所有既有词的相对价值序**必须不变
+
+        与 `test_relation_slot_and_order_invariance` 是同一判据的第二个样本：
+        新词**只能纯增量地插**，插错位置会让历史数据「并列取谁」静默改变。
+        """
+        assert dict(ACTIVITY_TYPE_PRESETS)['主动经历'] == '体验'
+        assert TASK_TO_L2['旅游观景'] == ('主动经历', '体验')
+        # 「体验」必须紧挨在「成长」之后（本次的纯增量插入点）
+        assert ATTRIBUTION_ORDER.index('体验') == ATTRIBUTION_ORDER.index('成长') + 1
+        # 去掉两个后插的词，原四词次序原封不动
+        assert [a for a in ATTRIBUTION_ORDER if a not in ('体验', '关系')] == ['成长', '维持', '谋生', '流失']
+        # 词表 / 价值序 / 配色 三者键集必须一致 —— 漏配一个，界面会**静默**落灰色兜底
+        from apps.temporal.constants import ATTRIBUTION_CHOICES_LIST, ATTRIBUTION_COLORS
+        assert set(ATTRIBUTION_CHOICES_LIST) == set(ATTRIBUTION_ORDER) == set(ATTRIBUTION_COLORS)
+
+    def test_experience_wins_when_largest(self):
+        """体验小时最多的那天，主导归因应是「体验」，且进入 breakdown"""
+        TaskMeta.objects.create(task_name='T', activity_type='主动经历', default_attribution='体验')
+        TaskMeta.objects.create(task_name='B', activity_type='维护性事务', default_attribution='维持')
+        self._mk('T', '2026-08-07', 5)
+        self._mk('B', '2026-08-07', 1)
+        d = self._get()['2026-08-07']
+        assert d['attr'] == '体验'
+        assert d['breakdown']['体验'] == 5
+
+    def test_experience_beats_relation_on_tie(self):
+        """并列时「体验」赢过「关系」—— 钉住插入位置的实际后果（成长 > 体验 > 关系）
+
+        这条是「为什么必须想清楚插在哪」的可见证据：若把「体验」插到流失之后，
+        同一天「旅游 + 社交」就会显示成「关系」色，而用户根本看不出为什么。
+        """
+        TaskMeta.objects.create(task_name='T', activity_type='主动经历', default_attribution='体验')
+        TaskMeta.objects.create(task_name='S', activity_type='社交', default_attribution='关系')
+        self._mk('T', '2026-08-08', 2)
+        self._mk('S', '2026-08-08', 2)
+        assert self._get()['2026-08-08']['attr'] == '体验'
 
     def test_value_mode_unchanged(self):
         """量值模式仍返回 mode=value，不受本次改动影响"""

@@ -2,7 +2,8 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as sugarApi from '../api/sugarApi'
 import type {
-  EnergyLog, EnergyStats, EnergyTemplate, SugarRecord, SugarCategoryStats, SugarTemplate,
+  EnergyLog, EnergyStats, EnergyTemplate, SugarRecord, SugarCategoryStats,
+  SugarHappinessBands, SugarTemplate,
 } from '../types/sugarTypes'
 
 export const useSugarStore = defineStore('sugar', () => {
@@ -28,6 +29,23 @@ export const useSugarStore = defineStore('sugar', () => {
   // ─── 小确幸模板 ───
   const templates = ref<SugarTemplate[]>([])
   const templateSubmitting = ref(false)
+
+  // ─── 快乐程度档位表（后端唯一真源，前端零副本） ───
+  // 取不到就是 null —— 那时界面上**只说分数、不编档位词**（见 happinessLabelOf）。
+  const happinessBands = ref<SugarHappinessBands | null>(null)
+
+  async function fetchHappinessBands() {
+    try {
+      const response = await sugarApi.getHappinessBands()
+      happinessBands.value = response.data
+      return response.data as SugarHappinessBands
+    } catch (error) {
+      console.error('获取快乐档位表失败:', error)
+      happinessBands.value = null
+      // 不往外抛：调用方（页面挂载）要的就是这个状态位，抛出去只会变成无人接的 rejection
+      return null
+    }
+  }
 
   async function fetchSugarList(params?: Record<string, unknown>) {
     loading.value = true
@@ -193,6 +211,8 @@ export const useSugarStore = defineStore('sugar', () => {
     // ─── 模板 ───
     templates, templateSubmitting,
     fetchTemplates, createTemplate, updateTemplate, deleteTemplate,
+    // ─── 快乐档位表 ───
+    happinessBands, fetchHappinessBands,
     // ─── 能量清单 ───
     energyTemplates, energyDailyLogs, energyStatsValue, energyLoading,
     fetchEnergyTemplates, completeEnergyTask, fetchEnergyStats, fetchEnergyDaily,

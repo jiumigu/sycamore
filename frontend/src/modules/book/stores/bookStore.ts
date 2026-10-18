@@ -110,6 +110,20 @@ export const useBookStore = defineStore('book', () => {
     }
   }
 
+  /** 批量改「阅读状态」/「阅读深度」。口径（能改哪些状态）在后端，这里只搬运。 */
+  async function bulkUpdateBooks(
+    bids: number[],
+    payload: { status?: string; reading_depth?: number },
+  ) {
+    try {
+      const response = await bookApi.bulkUpdateBooks(bids, payload)
+      return response.data
+    } catch (error) {
+      console.error('批量修改失败:', error)
+      throw error
+    }
+  }
+
   async function markAsCompleted(id: number) {
     try {
       const response = await bookApi.markAsCompleted(id)
@@ -134,7 +148,7 @@ export const useBookStore = defineStore('book', () => {
     bookList, stats, loading, submitting, totalCount, currentPage, pageSize,
     currentBook,
     fetchBookList, fetchBookById, fetchStats, createNewBook, updateExistingBook,
-    deleteExistingBook, bulkDeleteBooks, markAsCompleted,
+    deleteExistingBook, bulkDeleteBooks, bulkUpdateBooks, markAsCompleted,
     resetState,
   }
 })

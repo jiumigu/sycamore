@@ -43,6 +43,12 @@ INSTALLED_APPS = [
     'apps.core',
     'apps.treasure',
     'apps.redemption',
+    'apps.selfrun',
+    # 作品（v3.62.0）：从经历里长出来、以后还能再用的东西。
+    # ⚠️ 它同时是自我运转 KPI「留下件数」的取数源（`selfrun.readers.works_count`），
+    #    必须在 selfrun **之后**注册 —— 前者只依赖后者的 models，顺序无硬要求，
+    #    这里排在后面只是为了「读起来是后加的」。
+    'apps.works',
 ]
 
 MIDDLEWARE = [

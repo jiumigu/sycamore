@@ -48,6 +48,10 @@ export const useHealthStore = defineStore('health', () => {
     return res.data
   }
 
+  // ⚠️ 下面四个（`dailyTrend` / `typeStats` / `calendarData` / `milestoneTimeline`）
+  //    后端接口都还在，但**当前没有任何页面渲染它们**（调用方为零）。
+  //    本轮刻意不删：它们是接口层封装，删之前得先定「这几个统计块是不要了、还是还没做」
+  //    —— 属产品决定，不在一轮布局调整里顺手砍。已记入当日日志待办。
   async function fetchDailyTrend(days = 30) {
     const res = await healthApi.getHealthDailyTrend(days)
     dailyTrend.value = res.data
@@ -81,15 +85,19 @@ export const useHealthStore = defineStore('health', () => {
     return res.data
   }
 
-  async function fetchAll() {
+  /**
+   * 总览页要的三件事：进度条（`summary`）、里程碑地图、年度对比。
+   *
+   * 🔴 与「记录列表」**分开取**，别合成一个 `fetchAll()`：
+   *    首页只要记录、总览页只要这三样，**没有任何一个页面需要「一次全拿」**。
+   *    （原来那个混着 `fetchRecords` 的 `fetchAll()` 已随本次拆分删掉 ——
+   *     它唯一的调用方是首页，而首页现在只剩记录列表。）
+   */
+  async function fetchOverview() {
     await Promise.all([
       fetchSummary(),
       fetchMilestones(),
-      fetchDailyTrend(),
-      fetchTypeStats(),
       fetchYearlyComparison(),
-      fetchMilestoneTimeline(),
-      fetchRecords(),
     ])
   }
 
@@ -98,7 +106,7 @@ export const useHealthStore = defineStore('health', () => {
     typeStats, yearlyComparison, calendarData, milestoneTimeline,
     fetchRecords, fetchSummary, fetchMilestones, fetchDailyTrend,
     fetchTypeStats, fetchYearlyComparison, fetchCalendar,
-    fetchMilestoneTimeline, fetchAll,
+    fetchMilestoneTimeline, fetchOverview,
   }
 })
 

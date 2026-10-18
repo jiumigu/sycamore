@@ -1,30 +1,28 @@
 <template>
-  <div class="sugar-card" :class="{ expanded }">
-    <div class="card-main" @click="expanded = !expanded">
-      <div class="card-left">
-        <div class="emoji-badge" :style="{ background: happinessColor + '20', color: happinessColor }">
-          {{ happinessEmoji }}
-        </div>
-      </div>
+  <div class="sugar-card">
+    <div class="card-main">
       <div class="card-body">
         <div class="card-top">
           <span class="card-time">{{ formatDate(record.time) }}</span>
+          <!--
+            档位词与分数一起放在**日期右侧的空白位**。
+            颜色取后端下发的 `reward_color` —— 前端不按分数自己算（那是第二份档位边界）。
+          -->
+          <span v-if="scoreText" class="card-score" :style="{ color: scoreColor }">{{ scoreText }}</span>
           <span v-if="record.category_display" class="card-category">{{ record.category_display }}</span>
           <span class="card-reward">+¥{{ formatAmount(record.reward_amount) }}</span>
         </div>
+
         <h3 class="card-title">{{ record.title }}</h3>
-        <div class="card-happiness" v-if="record.level_of_happiness">
-          <el-progress
-            :percentage="(record.level_of_happiness / 20) * 100"
-            :stroke-width="8"
-            :color="happinessColor"
-            :show-text="false"
-          />
-          <span class="happiness-text" :style="{ color: happinessColor }">
-            {{ happinessEmoji }} {{ record.level_of_happiness }} {{ record.reward_label }}
-          </span>
-        </div>
-        <div v-if="record.joy_type || record.tags" class="sugar-meta">
+
+        <!--
+          备注**一直显示**，不再藏在「点一下卡片」后面。
+          实测填充率只有 28%（18/64）—— 而「填了也看不见」正是它填不进去的原因。
+          取不到就整段不渲染（自由文本的空只有一种含义，不留占位符）。
+        -->
+        <p v-if="record.notes" class="card-notes">{{ record.notes }}</p>
+
+        <div v-if="record.joy_type || parsedTags.length" class="sugar-meta">
           <el-tag v-if="record.joy_type" size="small" class="joy-tag">{{ record.joy_type }}</el-tag>
           <el-tag
             v-for="tag in parsedTags"
@@ -34,9 +32,6 @@
           >
             {{ tag }}
           </el-tag>
-        </div>
-        <div v-if="expanded && record.notes" class="card-notes">
-          <p>{{ record.notes }}</p>
         </div>
       </div>
       <div class="card-actions">
@@ -52,34 +47,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { Edit, Delete } from '@element-plus/icons-vue'
 import type { SugarRecord } from '../types/sugarTypes'
-import { REWARD_LABELS } from '../types/sugarTypes'
 import { formatAmount } from '@/shared/utils/format'
 
 const props = defineProps<{ record: SugarRecord }>()
 const emit = defineEmits<{ edit: [r: SugarRecord]; delete: [r: SugarRecord] }>()
+void emit
 
-const expanded = ref(false)
-
-const happinessColor = computed(() => {
-  const v = props.record.level_of_happiness
-  if (v <= 7) return '#9CA3AF'
-  if (v <= 10) return '#60A5FA'
-  if (v <= 13) return '#34D399'
-  if (v <= 16) return '#FBBF24'
-  return '#F97316'
+// ⚠️ 这里**没有**档位边界数字，也**没有**表情：
+// 卡片上曾经有两处一样的表情（左侧徽章 + 分数旁）与一条 `level/20` 的进度条。
+// 进度条与分数是同一个数的两种画法，而分数本身信息量更全（还带档位词）——
+// 实测 70% 的记录落在 4 个分数上、53% 的条长挤在 35%~40% 这 5% 区间里，
+// 一眼扫过去过半的条一模一样长。所以整块去掉。
+const scoreText = computed(() => {
+  const level = props.record.level_of_happiness
+  if (level === null || level === undefined || Number.isNaN(Number(level))) return ''
+  const label = props.record.reward_label
+  return label ? `${level} ${label}` : `${level}`
 })
 
-const happinessEmoji = computed(() => {
-  const v = props.record.level_of_happiness
-  if (v <= 7) return '😊'
-  if (v <= 10) return '🙂'
-  if (v <= 13) return '😄'
-  if (v <= 16) return '🥰'
-  return '🤩'
-})
+const scoreColor = computed(() => props.record.reward_color || '#6B7280')
 
 const parsedTags = computed(() => {
   if (!props.record.tags) return []
@@ -98,37 +87,17 @@ function formatDate(d: string) {
   border-radius: 16px;
   border: 1px solid #E5E7EB;
   transition: all 0.2s;
-  overflow: hidden;
 
   &:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
     border-color: #d1d5db;
   }
 
-  &.expanded {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-  }
-
   .card-main {
     display: flex;
-    gap: 16px;
-    padding: 20px;
-    cursor: pointer;
+    gap: 12px;
+    padding: 16px 20px;
     align-items: flex-start;
-  }
-
-  .card-left {
-    flex-shrink: 0;
-
-    .emoji-badge {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-    }
   }
 
   .card-body {
@@ -144,6 +113,13 @@ function formatDate(d: string) {
       .card-time {
         font-size: 12px;
         color: #9CA3AF;
+      }
+
+      // 分数 + 档位词：紧跟日期，是这一行唯一带色的一段
+      .card-score {
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
       }
 
       .card-category {
@@ -164,39 +140,20 @@ function formatDate(d: string) {
     }
 
     .card-title {
-      margin: 0 0 8px;
+      margin: 0;
       font-size: 15px;
       font-weight: 600;
       color: #1F2937;
       line-height: 1.4;
     }
 
-    .card-meta {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-
-      .happiness-bar {
-        flex: 1;
-        height: 6px;
-        background: #F3F4F6;
-        border-radius: 3px;
-        overflow: hidden;
-        max-width: 120px;
-
-        .bar-fill {
-          height: 100%;
-          border-radius: 3px;
-          transition: width 0.3s;
-        }
-      }
-
-      .happiness-text {
-        font-size: 12px;
-        font-weight: 600;
-        white-space: nowrap;
-      }
+    // 备注：与标题留出间距，靠字号/颜色区分层次，不加分隔线（那是展开态才需要的）
+    .card-notes {
+      margin: 6px 0 0;
+      font-size: 13px;
+      color: #6B7280;
+      line-height: 1.6;
+      white-space: pre-wrap;
     }
 
     .sugar-meta {
@@ -204,27 +161,13 @@ function formatDate(d: string) {
       flex-wrap: wrap;
       align-items: center;
       gap: 4px;
-      margin-top: 4px;
+      margin-top: 8px;
 
       .joy-tag {
         border: none;
         background: #FEF3C7;
         color: #D97706;
         font-weight: 500;
-      }
-    }
-
-    .card-notes {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px dashed #E5E7EB;
-
-      p {
-        margin: 0;
-        font-size: 13px;
-        color: #6B7280;
-        line-height: 1.6;
-        white-space: pre-wrap;
       }
     }
   }

@@ -264,6 +264,19 @@
       <el-table-column label="物品" min-width="140">
         <template #default="{ row }">
           <span class="survival-ledger__name">{{ row.name }}</span>
+          <!--
+            评价徽标 + 行内两秒快记（v3.60.32）。
+            ⚠️ 徽标真源在好恶物档案馆，这里**只读** —— 本模块不加「是不是好东西」字段。
+          -->
+          <TreasureQuickMark
+            kind="survival_item"
+            :target-id="row.id"
+            :name="row.name"
+            :badge="row.treasure_badge"
+            :record-id="row.treasure_record_id"
+            :suggest-category="row.treasure_suggest_category"
+            @saved="emit('treasure-saved')"
+          />
           <span v-if="row.notes" class="survival-ledger__notes">
             {{ maskFreeText(row.notes) }}
           </span>
@@ -405,6 +418,7 @@ import {
   DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, pageCountOf, pageSlice, shouldShowPager,
 } from '../../utils/survivalPaging'
 import type { SurvivalItem } from '../../types/survivalTypes'
+import TreasureQuickMark from '../common/TreasureQuickMark.vue'
 
 const emit = defineEmits<{
   /**
@@ -423,6 +437,8 @@ const emit = defineEmits<{
   /** 用掉 / 入库（v3.60.18）—— 变更量登记，由父级弹极简浮层 */
   'use-up': [itemId: number]
   restock: [itemId: number]
+  /** 行内快记写成功 ⇒ 父组件刷新列表（徽标要立刻变实色） */
+  'treasure-saved': []
 }>()
 
 const store = useSurvivalStore()

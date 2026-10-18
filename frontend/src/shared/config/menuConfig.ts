@@ -26,6 +26,11 @@ export const allMenuItems: MenuItem[] = [
   { key: 'summary', path: '/summary', label: '汇总总览', icon: 'PieChart', group: 'overview' },
   { key: 'personal_profile', path: '/summary/profile', label: '个人画像', icon: 'User', group: 'overview' },
   { key: 'inbox', path: '/inbox', label: '收件箱', icon: 'MessageBox', group: 'overview' },
+  // 作品（v3.62.0）：一件从经历里长出来、以后还能再用的东西。
+  // ⚠️ 与「汇总总览」是同一件事的两面：那边量**做了多少**，这边量**留下了什么**。
+  // 🔴 刻意**不新开顶级分组** —— 它先是「总览」里的一个结果页；
+  //    半年后它真成了主战场再提级，提级是一分钟的事。
+  { key: 'works', path: '/works', label: '作品', icon: 'Notebook', group: 'overview' },
 
   // ── 时间感知 ──
   { key: 'temporal_daily', path: '/temporal/daily', label: '日记流', icon: 'Calendar', group: 'temporal' },
@@ -40,6 +45,20 @@ export const allMenuItems: MenuItem[] = [
   { key: 'reward_gifts', path: '/reward/gifts', label: '礼物清单', icon: 'Present', group: 'goals' },
   { key: 'redemption', path: '/redemption', label: '三年赎回期', icon: 'Hourglass', group: 'goals' },
 
+  // ── 自我运转（v3.61.0）──
+  // 🔴 独立**顶级分组**，不挂在「目标与项目」下 —— 目标量「要到哪里去」，
+  //    自我运转量「这一阶段里有没有在动」，刻意分成两块。
+  // 每项就是**一个独立页面**，label 与页内页签、页面标题**同字**
+  // （不同字的话点进来会以为点错了）。
+  // ⚠️ 「制定配置」必须占一个菜单项：它是生命周期的**第一段**，
+  //    也是页面还空着时唯一的出口 —— 藏在页里就等于「没有入口」。
+  // ⚠️ 「阶段总结」刻意**不占菜单项**（模块内的深层页，只从页签进）。
+  //    原「设置」页签已删（与「制定配置」里的「本阶段 KPI」完全重复）。
+  { key: 'selfrun_setup', path: '/selfrun/setup', label: '制定配置', icon: 'EditPen', group: 'selfrun' },
+  { key: 'selfrun_week', path: '/selfrun/week', label: '本周状态', icon: 'Calendar', group: 'selfrun' },
+  { key: 'selfrun_month', path: '/selfrun/month', label: '本月状态', icon: 'Histogram', group: 'selfrun' },
+  { key: 'selfrun_review', path: '/selfrun/review', label: '历史复盘', icon: 'Clock', group: 'selfrun' },
+
   // ── 身心健康 ──
   { key: 'health', path: '/health', label: '健康管理', icon: 'FirstAidKit', group: 'health' },
   { key: 'health_weight', path: '/health/weight', label: '体重管理', icon: 'TrendCharts', group: 'health' },
@@ -49,7 +68,7 @@ export const allMenuItems: MenuItem[] = [
   // ── 精神滋养 ──
   { key: 'books', path: '/books', label: '书籍阅读', icon: 'Reading', group: 'nourishment' },
   { key: 'sugar', path: '/sugar', label: '小确幸', icon: 'Present', group: 'nourishment' },
-  { key: 'treasure', path: '/treasure', label: '好东西', icon: 'Star', group: 'nourishment' },
+  { key: 'treasure', path: '/treasure', label: '好恶物档案馆', icon: 'Star', group: 'nourishment' },
   { key: 'lifesample', path: '/lifesample', label: '人生样本', icon: 'Collection', group: 'nourishment' },
 
   // ── 财富管理 ──
@@ -93,10 +112,11 @@ export const defaultGroups: MenuGroupDef[] = [
   { key: 'overview', name: '总览', sort: 1 },
   { key: 'temporal', name: '时间感知', sort: 2 },
   { key: 'goals', name: '目标与项目', sort: 3 },
-  { key: 'health', name: '身心健康', sort: 4 },
-  { key: 'nourishment', name: '精神滋养', sort: 5 },
-  { key: 'wealth', name: '财富管理', sort: 6 },
-  { key: 'connection', name: '连接与足迹', sort: 7 },
-  { key: 'tools', name: '工具箱', sort: 8 },
-  { key: 'system', name: '系统运维', sort: 9 },
+  { key: 'selfrun', name: '自我运转', sort: 4 },
+  { key: 'health', name: '身心健康', sort: 5 },
+  { key: 'nourishment', name: '精神滋养', sort: 6 },
+  { key: 'wealth', name: '财富管理', sort: 7 },
+  { key: 'connection', name: '连接与足迹', sort: 8 },
+  { key: 'tools', name: '工具箱', sort: 9 },
+  { key: 'system', name: '系统运维', sort: 10 },
 ]

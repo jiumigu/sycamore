@@ -107,6 +107,8 @@ from ..serializers import (
     SurvivalUnitSerializer,
 )
 from ..services import survival_service as svc
+# 评价徽标：真源在 treasure 侧，这里只**消费**（v3.60.32）。一次查完一页，不是逐行查。
+from apps.treasure.badges import attach_badges
 
 
 def _parse_date(raw: str | None) -> date | None:
@@ -239,12 +241,14 @@ class SurvivalItemViewSet(viewsets.ModelViewSet):
             satiety=request.query_params.get('satiety') or None,
             status=request.query_params.get('status') or None,
         )
+        attach_badges(rows, 'survival_item')
         return Response(SurvivalItemSerializer(rows, many=True).data)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         row = svc.create_item(dict(serializer.validated_data))
+        attach_badges([row], 'survival_item')
         return Response(SurvivalItemSerializer(row).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], url_path='preview')
@@ -278,6 +282,7 @@ class SurvivalItemViewSet(viewsets.ModelViewSet):
         )
         serializer.is_valid(raise_exception=True)
         row = svc.update_item(instance.id, dict(serializer.validated_data))
+        attach_badges([row], 'survival_item')
         return Response(SurvivalItemSerializer(row).data)
 
     def destroy(self, request, *args, **kwargs):

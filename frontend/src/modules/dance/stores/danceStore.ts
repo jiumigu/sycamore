@@ -72,14 +72,20 @@ export const useDanceStore = defineStore('dance', () => {
     return res.data
   }
 
-  async function fetchAll(year?: number) {
+  /// 🔴 `recordParams` 必须能传进来（**页码** / 年份 / 各筛选）：
+  /// 记录列表走 DRF 全局分页，不传 `page` 就永远只有第 1 页，
+  /// 而 `totalCount` 是全量 ⇒ 分页条按全量渲染页数、翻页却全空（v3.62.14 修）。
+  /// ⚠️ 年份**只从 `recordParams` 里取**：趋势图与记录列表用同一个 year，
+  ///    两处各传一次就会「图是 2025、表是 2026」且不报错。
+  async function fetchAll(recordParams?: Record<string, unknown>) {
+    const year = recordParams?.year as number | undefined
     await Promise.all([
       fetchOverview(),
       fetchTrend(year),
       fetchTeachers(),
       fetchTypes(),
       fetchScoreTrend(),
-      fetchRecords({ year }),
+      fetchRecords({ year, ...recordParams }),
     ])
   }
 

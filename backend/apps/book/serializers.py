@@ -99,6 +99,34 @@ class BookCreateUpdateSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class BookBulkUpdateSerializer(serializers.Serializer):
+    """批量改「阅读状态」/「阅读深度」（阅读管理页的批量工具条）。
+
+    🔴 这里**故意只开这两个字段**，而且**状态里没有「弃读」**：
+    弃读在 `BookCreateUpdateSerializer.validate` 里是**逐本必填原因**的，
+    批量给一个统一原因会把「为什么弃」写成假话 —— 所以那条路只走单本编辑。
+
+    ⚠️ 约束挡在**后端**（而不是靠前端少画一项）：这样越界调用得到的是 400，
+    而不是「看起来成功了、其实写了一条假原因」。
+    """
+
+    BULK_STATUS_CHOICES = [c for c in Book.STATUS_CHOICES if c[0] != '弃读']
+
+    bids = serializers.ListField(
+        child=serializers.IntegerField(),
+        allow_empty=False,
+        error_messages={'empty': '请提供要修改的编号列表'},
+    )
+    status = serializers.ChoiceField(choices=BULK_STATUS_CHOICES, required=False)
+    reading_depth = serializers.ChoiceField(choices=Book.READING_DEPTH_CHOICES, required=False)
+
+    def validate(self, attrs):
+        # 两个字段都不给 ⇒ 这个请求没有任何事要做，直接说清楚（而不是回一个「改了 0 本」）
+        if 'status' not in attrs and 'reading_depth' not in attrs:
+            raise serializers.ValidationError('请至少提供 status 或 reading_depth 之一')
+        return attrs
+
+
 class BookStatsSerializer(serializers.Serializer):
     """统计数据序列化器"""
     total_count = serializers.IntegerField(default=0)

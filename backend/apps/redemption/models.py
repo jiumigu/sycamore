@@ -35,6 +35,7 @@ class RedemptionPeriod(models.Model):
 
     class Meta:
         db_table = 'redemption_period'
+        db_table_comment = '赎回期配置：单例（pk=1）；窗口区间与追踪状态都在这一行'
         verbose_name = '赎回期配置'
         verbose_name_plural = '赎回期配置'
 
@@ -60,6 +61,7 @@ class RedemptionPoolInject(models.Model):
 
     class Meta:
         db_table = 'redemption_pool_inject'
+        db_table_comment = '现金池注入：启动池的中途注水流水'
         verbose_name = '现金池注入'
         verbose_name_plural = '现金池注入'
         ordering = ['-inject_date']
@@ -95,6 +97,7 @@ class RedemptionAttrRule(models.Model):
 
     class Meta:
         db_table = 'redemption_attr_rule'
+        db_table_comment = '归因规则：把 ATracker 任务属性映射到归因类别，覆盖默认归因'
         verbose_name = '归因规则'
         verbose_name_plural = '归因规则'
         ordering = ['-priority', 'id']
@@ -104,7 +107,15 @@ class RedemptionAttrRule(models.Model):
 
 
 class RedemptionWeekSnapshot(models.Model):
-    """周归因快照（阶段二）：五类小时 + 覆盖率 + 单位赎回成本"""
+    """周归因快照（阶段二）：六类小时 + 覆盖率 + 单位赎回成本
+
+    🔴 v3.60.36 订正：本表**当前没有任何写入方与读取方** —— 全仓 grep 只命中
+    model / serializer / migration 三处，是阶段二预留的**死表**。
+    所以 v3.60.36 给 L1 新增「体验」时**没有同步加列**，也不需要加（无人消费）。
+
+    ⚠️ 将来真要启用它时，**必须先补 `experience_hours` 列**，否则「体验」的小时数
+    不属于任何一列、会被**静默丢掉** —— 表能写进去、页面也有数，只是那一格永远是 0。
+    """
 
     id = models.AutoField(primary_key=True, verbose_name='ID')
     year = models.IntegerField(verbose_name='年')
@@ -113,6 +124,7 @@ class RedemptionWeekSnapshot(models.Model):
     #    兼 API 字段名，改列名要动 schema + 接口契约 + 前端，收益只是"名字好看"。
     #    中文化只做到 verbose_name 与页面展示。其中 toward=成长、external=谋生。
     #    relation_hours 是 v3.58.11 随 L1 第五格「关系」新增的列（见 temporal/constants.py）。
+    #    ⚠️ v3.60.36 起 L1 已有**六**词，「体验」暂无对应列 —— 原因见本类 docstring。
     toward_hours = models.FloatField(default=0, verbose_name='成长小时')
     relation_hours = models.FloatField(default=0, verbose_name='关系小时')
     maintain_hours = models.FloatField(default=0, verbose_name='维持小时')
@@ -127,6 +139,7 @@ class RedemptionWeekSnapshot(models.Model):
 
     class Meta:
         db_table = 'redemption_week_snapshot'
+        db_table_comment = '周归因快照：某周的六类小时 + 覆盖率 + 单位赎回成本'
         verbose_name = '周归因快照'
         verbose_name_plural = '周归因快照'
         unique_together = [('year', 'week')]

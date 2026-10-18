@@ -2,7 +2,7 @@
 
 与 wealth 里既有的金融资产体系**刻意分开命名**：
     WealthAssetAccount / WealthAssetSnapshot = 钱（资产科目与快照）
-    Survival*                               = 物（吃 / 穿 / 用 / 数字）
+    Survival*                               = 物（吃 / 穿 / 用 / 医药）
 两套名字必须一眼能分辨 —— 「资产快照」这个表名已被金融侧占用，
 照抄只会在建表时撞车，而且之后没人说得清哪张是哪张。
 
@@ -20,7 +20,6 @@ from ..constants import (
     SURVIVAL_FLOW_CHANNELS,
     SURVIVAL_FLOW_REASONS,
     SURVIVAL_GRADE_CHOICES,
-    SURVIVAL_PRIORITY_CHOICES,
     SURVIVAL_ROLE_CHOICES,
     SURVIVAL_SATIETY_CHOICES,
     SURVIVAL_SNAPSHOT_SOURCES,
@@ -31,7 +30,11 @@ from ..constants import (
 
 
 class SurvivalCategory(models.Model):
-    """物资类别：吃 / 穿 / 用 / 数字
+    """物资类别：吃 / 穿 / 用 / 医药
+
+    类别是**可增删的用户数据**，默认种子只给一份起步值（见 constants 的
+    `SURVIVAL_CATEGORY_SEEDS`）—— 种子里曾有的「数字」（书与课程）已退役，
+    判据见那一段注释：书籍「一册能读多少天」不是一个可观测的量。
 
     两个字段决定算法走向，都放在类别上而不是写死在服务层：
 
@@ -47,7 +50,10 @@ class SurvivalCategory(models.Model):
     name = models.CharField(max_length=50, verbose_name='类别名称')
     consume_mode = models.CharField(
         max_length=20, choices=SURVIVAL_CONSUME_MODES, default='on_demand',
-        verbose_name='消耗模式', help_text='决定用哪套算法：配餐/折旧/按需/时间',
+        verbose_name='消耗模式', help_text='决定用哪套算法：配餐/折旧/按需',
+        # ⚠️ 这里曾多一档「时间」（`time_based` / 书与课程）—— 已于 v3.62.13 退役，
+        #    help_text 一并删掉：**说明里留一个不存在的选项，比没有说明更坏**
+        #    （会让人以为填得进去）。见 constants.SURVIVAL_CONSUME_MODES。
     )
     aggregate_mode = models.CharField(
         max_length=20, choices=SURVIVAL_AGGREGATE_MODES, default='sum',
@@ -63,6 +69,7 @@ class SurvivalCategory(models.Model):
         # 不设 Meta.ordering：外部表的 ordering 会被注入 SELECT 而静默破坏聚合
         # （项目硬坑②），本项目 managed 表统一不设，排序交给服务层。
         db_table = 'wealth_survival_category'
+        db_table_comment = '生存资源 · 物资类别（吃 / 穿 / 用 / 医药，可增删的用户数据）'
         verbose_name = '物资类别'
         verbose_name_plural = '物资类别'
         constraints = [
@@ -112,6 +119,7 @@ class SurvivalUnit(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_unit'
+        db_table_comment = '生存资源 · 消耗单位：同类别内必须能换算到同一基准单位'
         verbose_name = '消耗单位'
         verbose_name_plural = '消耗单位'
         constraints = [
@@ -134,7 +142,6 @@ class SurvivalItem(models.Model):
         days_per_unit                      按天（一份还能撑多少天）
             穿：一件大衣还能穿 3 年 → 1095
             用：一包纸巾能用 10 天 → 10
-            数字：一本书按我的节奏能读几天
         uses_per_unit + 每 N 周期用 M 次    按次（一份能用多少次）
             卫生巾：一包 10 片、3 天用一片 → 10 次 × 3 天 = 30 天
             牙膏：一支 90 次、每天 2 次 → 90 × 1 ÷ 2 = 45 天
@@ -150,6 +157,15 @@ class SurvivalItem(models.Model):
 
     这样「最悲观能撑多久」就不用猜了 —— 季节、强度、心情的差异
     体现在消耗速率系数上（省着用 / 正常 / 费着用），那是人能回答的。
+
+    ⚠️ 判据的边界（v3.62.13）—— **「可观测」不等于「能填出一个数」**：
+       上面两条口径都成立，是因为填进去的是**你已经知道的事实**
+       （一件大衣穿多久、一包纸巾用几天、一片卫生巾多久换）。
+       而曾经存在的第三个类别「数字」（书与课程：一册能读多少天 + 每册多少小时）
+       恰好**违反**这一条 —— 「一册能读多少天」取决于你是研读还是通读，
+       同一本书能差十倍，用户答出来的不是观测值，是被逼出来的一个像样的数字。
+       故该类别连同 `time_based` / `hours_per_unit` / `priority` 一并退役。
+       **出路是「这类东西不进这张表」，不是「再换一种问法」。**
     """
 
     user_id = models.IntegerField(default=1, verbose_name='用户ID')
@@ -180,21 +196,18 @@ class SurvivalItem(models.Model):
     status = models.CharField(
         max_length=20, choices=SURVIVAL_STATUS_CHOICES, default='stocked', verbose_name='状态',
     )
-    priority = models.CharField(
-        max_length=20, choices=SURVIVAL_PRIORITY_CHOICES, blank=True, default='',
-        verbose_name='优先级',
-    )
+    # （`priority` 已随「数字」类别退役 —— v3.62.13。它读起来像通用的「优先级」，
+    #   实际取值是**书籍专用词汇**「必读 / 通读 / 不适合」，通用化不了；
+    #   而全库 57 件物品里 0 件填过 ⇒ 留着就是一条永远为空的列 + 没人选的枚举。）
 
     days_per_unit = models.DecimalField(
         max_digits=10, decimal_places=1, null=True, blank=True,
         verbose_name='单件可用天数',
         help_text='一件/一份还能撑多少天；配餐类不填，由配方决定',
     )
-    hours_per_unit = models.DecimalField(
-        max_digits=8, decimal_places=1, null=True, blank=True,
-        verbose_name='单件耗时(小时)',
-        help_text='数字类专用：一册需要读多少小时，用来同时给出「还能读多少小时」',
-    )
+    # （`hours_per_unit`「一册需要读多少小时」随该类别一并退役 —— v3.62.13，
+    #   全库 0 条有值。它的下游产物「还能读多少小时」（快照的 `hours_total`）
+    #   同批删除 —— 半个能力留着比整个删掉更糟：卡片会显示一个来源不明的小时数。）
 
     # ── 按次计量（与 days_per_unit 二选一，v3.59.3） ──
     # 四个字段连起来读作：**一份能用 10 次，每 3 天用 1 次**。
@@ -258,6 +271,7 @@ class SurvivalItem(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_item'
+        db_table_comment = '生存资源 · 物品：一件具体物资 + 它的三档估算输入'
         verbose_name = '生存资源物品'
         verbose_name_plural = '生存资源物品'
         indexes = [
@@ -340,6 +354,7 @@ class SurvivalEssential(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_essential'
+        db_table_comment = '生存资源 · 必需品基准项：一个人生活「本该有」的清单，与库存物品的对账走 M2M'
         verbose_name = '必需品基准项'
         verbose_name_plural = '必需品基准项'
         constraints = [
@@ -383,6 +398,7 @@ class SurvivalRecipe(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_recipe'
+        db_table_comment = '生存资源 · 配餐配方：一顿饭由哪些餐位组成、每天吃几顿'
         verbose_name = '配餐配方'
         verbose_name_plural = '配餐配方'
         constraints = [
@@ -434,6 +450,7 @@ class SurvivalRecipeLine(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_recipe_line'
+        db_table_comment = '生存资源 · 配方行：一个餐位下的一件食材'
         verbose_name = '配方行'
         verbose_name_plural = '配方行'
 
@@ -482,6 +499,7 @@ class SurvivalCombo(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_combo'
+        db_table_comment = '生存资源 · 组合：几件物品「一起用」的声明'
         verbose_name = '生存资源组合'
         verbose_name_plural = '生存资源组合'
         constraints = [
@@ -532,6 +550,7 @@ class SurvivalComboItem(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_combo_item'
+        db_table_comment = '生存资源 · 组合成员：一件物品 + 每餐用量'
         verbose_name = '组合成员'
         verbose_name_plural = '组合成员'
         constraints = [
@@ -595,6 +614,7 @@ class SurvivalRecipeComboLine(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_recipe_combo_line'
+        db_table_comment = '生存资源 · 配方组合行：这一顿会用到「一整份组合」'
         verbose_name = '配方组合行'
         verbose_name_plural = '配方组合行'
         constraints = [
@@ -685,6 +705,7 @@ class SurvivalSnapshot(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_snapshot'
+        db_table_comment = '生存资源 · 盘点快照头：某天算出的结论，落库即定格'
         verbose_name = '生存资源盘点快照'
         verbose_name_plural = '生存资源盘点快照'
         constraints = [
@@ -749,14 +770,14 @@ class SurvivalSnapshotCategory(models.Model):
     snack_days = models.DecimalField(
         max_digits=12, decimal_places=2, null=True, blank=True, verbose_name='零食天数',
     )
-    hours_total = models.DecimalField(
-        max_digits=12, decimal_places=1, null=True, blank=True, verbose_name='可读小时数',
-    )
+    # （`hours_total`「可读小时数」随「数字」类别退役 —— v3.62.13。
+    #   已归档的 6 期快照里该列全为 NULL，删列不损失任何历史信息。）
     issue_count = models.IntegerField(default=0, verbose_name='问题条数')
     trustworthy = models.BooleanField(default=True, verbose_name='该类别是否可信')
 
     class Meta:
         db_table = 'wealth_survival_snapshot_category'
+        db_table_comment = '生存资源 · 快照类别明细：某类别在那一天的结论（类别名冗余留存）'
         verbose_name = '盘点快照类别明细'
         verbose_name_plural = '盘点快照类别明细'
         constraints = [
@@ -801,6 +822,7 @@ class SurvivalStocktake(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_stocktake'
+        db_table_comment = '生存资源 · 实盘盘点单头：手数出来的实际数量'
         verbose_name = '生存资源实盘盘点'
         verbose_name_plural = '生存资源实盘盘点'
         indexes = [
@@ -854,6 +876,7 @@ class SurvivalStocktakeLine(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_stocktake_line'
+        db_table_comment = '生存资源 · 实盘盘点明细：一件物品的账面 vs 实际'
         verbose_name = '实盘盘点明细'
         verbose_name_plural = '实盘盘点明细'
 
@@ -928,6 +951,7 @@ class SurvivalFlow(models.Model):
 
     class Meta:
         db_table = 'wealth_survival_flow'
+        db_table_comment = '生存资源 · 库存流水：数量怎么变的（库存的唯一写入口）'
         verbose_name = '生存资源库存流水'
         verbose_name_plural = '生存资源库存流水'
         # 最近发生的在最前；同刻多条按 id 倒序 —— 保证顺序稳定可预期

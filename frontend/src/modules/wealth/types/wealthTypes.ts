@@ -339,12 +339,22 @@ export interface AccountBalances {
 }
 
 /** 资产汇总
- * total / financial_assets = 活期账户 + 公积金
- * total_assets             = financial_assets + 应收借出
- * net_worth                = total_assets − 负债（与 realnum 同值，realnum 为兼容保留）
+ *
+ * 新体系（有按科目快照时）：
+ *   financial_assets = 流动资金 + 非流动资金 + 公积金 + 应收借出（**四行拆解，恒等**）
+ *   total_assets     = financial_assets + 自用资产
+ *   net_worth        = total_assets − 负债
+ *
+ * 旧表 8 列路径（无快照时）：total / financial_assets = 活期账户 + 公积金，
+ * total_assets = financial_assets + 应收借出，`non_liquid` 恒 0。
+ *
+ * ⚠️ 「流动资金」只含 T+0 可取的部分；取不出来的余额在 `non_liquid` 里，
+ *    两者都属于金融资产，别把 `non_liquid` 当成金融资产之外的第六项。
  */
 export interface AssetSummary {
   flow_total: number
+  /** 非流动资金：计入资产、但 T+0 取不出来的余额（定期/理财/被锁定的存款…） */
+  non_liquid: number
   total: number
   financial_assets: number
   total_assets: number
@@ -772,6 +782,17 @@ export const ASSET_ACCOUNT_KINDS = [
 /** 新建科目时「不计入资产负债表」的建议默认类别 —— 后端可改，前端只作默认勾选 */
 export const ASSET_DEFAULT_EXCLUDE_CATEGORIES: readonly string[] = ['自用']
 
+/**
+ * 新建科目时「T+0 可取」的建议默认**关闭**的形态。
+ *
+ * 🔴 与后端 `constants.ASSET_NON_LIQUID_KINDS` 同源，**改要一起改**
+ *    （同 `ASSET_DEFAULT_EXCLUDE_CATEGORIES` 的既有形态）。
+ * 判据：这些形态天生不可随时支取。写死「默认打开」会让用户新建一个公积金
+ * 账户后得到「计入应急金」的账户 —— 把应急金月数往**乐观方向**推，
+ * 而界面上完全看不出来（科目表里那个勾是开着的，用户不会逐条去核）。
+ */
+export const ASSET_NON_LIQUID_KINDS: readonly string[] = ['公积金']
+
 /** 资产科目（主数据） */
 export interface AssetAccountItem {
   id: number
@@ -1059,6 +1080,43 @@ export interface UnclassifiedCandidates {
   total_count: number
   total_amount: number
   items: UnclassifiedGroup[]
+}
+
+/* ══════════════════════════════════════════════════════════════
+ * 快速记账的分类 / 子分类候选（v3.62.17）
+ *
+ * 🔴 这两份候选**只有一个来源**：后端
+ *    `services/classify_service.get_bill_category_options()`。
+ *    前端**不许**再写一份分类数组 —— 那正是本轮修掉的缺陷：
+ *    `QuickBillForm.vue` 里曾有 17 项硬编码中文分类，与真实账本
+ *    （食品酒水 / 日常生活 / 行车交通…）完全对不上，全表只碰巧命中 3 行，
+ *    而分类体系一旦有两处定义，就永远不知道哪一处才是真的。
+ *
+ * ⚠️ `count` 是**账本里用过的笔数**，不是金额：它只用来排序
+ *    （常用的在前）与标注。`count = 0` 表示这个值只在口径配置里登记过、
+ *    账本里还没记过 —— **不是「无效」**，不要拿它当过滤条件。
+ * ══════════════════════════════════════════════════════════════ */
+
+export interface BillCategoryOption {
+  value: string
+  count: number
+}
+
+export interface BillCategoryOptions {
+  /** 分类下拉的候选（账本 ∪ 口径配置，按笔数降序） */
+  categories: BillCategoryOption[]
+  /** 选了分类之后的子分类候选；**空数组 = 该分类还没有历史**，前端回退到全局 */
+  subcategories: Record<string, BillCategoryOption[]>
+  /**
+   * 全局子分类候选（跨分类拍平、同样按笔数降序）。
+   *
+   * 🔴 **由后端算**，前端**不要**自己把 `subcategories` 拍平：拍平就得在前端
+   *    再决定一次顺序，那又是一份局部口径 —— 第一版就是这么错的，
+   *    前端按各分类的键序拼接，把「早午晚餐（3026 笔）」排到了「公交（134 笔）」后面。
+   */
+  subcategories_all: BillCategoryOption[]
+  /** 无法归到任何分类的子分类（账本里分类为空的孤儿行 + 口径配置里无归属的值） */
+  ungrouped: BillCategoryOption[]
 }
 
 /* ══════════════════════════════════════════════════════════════

@@ -1,7 +1,7 @@
 <template>
   <div class="dance-dashboard">
-    <!-- 归档提示 -->
-    <el-alert title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
+    <!-- 归档提示（仅在当前仍处于归档状态时显示，重新启用后自动消失） -->
+    <el-alert v-if="ready && isArchived" title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
 
     <!-- 页面标题 -->
     <div class="page-header">
@@ -48,17 +48,17 @@
     <el-card class="section-card filter-card">
       <el-row :gutter="12" align="middle">
         <el-col :span="5">
-          <el-select v-model="filterType" placeholder="全部舞种" clearable style="width: 100%" @change="fetchRecords">
+          <el-select v-model="filterType" placeholder="全部舞种" clearable style="width: 100%" @change="resetAndFetch">
             <el-option v-for="t in DANCE_TYPE_OPTIONS" :key="t.value" :label="`${t.icon} ${t.label}`" :value="t.value" />
           </el-select>
         </el-col>
         <el-col :span="5">
-          <el-select v-model="filterTeacher" placeholder="全部老师" clearable filterable style="width: 100%" @change="fetchRecords">
+          <el-select v-model="filterTeacher" placeholder="全部老师" clearable filterable style="width: 100%" @change="resetAndFetch">
             <el-option v-for="t in teacherOptions" :key="t" :label="t" :value="t" />
           </el-select>
         </el-col>
         <el-col :span="5">
-          <el-select v-model="filterDifficulty" placeholder="全部难度" clearable style="width: 100%" @change="fetchRecords">
+          <el-select v-model="filterDifficulty" placeholder="全部难度" clearable style="width: 100%" @change="resetAndFetch">
             <el-option v-for="d in DIFFICULTY_OPTIONS" :key="d.value" :label="d.label" :value="d.value" />
           </el-select>
         </el-col>
@@ -106,7 +106,10 @@
           <span>📝 最近课程记录</span>
         </div>
       </template>
-      <el-table v-loading="store.loading" :data="displayRecords" style="width: 100%" size="small" stripe>
+      <!-- 🔴 `store.records` 就是**当前页**那 10 条 —— 分页交给后端。
+           这里曾写 `displayRecords`（在本地对这 10 条再切一次），
+           而后端只给了第 1 页 ⇒ 选 2025 年时 29 页里只有第 1 页有数据（v3.62.14 修）。 -->
+      <el-table v-loading="store.loading" :data="store.records" style="width: 100%" size="small" stripe>
         <el-table-column label="日期" width="100">
           <template #default="{ row }">{{ row.study_time || '-' }}</template>
         </el-table-column>
@@ -214,6 +217,10 @@ import { Plus, Refresh, Edit, Delete } from '@element-plus/icons-vue'
 import { useDanceStore } from '../stores/danceStore'
 import { DANCE_TYPE_OPTIONS, DIFFICULTY_OPTIONS, SCORE_LABELS } from '../types/danceTypes'
 import * as echarts from 'echarts'
+import { useMenuArchive } from '@/shared/composables/useMenuArchive'
+
+// 归档横幅的判据唯一实现在 useMenuArchive（存档态含用户偏好，非写死的 defaultArchived）
+const { ready, isArchived } = useMenuArchive('dance')
 
 const store = useDanceStore()
 
@@ -258,10 +265,22 @@ let typeChart: echarts.ECharts | null = null
 let teacherChart: echarts.ECharts | null = null
 let scoreChart: echarts.ECharts | null = null
 
-const displayRecords = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return store.records.slice(start, start + pageSize)
-})
+// 🔴 **页码与筛选必须一起发给后端** —— 分页只有一把尺子。
+// 这个接口走 DRF 全局 `StandardPagination`（每页 10 条），`results` 只是当前页；
+// 曾经这里不传 `page`，于是 `records` 永远只有第 1 页 ⇒
+// 页码按全量渲染（2025 年 285 条 = 29 页），点第 2 页起却全空。
+// ⚠️ `page_size` 也显式传：后端默认值改了这一页就会错位。
+function buildRecordParams(): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    year: filterYear.value,
+    page: currentPage.value,
+    page_size: pageSize,
+  }
+  if (filterType.value) params.dance_type = filterType.value
+  if (filterTeacher.value) params.teacher = filterTeacher.value
+  if (filterDifficulty.value) params.difficulty = filterDifficulty.value
+  return params
+}
 
 // Form state
 const formVisible = ref(false)
@@ -328,15 +347,20 @@ async function handleSubmit() {
   try {
     const payload = { ...formData.value }
     if (isEdit.value && editingId.value) {
-      await store.records.find(r => r.id === editingId.value)
-        ? await danceApi.updateDance(editingId.value, payload)
-        : null
+      // ⚠️ 这里曾写 `await store.records.find(r => r.id === editingId.value)
+      //    ? await danceApi.updateDance(...) : null` —— **列表里找不到就什么也不写**，
+      //    却照样弹出「已更新」。那是「点了保存、提示成功、其实没落库」。
+      //    分页修好之后 `records` 只是当前页，这种「找不到就跳过」更容易命中。
+      await danceApi.updateDance(editingId.value, payload)
     } else {
       await danceApi.createDance(payload)
     }
     ElMessage.success(isEdit.value ? '已更新' : '已添加')
     formVisible.value = false
-    await refreshData()
+    // 新增 ⇒ 回第 1 页（新记录按时间倒序排在最前，那儿才看得到它）；
+    // 编辑 ⇒ **留在原页**（把人从第 5 页弹回开头 = 另一种「看不到刚才那条」）
+    if (isEdit.value) await fetchRecords()
+    else await refreshData()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.error || '操作失败')
   } finally {
@@ -349,7 +373,12 @@ async function handleDelete(row: any) {
     await ElMessageBox.confirm(`确定删除 ${row.study_time} ${row.dance_type}？`, '提示', { type: 'warning' })
     await danceApi.deleteDance(row.id)
     ElMessage.success('已删除')
-    await refreshData()
+    // 🔴 删掉本页最后一条 ⇒ 留原页会显示空表。`store.totalCount` 此刻还是
+    //    **删除前**的数，减 1 才是删完的总数；越界才退页，否则留在原页
+    //    （走 `refreshData()` 会把人从第 20 页弹回第 1 页）。
+    const lastPage = Math.max(1, Math.ceil(Math.max(0, store.totalCount - 1) / pageSize))
+    if (currentPage.value > lastPage) currentPage.value = lastPage
+    await fetchRecords()
   } catch { /* cancelled */ }
 }
 
@@ -361,12 +390,21 @@ function resetFilters() {
   filterType.value = ''
   filterTeacher.value = ''
   filterDifficulty.value = ''
-  currentPage.value = 1
-  fetchRecords()
+  resetAndFetch()
 }
 
-function handlePageChange(p: number) {
-  currentPage.value = p
+/** 换筛选 ⇒ 回到第 1 页再取（原页码对新筛选没有意义） */
+async function resetAndFetch() {
+  currentPage.value = 1
+  await fetchRecords()
+}
+
+async function handlePageChange(p: number) {
+  // 🔴 改页码必须**重新取数**：后端分页时 `store.records` 里只有当前页。
+  // ⚠️ 顺便夹住页码：DRF 对超出范围的页码回 404（不是空数组）。
+  const lastPage = Math.max(1, Math.ceil(store.totalCount / pageSize))
+  currentPage.value = Math.min(p, lastPage)
+  await fetchRecords()
 }
 
 // Charts
@@ -474,14 +512,12 @@ function initScoreChart() {
 }
 
 async function fetchRecords() {
-  const params: Record<string, unknown> = { year: filterYear.value }
-  if (filterType.value) params.dance_type = filterType.value
-  if (filterTeacher.value) params.teacher = filterTeacher.value
-  if (filterDifficulty.value) params.difficulty = filterDifficulty.value
-  await store.fetchRecords(params)
+  await store.fetchRecords(buildRecordParams())
 }
 
 async function refreshData() {
+  // 年份变化 / 增改后刷新 ⇒ 回到第 1 页（换了一套筛选，原页码没有意义）
+  currentPage.value = 1
   await Promise.all([
     store.fetchOverview(),
     store.fetchTrend(filterYear.value),
@@ -502,7 +538,8 @@ window.addEventListener('resize', () => {
 })
 
 onMounted(() => {
-  store.fetchAll(filterYear.value).then(initCharts)
+  // 记录那一块也带上 `page`，否则后端只给第 1 页（见 `buildRecordParams`）
+  store.fetchAll(buildRecordParams()).then(initCharts)
 })
 </script>
 

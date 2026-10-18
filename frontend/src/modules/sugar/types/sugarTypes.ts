@@ -13,6 +13,8 @@ export interface SugarRecord {
   reward_amount: number
   reward_synced: boolean
   reward_label?: string
+  /** 档位配色，由后端随记录下发（前端不按分数自己算 —— 那是第二份档位边界） */
+  reward_color?: string
   created_at: string
   updated_at: string
 }
@@ -43,12 +45,44 @@ export const CATEGORY_OPTIONS = [
   { value: 'other', label: '其他', icon: '💭' },
 ]
 
-export const REWARD_LABELS: Record<string, { desc: string; icon: string; color: string }> = {
-  '小开心': { desc: '1.0 - 3.0', icon: '😊', color: '#9CA3AF' },
-  '开心': { desc: '3.1 - 5.0', icon: '🙂', color: '#60A5FA' },
-  '很高兴': { desc: '5.1 - 7.0', icon: '😄', color: '#34D399' },
-  '超开心': { desc: '7.1 - 8.5', icon: '🥰', color: '#FBBF24' },
-  '幸福爆炸': { desc: '8.6 - 10.0', icon: '🤩', color: '#F97316' },
+// ─── 快乐程度档位（唯一下发口：GET /sugar/records/happiness_bands/） ───
+//
+// 🔴 这里**只有类型与查表函数，没有档位边界数字**。
+// 边界与词表在 `apps/sugar/constants.py`（后端唯一真源），随接口下发。
+// 曾经前端抄过四份（本文件一个 REWARD_LABELS、卡片里一份配色一份表情、弹窗里一份词表），
+// 结果同一分数在弹窗说「非常开心」、在列表说「很高兴」—— 所以全部删掉，改成查表。
+
+export interface SugarHappinessBand {
+  /** 这一档的上界（含） */
+  max_level: number
+  label: string
+  color: string
+}
+
+export interface SugarHappinessBands {
+  min: number
+  max: number
+  bands: SugarHappinessBand[]
+}
+
+/** 取该分数所在的档位；**没取到表就返回 null**（不猜、不回落硬编码档位）。 */
+export function happinessBandOf(
+  meta: SugarHappinessBands | null,
+  level: number | null | undefined,
+): SugarHappinessBand | null {
+  if (!meta || level === null || level === undefined) return null
+  const value = Number(level)
+  if (Number.isNaN(value)) return null
+  // 与服务端 `resolve_happiness_band` 同一套判据：第一个 `max_level >= 分数` 的档
+  return meta.bands.find(b => value <= b.max_level) ?? null
+}
+
+/** 档位词；取不到表时返回空串 —— 宁可只说分数，也不要编一个词出来 */
+export function happinessLabelOf(
+  meta: SugarHappinessBands | null,
+  level: number | null | undefined,
+): string {
+  return happinessBandOf(meta, level)?.label ?? ''
 }
 
 // ─── 能量清单 ───

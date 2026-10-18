@@ -2,7 +2,8 @@
 
 覆盖：
   ① 种子科目：9 个（旧表 8 个账户列 + 借出款）、幂等、默认不覆盖用户改动
-  ② 科目 CRUD：code 唯一（重复 400）、空 code 可多行、被快照引用时删除 400
+  ② 科目 CRUD：code 唯一（重复 400）、空 code 可多行、被快照引用时删除 400、
+     表单字段的校验消息必须中文化（回英文串 = 用户不知道该改哪一格）
   ③ 汇总恒等式：total_assets = financial_assets + self_use_total；
      net_worth = total_assets − borrow；available_net_worth 剔除自用资产
   ④ liquid_total 只认 is_liquid；类别合计恒 4 行（缺失补 0）
@@ -23,7 +24,11 @@ from datetime import date
 import pytest
 from rest_framework.test import APIClient
 
-from apps.wealth.constants import ASSET_CATEGORIES, LEGACY_ASSET_ACCOUNTS
+from apps.wealth.constants import (
+    ASSET_CATEGORIES,
+    LEGACY_ASSET_ACCOUNTS,
+    PROVIDENT_FUND_ACCOUNT_KEY,
+)
 from apps.wealth.models import (
     WealthAssetAccount,
     WealthAssetSnapshot,
@@ -39,6 +44,8 @@ from apps.wealth.services.asset_service import (
     rollup_items,
     seed_asset_accounts,
 )
+from apps.wealth.services.cashflow_service import get_cashflow_overview
+from apps.wealth.services.ratio_service import resolve_asset_position
 
 ACC_URL = '/api/wealth/asset/accounts/'
 SNAP_URL = '/api/wealth/asset/snapshots/'
@@ -195,6 +202,68 @@ class TestAccountApi:
         assert c.post(ACC_URL, {'name': 'B', 'code': ''}, format='json').status_code == 201
         assert WealthAssetAccount.objects.count() == 2
         assert all(a.code is None for a in WealthAssetAccount.objects.all())
+
+    # ── 校验消息必须说人话（v3.62.18）──
+
+    def test_over_long_code_is_rejected_with_chinese_hint(self):
+        """映射码超长：既要拦住，也要说清是哪一格、怎么办。
+
+        2026-10-16 现场：21 个字符的 `accumulationfund_ning` 被拒，
+        后端回的是 DRF 默认英文 `Ensure this field has no more than
+        20 characters.`，而前端那条链只认 `detail` ⇒ 字段级错误被吞成
+        「保存失败」⇒ 用户只能来问「为什么失败」。
+
+        本用例钉两件事：
+          ① 超长被拒是 400（不是 IntegrityError 500，也不是放行后
+             在 MySQL 严格模式下炸 1406）；
+          ② 消息是中文、且带「映射码」三个字 —— 否则用户不知道指哪一格。
+        """
+        r = APIClient().post(ACC_URL, {
+            'name': '公积金福建', 'code': 'accumulationfund_ning',
+        }, format='json')
+        assert r.status_code == 400
+        msg = str(r.data['code'])
+        assert '映射码' in msg
+        assert 'Ensure this field' not in msg
+        assert not WealthAssetAccount.objects.filter(name='公积金福建').exists()
+
+    def test_code_at_exactly_20_chars_is_accepted(self):
+        """20 是闭区间上限 —— 边界不许写成「小于 20」"""
+        code = 'a' * 20
+        r = APIClient().post(ACC_URL, {'name': '恰好20码', 'code': code}, format='json')
+        assert r.status_code == 201
+        assert WealthAssetAccount.objects.get(id=r.data['id']).code == code
+
+    def test_form_field_errors_are_chinese(self):
+        """四个可填字段的校验消息都得是中文（界面里冒英文等于没提示）"""
+        c = APIClient()
+        for payload, field, expected in [
+            ({'name': ''}, 'name', '请填写科目名'),
+            ({'name': 'X', 'institution': '浙' * 60}, 'institution', '机构最长 50 个字符'),
+            ({'name': 'X', 'note': '浙' * 210}, 'note', '备注最长 200 个字符'),
+        ]:
+            r = c.post(ACC_URL, payload, format='json')
+            assert r.status_code == 400, payload
+            assert expected in str(r.data[field]), payload
+
+    def test_two_provident_fund_accounts_can_coexist(self):
+        """用户场景：公积金随工作变动会不断开户，要按省份区分余额。
+
+        两条同类别、同账户形态、仅科目名与机构不同的记录必须都能建 ——
+        科目名与 account_kind 都没有唯一约束（account_kind 是自由 CharField，
+        不受任何枚举限制），区分账户本来就该靠「科目名 + 机构」。
+        """
+        c = APIClient()
+        rows = [
+            {'name': '公积金福建', 'institution': '宁德', 'code': 'accfund_fj'},
+            {'name': '公积金浙江', 'institution': '浙江', 'code': 'accfund_zj'},
+        ]
+        for row in rows:
+            r = c.post(ACC_URL, {
+                'category': '投资性', 'account_kind': '公积金', **row,
+            }, format='json')
+            assert r.status_code == 201, r.data
+        assert WealthAssetAccount.objects.filter(account_kind='公积金').count() == 2
 
     def test_patch_updates_flags(self):
         obj = _acct(name='某卡', is_liquid=True)
@@ -529,3 +598,240 @@ class TestLegacyBackfill:
         assert second['created'] == 0
         assert second['updated'] == 1
         assert WealthAssetSnapshot.objects.count() == 1
+
+
+# ══════════════════════════════════════════════════════════════
+# ⑩ 公积金按**形态**汇总（v3.62.24）
+# ══════════════════════════════════════════════════════════════
+#
+# 用户报的场景：新建一个公积金科目后，资产全景上「公积金」一栏恒显 ¥0.00。
+# 根因：资产位置的取数键用的是**旧表列名** `accumulationfund`，而新体系里
+# 科目 code 由用户自定（实测 `accfund_zj`）或为空 —— 那个键不存在
+# ⇒ 前端读到 undefined ⇒ 显示 0，而且**全程不报错**
+# （`accounts.get(key, 0.0)`，缺键和真 0 长得一模一样）。
+# 影响面 5 处：汇总列 / 饼图 / 公积金占比 / 趋势线 / 快照历史列。
+#
+# 判据：**新体系里凡「跨科目的语义量」都必须按形态 / 类别取，不许按 code 取。**
+# `code` 只是旧表列名的映射，服务于「初始化科目 + 回填历史快照」这条迁移路径。
+
+
+@pytest.mark.django_db
+class TestProvidentFundAggregation:
+
+    def _snapshot(self, rows, yearmon='2026-10', lend=0.0):
+        """rows: [(科目, 金额)] → 建一期快照。"""
+        snap = WealthAssetSnapshot.objects.create(
+            user_id=1, yearmon=yearmon, snapshot_date=date(2026, 10, 3),
+            borrow=0, lend=lend,
+        )
+        for acct, amount in rows:
+            WealthAssetSnapshotItem.objects.create(
+                snapshot=snap, account=acct, amount=amount,
+            )
+        return snap
+
+    def test_two_provident_fund_accounts_are_merged(self):
+        """两个省份的公积金账户 → 合并成一条，且**不以各自 code 重复出现**"""
+        zj = _acct(name='公积金浙江', code='accfund_zj', category='投资性',
+                   account_kind='公积金', is_liquid=False)
+        fj = _acct(name='公积金福建', code=None, category='投资性',
+                   account_kind='公积金', is_liquid=False)
+        self._snapshot([(zj, 48810.2), (fj, 2500)])
+
+        accounts = get_cashflow_overview()['accounts']
+        assert accounts[PROVIDENT_FUND_ACCOUNT_KEY] == 51310.2
+        # 🔴 不得同时留着 code 键 —— 那会让同一笔钱在两个键里各出现一次（双计）
+        assert 'accfund_zj' not in accounts
+
+    def test_financial_assets_decompose_into_four(self):
+        """金融资产 = 流动资金 + 非流动资金 + 公积金 + 应收借出（1 + 4 个拆解，不是五项并列）"""
+        cash = _acct(name='现金', code='cash', account_kind='现金', is_liquid=True)
+        pf = _acct(name='公积金浙江', code='accfund_zj', category='投资性',
+                   account_kind='公积金', is_liquid=False)
+        lend = _acct(name='借出款', code='lend', category='应收',
+                     account_kind='其他', is_liquid=False)
+        self._snapshot([(cash, 1000), (pf, 4000), (lend, 500)], lend=500)
+
+        ov = get_cashflow_overview()
+        s = ov['summary']
+        assert ov['accounts'][PROVIDENT_FUND_ACCOUNT_KEY] == 4000
+        assert s['flow_total'] == 1000
+        assert s['non_liquid'] == 0
+        assert s['lend'] == 500
+        assert s['financial_assets'] == 5500
+        assert (s['flow_total'] + s['non_liquid']
+                + ov['accounts'][PROVIDENT_FUND_ACCOUNT_KEY]
+                + s['lend']) == s['financial_assets']
+
+    def test_provident_fund_not_in_emergency_fund(self):
+        """另一侧：公积金**绝不**进应急金分子 —— 它撑不了应急"""
+        cash = _acct(name='现金', code='cash', account_kind='现金', is_liquid=True)
+        pf = _acct(name='公积金浙江', code='accfund_zj', category='投资性',
+                   account_kind='公积金', is_liquid=False)
+        self._snapshot([(cash, 1000), (pf, 90000)])
+        assert get_cashflow_overview()['health_metrics']['emergency_fund'] == 1000
+
+    def test_provident_fund_ratio_shares_the_same_source(self):
+        """公积金占比的分子与「公积金」那一栏**同源**（不许做第二把尺子）"""
+        pf = _acct(name='公积金浙江', code='accfund_zj', category='投资性',
+                   account_kind='公积金', is_liquid=False)
+        self._snapshot([(pf, 4000)])
+        ov = get_cashflow_overview()
+        assert ov['accounts'][PROVIDENT_FUND_ACCOUNT_KEY] == 4000
+        assert ov['health_metrics']['provident_fund_ratio'] == 100.0
+
+    def test_account_without_code_is_not_silently_dropped(self):
+        """code 为空的普通科目**不许静默丢钱**（回落形态做键）
+
+        旧实现 `if not code: continue` 会让这笔钱从**唯一口径真源**
+        `resolve_asset_position()['accounts']` 里消失，而 `financial_assets`
+        （走 rollup_items）仍算它 ⇒ 两边对不上且都不报错。
+
+        ⚠️ 断言打在**真源层**，不打 `overview['accounts']` ——
+        后者是旧表 8 列的固定形状（展示位写死），本来就不含用户自建科目。
+        """
+        sec = _acct(name='华泰证券', code=None, category='投资性',
+                    account_kind='证券账户', is_liquid=False)
+        self._snapshot([(sec, 7000)])
+
+        pos = resolve_asset_position()
+        assert pos['accounts'].get('证券账户') == 7000
+        assert pos['financial_assets'] == 7000
+        # 展示层仍是固定 8 键 —— 这是**已知限制**，不是 bug：
+        # 要让新科目上饼图得把展示层改成按科目动态（独立一轮）。
+        assert '证券账户' not in get_cashflow_overview()['accounts']
+
+    def test_legacy_path_keeps_the_same_shape(self):
+        """旧表路径仍下发 `accumulationfund` —— 两条路径同形状，消费方不必分支"""
+        _legacy(yearmon='2099-06', cash=100, accumulationfund=1234)
+        accounts = get_cashflow_overview()['accounts']
+        assert accounts[PROVIDENT_FUND_ACCOUNT_KEY] == 1234
+        assert accounts['cash'] == 100
+
+
+# ══════════════════════════════════════════════════════════════
+# ⑧ 金融资产的四行拆解必须「加得回去」（v3.62.28）
+# ══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.django_db
+class TestAssetDecomposition:
+    """用户原话：「应该显示固定、不流动的那份资产，否则账面数据对不上」。
+
+    改前界面上只有「流动资金」一行，`T+0 可取 = 否` 的余额
+    **不属于任何一行** ⇒ 拆项之和比金融资产少一截，而两边各自都「看着正常」。
+    这不是算错，是有一块根本不出现 —— 本项目最忌的静默失败。
+
+    🔴 判据：拆解等式必须是**按定义**成立的（四桶互斥完备），
+       而不是「此刻恰好成立」—— 判法见 `test_identity_holds_whatever_is_liquid`。
+    """
+
+    def _snapshot(self, rows, yearmon='2026-10', lend=0.0):
+        snap = WealthAssetSnapshot.objects.create(
+            user_id=1, yearmon=yearmon, snapshot_date=date(2026, 10, 3),
+            borrow=0, lend=lend,
+        )
+        for acct, amount in rows:
+            WealthAssetSnapshotItem.objects.create(
+                snapshot=snap, account=acct, amount=amount,
+            )
+        return snap
+
+    def test_non_liquid_bucket_fills_the_gap(self):
+        """那 206,752.88 以前不属于任何一行 —— 现在它是「非流动资金」
+
+        金额取自开发库 2026-10 那期的真实形状：三张储蓄卡被标成
+        「T+0 可取 = 否」（用户自己拨的开关），于是它们从流动资金里消失，
+        但**仍然计入金融资产** —— 中间那一截就是这轮补的那一行。
+        """
+        rows = [
+            (_acct(name='支付宝', code='zplay', account_kind='第三方支付'), 31110.17),
+            (_acct(name='微信', code='wechat', account_kind='第三方支付'), 12480.03),
+            (_acct(name='现金', code='cash', account_kind='现金'), 3982.00),
+            (_acct(name='建设银行', code='jianbank', is_liquid=False), 100624.81),
+            (_acct(name='工商银行', code='gongbank', is_liquid=False), 30057.88),
+            (_acct(name='中国银行', code='zhongbank', category='投资性', is_liquid=False), 76070.19),
+            (_acct(name='农村信用社', code='nongbank'), 28.00),
+            (_acct(name='公积金福建', code=None, category='投资性',
+                   account_kind='公积金', is_liquid=False), 816.09),
+            (_acct(name='公积金浙江', code='accfund_zj', category='投资性',
+                   account_kind='公积金', is_liquid=False), 47994.09),
+            (_acct(name='借出款', code='lend', category='应收',
+                   account_kind='其他', is_liquid=False), 5000.00),
+        ]
+        self._snapshot(rows, lend=5000)
+
+        ov = get_cashflow_overview()
+        s = ov['summary']
+        assert s['flow_total'] == 47600.20
+        assert s['non_liquid'] == 206752.88      # ← 三张卡，以前界面上根本没有这一格
+        assert ov['accounts'][PROVIDENT_FUND_ACCOUNT_KEY] == 48810.18
+        assert s['lend'] == 5000
+        assert s['financial_assets'] == 308163.26
+        assert (s['flow_total'] + s['non_liquid']
+                + ov['accounts'][PROVIDENT_FUND_ACCOUNT_KEY]
+                + s['lend']) == s['financial_assets']
+
+    def test_identity_holds_whatever_is_liquid(self):
+        """把三个开关翻来翻去，等式恒成立 —— 它不依赖用户能改的任何东西
+
+        这条才是「恒等式」的正当性所在：如果某个组合下它破了，
+        说明桶没做到互斥完备，那它就只是「此刻恰好成立」的巧合。
+        """
+        cash = _acct(name='现金', code='cash', account_kind='现金')
+        card = _acct(name='建设银行', code='jianbank', is_liquid=False)
+        pf = _acct(name='公积金浙江', code='accfund_zj', category='投资性',
+                   account_kind='公积金', is_liquid=False)
+        lend = _acct(name='借出款', code='lend', category='应收',
+                     account_kind='其他', is_liquid=False)
+        self._snapshot([(cash, 1000), (card, 20000), (pf, 4000), (lend, 500)], lend=500)
+
+        for card_liquid in (False, True):
+            for pf_liquid in (False, True):
+                for lend_liquid in (False, True):
+                    WealthAssetAccount.objects.filter(id=card.id).update(is_liquid=card_liquid)
+                    WealthAssetAccount.objects.filter(id=pf.id).update(is_liquid=pf_liquid)
+                    WealthAssetAccount.objects.filter(id=lend.id).update(is_liquid=lend_liquid)
+
+                    ov = get_cashflow_overview()
+                    s = ov['summary']
+                    parts = (s['flow_total'] + s['non_liquid']
+                             + ov['accounts'][PROVIDENT_FUND_ACCOUNT_KEY] + s['lend'])
+                    assert parts == s['financial_assets'] == 25500, (
+                        f'card_liquid={card_liquid} pf_liquid={pf_liquid} '
+                        f'lend_liquid={lend_liquid} → {parts} != {s["financial_assets"]}'
+                    )
+
+    def test_receivable_never_counts_as_liquid(self):
+        """借出的钱即使被标成 T+0 可取，也不进「流动资金」
+
+        口径收紧（v3.62.28）：旧表路径 `sum_liquid_accounts` 本来就不含借出，
+        新体系若含它 ⇒ 切换来源时「流动资金」会凭空跳 5,000。
+        """
+        lend = _acct(name='借出款', code='lend', category='应收',
+                     account_kind='其他', is_liquid=True)
+        self._snapshot([(lend, 5000)], lend=5000)
+
+        s = get_cashflow_overview()['summary']
+        assert s['flow_total'] == 0
+        assert s['lend'] == 5000
+        assert s['non_liquid'] == 0
+        assert s['financial_assets'] == 5000
+
+    def test_provident_fund_never_counts_as_liquid(self):
+        """公积金同理：只进「公积金」那一行，绝不同时出现在流动资金里（否则双计）"""
+        pf = _acct(name='公积金浙江', code=None, category='投资性',
+                   account_kind='公积金', is_liquid=True)
+        self._snapshot([(pf, 4000)])
+
+        ov = get_cashflow_overview()
+        assert ov['summary']['flow_total'] == 0
+        assert ov['summary']['non_liquid'] == 0
+        assert ov['accounts'][PROVIDENT_FUND_ACCOUNT_KEY] == 4000
+        assert ov['summary']['financial_assets'] == 4000
+
+    def test_legacy_path_non_liquid_is_zero(self):
+        """旧表 8 列装的都是能动的钱（活期 + 公积金）—— 没有非流动项，给 0 而不是省略字段"""
+        _legacy(yearmon='2099-06', cash=100, accumulationfund=1000)
+        s = get_cashflow_overview()['summary']
+        assert s['non_liquid'] == 0

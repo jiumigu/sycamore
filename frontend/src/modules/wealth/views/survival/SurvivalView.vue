@@ -308,6 +308,7 @@
           @stocktake-one="openQuickStocktake"
           @use-up="openFlowDialog($event, 'use')"
           @restock="openFlowDialog($event, 'restock')"
+          @treasure-saved="store.fetchAll()"
         />
       </div>
 
@@ -588,14 +589,13 @@ async function onFlowSaved() {
  *
  * 配餐看「配餐可支撑天数」、其余看「耐用品与耗材天数」——
  * 数字一样是「天」，但算法完全不同，用同一段说明会解释错。
- * 数字类额外有「还能读多少小时」，也挂同一颗 ⓘ。
+ * （`time_based` 曾在此多挂一颗「还能读多少小时」，随「数字」类别退役 —— v3.62.13。）
  */
 function cardMetricKey(row: SurvivalCategoryResult): string {
   const table: Record<string, string> = {
     meal: 'meal_days',
     depreciation: 'life_days',
     on_demand: 'life_days',
-    time_based: 'life_days',
   }
   return table[row.consume_mode] ?? 'survival_days'
 }

@@ -79,11 +79,12 @@ class ReaderGroup(models.Model):
     name = models.CharField(max_length=100, verbose_name='群体名称')
     description = models.TextField(blank=True, default='', verbose_name='描述')
     total_energy = models.IntegerField(default=0, verbose_name='总能量分')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
         db_table = 'relation_reader_group'
+        db_table_comment = '读者群体：公众号读者分组档案'
         verbose_name = '读者群体'
         verbose_name_plural = '读者群体'
 
@@ -117,10 +118,11 @@ class ReaderInteraction(models.Model):
     energy_score = models.IntegerField(default=1, verbose_name='能量分')
     tags = models.CharField(max_length=500, blank=True, default='', verbose_name='共振关键词')
     interaction_date = models.DateField(null=True, blank=True, verbose_name='互动时间', help_text='不填默认为创建日期')
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
 
     class Meta:
         db_table = 'relation_reader_interaction'
+        db_table_comment = '读者互动：留言 / 私信等互动的逐条记录'
         ordering = ['-energy_score', '-created_at']
         verbose_name = '读者互动'
         verbose_name_plural = '读者互动'
@@ -155,11 +157,12 @@ class ConflictEvent(models.Model):
     is_resolved = models.BooleanField(default=False, verbose_name='是否已解决')
     resolution_note = models.TextField(blank=True, default='', verbose_name='解决备注')
     tags = models.CharField(max_length=200, blank=True, default='', verbose_name='标签')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
         db_table = 'relation_conflict_event'
+        db_table_comment = '成长记录：人际冲突事件复盘'
         ordering = ['-event_date']
         verbose_name = '成长记录'
 
@@ -183,10 +186,11 @@ class ReaderMonthlySummary(models.Model):
     high_energy_count = models.IntegerField(default=0, verbose_name='本月高能量互动数')
     top_article = models.CharField(max_length=255, blank=True, default='', verbose_name='本月最佳文章')
     notes = models.TextField(blank=True, default='', verbose_name='备注')
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
 
     class Meta:
         db_table = 'relation_reader_monthly_summary'
+        db_table_comment = '读者月末盘点：每月一次的读者数据小结'
         unique_together = ['reader_group', 'year', 'month']
         ordering = ['-year', '-month']
         verbose_name = '读者月末盘点'

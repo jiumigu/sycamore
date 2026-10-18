@@ -21,8 +21,10 @@ const props = withDefaults(defineProps<{
 })
 
 const formatted = computed(() => {
-  if (props.value === null || props.value === undefined) return '0.00'
   // 符号由模板按 showSign 统一渲染，这里只负责数值大小 + 千分位 + 脱敏
+  // 取不到交回 formatAmount（它会给「—」）；本组件不兜 0，
+  // 否则「没数据」会被说成「0 元」——本组件存在的意义正是把这两件事分开。
+  if (props.value === null || props.value === undefined) return formatAmount(null)
   return formatAmount(Math.abs(props.value), props.precision)
 })
 

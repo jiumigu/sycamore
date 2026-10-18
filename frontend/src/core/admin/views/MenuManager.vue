@@ -68,6 +68,8 @@ import type { Component } from 'vue'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { allMenuItems, defaultGroups } from '@/shared/config/menuConfig'
+// 保存后让归档判据缓存失效（与侧边栏、各模块页横幅共用同一份状态）
+import { refreshMenuArchive } from '@/shared/composables/useMenuArchive'
 import {
   getMenuPrefs, getMenuGroups, batchUpdateMenus,
   createMenuGroup, updateMenuGroup, deleteMenuGroup,
@@ -87,7 +89,11 @@ interface GroupRow {
 
 // ========== 状态 ==========
 const groups = ref<GroupRow[]>([])
-/** 本地菜单态：menu_key -> is_favorite（未记录时用 defaultArchived 兜底） */
+/**
+ * 本地菜单态：menu_key -> is_favorite（未记录时用 defaultArchived 兜底）
+ * ⚠️ 这是「正在编辑、尚未保存的草稿」，与 useMenuArchive 持有的「当前生效态」不是一回事，
+ *    别把二者合并 —— 合并后保存前的预览会直接改掉全站的归档判据。
+ */
 const prefs = ref<Record<string, boolean>>({})
 
 // ========== 数据加载 ==========
@@ -179,6 +185,8 @@ const saveAll = async () => {
     is_favorite: isFavorite(item.key),
   }))
   await batchUpdateMenus(updates)
+  // 偏好变了 ⇒ 让侧边栏分组与各模块页的归档横幅立刻跟上（不必刷新页面）
+  await refreshMenuArchive()
   ElMessage.success('菜单偏好已保存')
 }
 </script>

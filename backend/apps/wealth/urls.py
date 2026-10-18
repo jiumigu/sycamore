@@ -44,6 +44,12 @@ router.register(r'survival/flows', views.SurvivalFlowViewSet, basename='survival
 #    那条是钱的去向，这条是家里那台冰箱。
 router.register(r'property/categories', views.PropertyCategoryViewSet, basename='property-categories')
 router.register(r'property/items', views.PropertyItemViewSet, basename='property-items')
+# 身上之物（v3.62.4）—— 「我该有什么、找到了没有」。
+# ⚠️ 与上面的 property/* 是**两条**路径，别合并：
+#    那条是已经买回来的（有价格、有年限），这条是**还没找到的**（连东西都没有）。
+#    合并后「我该有一副眼镜」会被读成「我有一副眼镜」。
+router.register(r'body/parts', views.BodyPartViewSet, basename='body-parts')
+router.register(r'body/needs', views.BodyNeedViewSet, basename='body-needs')
 
 urlpatterns = [
     # 🔴 **路由器的动态路由必须排在最后。**
@@ -56,6 +62,9 @@ urlpatterns = [
     # 物件资产：汇总卡 + 口径元信息（均只读、实时算）
     path('property/summary/', views.PropertySummaryView.as_view(), name='property-summary'),
     path('property/meta/', views.PropertyMetaView.as_view(), name='property-meta'),
+    # 身上之物：顶部计数 + 口径元信息（均只读、实时算）
+    path('body/summary/', views.BodySummaryView.as_view(), name='body-summary'),
+    path('body/meta/', views.BodyMetaView.as_view(), name='body-meta'),
     # 生存资源盘点：综合分析 + 口径元信息（均只读、实时算）
     path('survival/analysis/', views.SurvivalAnalysisView.as_view(), name='survival-analysis'),
     path('survival/meta/', views.SurvivalMetaView.as_view(), name='survival-meta'),
@@ -75,6 +84,11 @@ urlpatterns = [
     path('daily_detail/', views.DailyDetailView.as_view(), name='daily-detail'),
     path('monthly_summary/', views.MonthlySummaryView.as_view(), name='monthly-summary'),
     path('bill/create/', views.BillCreateView.as_view(), name='bill-create'),
+    # 快速记账的「分类 / 子分类」候选值（只读、实时算）。
+    # 🔴 静态路径，与上面那些一样**必须排在 `include(router.urls)` 之前** ——
+    #    否则会被 `classify/rules/<pk>/` 的 `<pk>` 吃掉（v3.60.16 的现场）。
+    path('classify/bill-options/', views.BillCategoryOptionsView.as_view(),
+         name='classify-bill-options'),
     # 月度复盘
     path('review/monthly_summary/', views.MonthlyReviewView.as_view(), name='review-monthly-summary'),
     path('review/trend/', views.TrendView.as_view(), name='review-trend'),

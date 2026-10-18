@@ -1,3 +1,5 @@
+from datetime import date
+
 from django.db.models import Avg, Count
 from django.utils import timezone
 
@@ -85,3 +87,27 @@ class BookService:
         """标记为已完成"""
         book.status = '已完成'
         book.save()
+
+    @staticmethod
+    def bulk_update(bids, status=None, reading_depth=None):
+        """按编号批量改「阅读状态」/「阅读深度」，返回**实际命中并改动**的行数。
+
+        统一走 `Book.objects.filter(bid__in=...)` 一次 UPDATE —— 逐条 `save()`
+        会按选中数发 N 条语句，选 100 本就是一串请求。
+
+        🔴 **`updated_at` 必须手工带上**：`QuerySet.update()` 走的是 SQL UPDATE，
+        绕过了 `Model.save()`，而 `auto_now` 那个钩子挂在 `save()` 上 ——
+        不手工写就会变成「内容改了、更新日期还是旧的」（静默的假数据）。
+
+        ⚠️ 返回的是**命中数**，可能小于 `len(bids)`（选中的书被别处删掉了）。
+        调用方要把「请求了多少本」和「改了几本」分开报，不能把命中数当成请求数。
+        """
+        fields = {}
+        if status is not None:
+            fields['status'] = status
+        if reading_depth is not None:
+            fields['reading_depth'] = reading_depth
+        if not fields:
+            return 0
+        fields['updated_at'] = date.today()
+        return Book.objects.filter(bid__in=bids).update(**fields)

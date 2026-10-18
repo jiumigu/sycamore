@@ -74,6 +74,7 @@ class InboxItem(models.Model):
 
     class Meta:
         db_table = 'inbox_item'
+        db_table_comment = '收件箱条目：随手记的入口；状态决定它还在待办，还是已转成别的模块'
         verbose_name = '收件箱条目'
         verbose_name_plural = '收件箱条目'
         ordering = ['-created_at']
@@ -120,6 +121,7 @@ class InboxProcessLog(models.Model):
 
     class Meta:
         db_table = 'inbox_process_log'
+        db_table_comment = '收件箱处理日志：条目被转成目标 / 里程碑 / 能量等动作的留痕'
         verbose_name = '处理日志'
         verbose_name_plural = '处理日志'
         ordering = ['-created_at']

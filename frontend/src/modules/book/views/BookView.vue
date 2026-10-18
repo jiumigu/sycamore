@@ -110,8 +110,52 @@
       </div>
     </el-card>
 
+    <!-- 批量工具条 —— **选中行后才出现**。
+         和上面那张筛选卡分开，是因为两者「量的不是同一类东西」：
+         筛选卡改的是「这张表给我看什么」，这里改的是「选中的那几本变成什么」，
+         混成一条会把筛选状态和选中状态搅在一起（§81.1）。
+         ⚠️ 只有两件事：状态 / 深度 —— 「弃读」不在状态选项里（见 BULK_STATUS_OPTIONS）。 -->
+    <div v-if="selectedCount" class="bulk-bar">
+      <span class="bulk-count">已选 <b>{{ selectedCount }}</b> 本</span>
+
+      <el-dropdown trigger="click" @command="applyBatchStatus">
+        <el-button size="small" type="primary" plain>
+          批量改状态<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="s in BULK_STATUS_OPTIONS" :key="s" :command="s">
+              <el-tag :type="getStatusTagType(s)" size="small" effect="plain">{{ s }}</el-tag>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
+      <el-dropdown trigger="click" @command="applyBatchDepth">
+        <el-button size="small" type="primary" plain>
+          批量改阅读深度<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="d in READING_DEPTH_OPTIONS" :key="d.value" :command="d.value">
+              <el-tag :type="getDepthTagType(d.value)" size="small" effect="plain">{{ d.label }}</el-tag>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
+      <el-button size="small" @click="clearSelection">取消选择</el-button>
+    </div>
+
     <el-card class="table-card">
-      <el-table v-loading="loading" :data="bookList" style="width: 100%" @selection-change="handleSelectionChange" @row-dblclick="openEditDialog">
+      <el-table
+        ref="tableRef"
+        v-loading="loading"
+        :data="bookList"
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+        @row-dblclick="openEditDialog"
+      >
         <el-table-column type="selection" width="55" />
         <el-table-column prop="bid" label="ID" width="70" sortable />
         <el-table-column label="书名" min-width="180" show-overflow-tooltip>
@@ -217,6 +261,30 @@
               </el-form-item>
             </el-col>
           </el-row>
+
+          <!-- 作品（v3.62.0）：**只有状态是「已完成」时才出现** ——
+               在读的书没有「读完了留下什么」这回事。 -->
+          <el-form-item v-if="formData.status === '已完成'">
+            <div class="keep-row">
+              <el-checkbox v-model="formData.keepIt">这本书里有东西值得留下</el-checkbox>
+              <!-- ⚠️ `el-popover` 而不是 `el-tooltip`（两者插槽语义是反的）：
+                   tooltip 的默认插槽是「触发元素」、正文要走 `#content`；
+                   popover 才是「`#reference` 触发 + 默认插槽正文」。
+                   写错不报错，只是正文被当成触发内容**内联渲染、常驻可见**。 -->
+              <el-popover placement="top" :width="340" trigger="hover" :show-after="120">
+                <template #reference>
+                  <el-icon class="keep-icon"><QuestionFilled /></el-icon>
+                </template>
+                <div class="keep-tip">
+                  <p>勾了<b>不用现在写</b>什么 —— 它只把这本书放进「待提炼」。</p>
+                  <p>
+                    在<b>「本周状态」页末</b>把它收成一件东西
+                    （一个模型、一段书评、一份清单都算）。
+                  </p>
+                </div>
+              </el-popover>
+            </div>
+          </el-form-item>
           <el-row :gutter="20">
             <el-col :span="12">
               <el-form-item label="阅读深度" prop="reading_depth">
@@ -317,11 +385,14 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
   Search, Refresh, Plus, Delete, Edit, Document, Check, Star, Calendar, RefreshRight, DataAnalysis,
+  QuestionFilled, ArrowDown,
 } from '@element-plus/icons-vue'
 import { useBookStore } from '../stores/bookStore'
 import { getPresetByType } from '@/shared/api/coreApi'
+// 「值得留下」→ 作品库的「待提炼」（v3.62.0）。三个入口同一个模式：**前端串联**。
+import { capture as captureWork } from '@/modules/works/api/workApi'
 import {
-  BTYPE_OPTIONS, STATUS_OPTIONS, READING_DEPTH_OPTIONS, RECOMMEND_TEXTS,
+  BTYPE_OPTIONS, STATUS_OPTIONS, READING_DEPTH_OPTIONS, RECOMMEND_TEXTS, BULK_STATUS_OPTIONS,
 } from '../types/bookTypes'
 import type { Book } from '../types/bookTypes'
 
@@ -336,7 +407,14 @@ const totalCount = computed(() => bookStore.totalCount)
 
 const currentPage = ref(1)
 const pageSize = ref(20)
-const selectedIds = ref<number[]>([])
+// 表格选中：**只存「选中的行」这一份**，编号与数量都从它推出来。
+// 原先另有一个 `selectedIds`，赋值之后没有任何消费方 ——
+// 勾选框勾了等于没勾（本轮需求的由来）。两份状态各写各的，迟早
+// 出现「勾了说没勾」（§64/§76：身份/去重/判据只许一把尺子）。
+const selectedRows = ref<Book[]>([])
+const selectedIds = computed(() => selectedRows.value.map(r => r.bid))
+const selectedCount = computed(() => selectedRows.value.length)
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
 const dialogVisible = ref(false)
 const dialogType = ref<'create' | 'edit'>('create')
 const formRef = ref<FormInstance>()
@@ -360,6 +438,9 @@ const formData = reactive({
   btype: '', status: '', recommend: 3, reading_depth: 3,
   readDate: '', openop: '', closedop: '', action_item: '', abandon_reason: '',
   tags: [] as string[],
+  // 作品（v3.62.0）：**只在状态是「已完成」时**才露出来。
+  // ⚠️ 默认「不勾」—— 把它默认打开，等于替用户判断「这本书值得留」。
+  keepIt: false,
 })
 
 const formRules: FormRules = {
@@ -402,10 +483,85 @@ function formatBookTitle(title?: string | null) {
 
 function onStatusChange(status: string) {
   if (status !== '弃读') formData.abandon_reason = ''
+  // 状态离开「已完成」⇒ 把勾也收掉 ——
+  // 否则改回「在读」再保存，那条「值得留下」还会跟着发出去（静默的错）。
+  if (status !== '已完成') formData.keepIt = false
 }
 
 function handleSelectionChange(val: Book[]) {
-  selectedIds.value = val.map(item => item.bid)
+  selectedRows.value = val
+}
+
+function clearSelection() {
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
+/** 批量提交的**唯一出口** —— 两个动作只有 `payload` 与文案不同。 */
+async function runBulk(
+  ids: number[],
+  payload: { status?: string; reading_depth?: number },
+  what: string,
+) {
+  try {
+    const res = await bookStore.bulkUpdateBooks(ids, payload)
+    const n = res?.updated ?? 0
+    // 🔴 命中 0 条要说出来：选中的书可能已被别处删掉。静默报「成功」
+    // 会让人以为改了 —— 和「勾了没反应」是同一个病（把「没做」说成「做了」）。
+    if (n) ElMessage.success(`已把 ${n} 本改为${what}`)
+    else ElMessage.warning('没有书籍被改动 —— 选中的书可能已经不在了，刷新看看')
+    clearSelection()
+    await fetchData()
+    await fetchStats()
+  } catch {
+    ElMessage.error('批量修改失败')
+  }
+}
+
+/** 批量改状态。`弃读` 不在这里（它要逐本填原因，见 `BULK_STATUS_OPTIONS`）。 */
+async function applyBatchStatus(status: string) {
+  const ids = selectedIds.value.slice()
+  if (!ids.length) return
+  // 判据读**选中行自己的状态**（不读任何「还没答的东西」）
+  const todo = selectedRows.value.filter(r => r.status !== status).length
+  if (!todo) {
+    ElMessage.warning(`选中的 ${ids.length} 本都已经是「${status}」了，不用改`)
+    return
+  }
+  const same = ids.length - todo
+  const tail = same ? `（另外 ${same} 本已经是这个状态）` : ''
+  try {
+    await ElMessageBox.confirm(`把选中的 ${todo} 本改成「${status}」？${tail}`, '批量改状态', {
+      type: 'warning',
+    })
+  } catch {
+    return // 用户点了取消（Element 以 'cancel'/'close' reject）—— 什么都不做才是对的
+  }
+  await runBulk(ids, { status }, `「${status}」`)
+}
+
+/** 批量改阅读深度。
+ *  `command` 的静态类型是 `string | number | object`（同 SurvivalStocktakePanel 的写法）。 */
+async function applyBatchDepth(depthRaw: string | number | object) {
+  const depth = Number(depthRaw)
+  const ids = selectedIds.value.slice()
+  if (!ids.length || !depth) return
+  const label = READING_DEPTH_OPTIONS.find(d => d.value === depth)?.label || String(depth)
+  const todo = selectedRows.value.filter(r => r.reading_depth !== depth).length
+  if (!todo) {
+    ElMessage.warning(`选中的 ${ids.length} 本都已经是「${label}」了，不用改`)
+    return
+  }
+  const same = ids.length - todo
+  const tail = same ? `（另外 ${same} 本已经是这个深度）` : ''
+  try {
+    await ElMessageBox.confirm(`把选中的 ${todo} 本改成「${label}」？${tail}`, '批量改阅读深度', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  await runBulk(ids, { reading_depth: depth }, `「${label}」`)
 }
 
 function handleSearch() { currentPage.value = 1; fetchData() }
@@ -515,6 +671,23 @@ async function handleSubmit() {
         await bookStore.updateExistingBook(formData.bid, data)
         ElMessage.success('更新成功')
       }
+
+      // 「值得留下」→ 作品库（v3.62.0）。🔴 **单独 try**：附加标记，失败不阻断保存。
+      // ⚠️ 只在**编辑已有书**时打勾：新建那一路拿不到新书的 `bid`，
+      //    而捕获必须带 `source_id`（拿不到就宁可不记，也不记一条指错的）。
+      if (formData.keepIt && formData.status === '已完成' && formData.bid) {
+        try {
+          await captureWork({
+            source_type: 'book',
+            source_id: formData.bid,
+            title: formData.btitle,
+            excerpt: (formData.action_item || '').slice(0, 300),
+          })
+        } catch {
+          ElMessage.warning('已保存；「值得留下」没记上（作品库可能还没就绪）')
+        }
+      }
+
       dialogVisible.value = false
       await fetchData(); await fetchStats()
     } catch {
@@ -626,6 +799,25 @@ onMounted(() => { fetchData(); fetchStats(); loadPresetTags() })
   }
 }
 
+/* 批量工具条（选中行后才出现）—— 和筛选卡分开，两者量的不是同一类东西 */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: var(--el-border-radius-base);
+  background: var(--el-color-primary-light-9);
+
+  .bulk-count {
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+    b { margin: 0 2px; font-size: 16px; color: var(--el-color-primary); }
+  }
+}
+
 .table-card {
   :deep(.el-card__body) { padding: 20px; }
   .recommend-stars { display: inline-flex; gap: 2px;
@@ -698,4 +890,14 @@ onMounted(() => { fetchData(); fetchStats(); loadPresetTags() })
   color: var(--el-text-color-placeholder);
   line-height: 1.4;
 }
+/* 「值得留下」那一行（只在状态 = 已完成时出现） */
+.keep-row { display: flex; align-items: center; gap: 6px; }
+.keep-icon {
+  color: var(--el-text-color-secondary); cursor: help;
+  border-bottom: 1px dashed var(--el-border-color);
+}
+.keep-icon:hover { color: var(--el-color-primary); }
+.keep-tip { max-width: 330px; font-size: 12px; line-height: 1.8; }
+.keep-tip p { margin: 0 0 6px; }
+.keep-tip p:last-child { margin-bottom: 0; }
 </style>

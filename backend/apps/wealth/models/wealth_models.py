@@ -21,6 +21,7 @@ class WealthLifeWeekCalendar(models.Model):
 
     class Meta:
         db_table = 'wealth_life_week_calendar'
+        db_table_comment = '人生周历：61 年 × 52 周 = 3172 行，一次性种下、之后只读'
         verbose_name = '人生周历'
         verbose_name_plural = '人生周历'
         indexes = [
@@ -46,6 +47,7 @@ class WealthCurrentScenario(models.Model):
 
     class Meta:
         db_table = 'wealth_current_scenario'
+        db_table_comment = 'FIRE 推演当前状态（单例，恒定 id=1）'
         verbose_name = '当前推演状态'
         verbose_name_plural = '当前推演状态'
 
@@ -67,6 +69,7 @@ class WealthScenarioHistory(models.Model):
 
     class Meta:
         db_table = 'wealth_scenario_history'
+        db_table_comment = 'FIRE 推演历史：每次推演留一行'
         verbose_name = '推演历史'
         verbose_name_plural = '推演历史'
         ordering = ['-snapshot_time']
@@ -304,6 +307,7 @@ class WealthLiabilityDetail(models.Model):
         # 刻意不设 Meta.ordering：外部表 ordering 会被注入 SELECT 而使
         # values().distinct() / annotate() 静默失效（项目硬坑②）—— 排序一律在服务层显式给定
         db_table = 'wealth_liability_detail'
+        db_table_comment = '负债逐笔台账（本金 / 剩余 / 利率 / 还款方式）'
         verbose_name = '负债明细'
         verbose_name_plural = '负债明细'
         indexes = [
@@ -370,6 +374,7 @@ class WealthAssetAccount(models.Model):
         # 同 WealthLiabilityDetail：不设 Meta.ordering，排序交给服务层
         # （外部表 ordering 会被注入 SELECT 而静默破坏聚合/去重，项目硬坑②）
         db_table = 'wealth_asset_account'
+        db_table_comment = '资产科目主数据：有哪些科目是数据，不是表结构'
         verbose_name = '资产科目'
         verbose_name_plural = '资产科目'
         # code 允许为 NULL（手工新增的科目无旧列可映射）；MySQL 唯一索引
@@ -412,6 +417,7 @@ class WealthAssetSnapshot(models.Model):
 
     class Meta:
         db_table = 'wealth_asset_snapshot'
+        db_table_comment = '资产盘点快照头（每月一期：年月 + 盘点日 + 负债与借出汇总）'
         verbose_name = '资产快照'
         verbose_name_plural = '资产快照'
         constraints = [
@@ -448,6 +454,7 @@ class WealthAssetSnapshotItem(models.Model):
 
     class Meta:
         db_table = 'wealth_asset_snapshot_item'
+        db_table_comment = '资产快照明细行：一个科目一行，唯一键 = 快照 + 科目'
         verbose_name = '资产快照明细'
         verbose_name_plural = '资产快照明细'
         constraints = [
@@ -495,6 +502,7 @@ class WealthReceivableDetail(models.Model):
     class Meta:
         # 同 WealthLiabilityDetail：不设 Meta.ordering，排序交给服务层
         db_table = 'wealth_receivable_detail'
+        db_table_comment = '应收借出逐笔台账（本金 / 已收回 / 约定还款日）'
         verbose_name = '应收借出明细'
         verbose_name_plural = '应收借出明细'
         indexes = [
@@ -573,6 +581,7 @@ class WealthClassifyRule(models.Model):
         # 同其他 managed 表：不设 Meta.ordering，排序交给服务层
         # （外部表 ordering 会被注入 SELECT 而静默破坏聚合/去重，项目硬坑②）
         db_table = 'wealth_classify_rule'
+        db_table_comment = '账单项分类规则：字段 + 匹配值 → 三个维度的标签'
         verbose_name = '账单项分类规则'
         verbose_name_plural = '账单项分类规则'
         constraints = [

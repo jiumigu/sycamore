@@ -40,6 +40,7 @@ from .wealth_views import (
     AssetSnapshotViewSet,
     ClassifyRuleViewSet,
     ClassifyResultViewSet,
+    BillCategoryOptionsView,
     RatioViewSet,
 )
 # 生存资源盘点（v3.59.0，P3-A 一期）
@@ -65,6 +66,14 @@ from .property_views import (
     PropertyItemViewSet,
     PropertySummaryView,
     PropertyMetaView,
+)
+# 身上之物（v3.62.4）—— 「我该有什么、找到了没有」。
+# ⚠️ 与上面的 property（已买回来的）**刻意分开**：这条管的是**还没找到的**。
+from .body_views import (
+    BodyPartViewSet,
+    BodyNeedViewSet,
+    BodySummaryView,
+    BodyMetaView,
 )
 __all__ = [
     'calculate_current_age_week',
@@ -108,6 +117,7 @@ __all__ = [
     'AssetSnapshotViewSet',
     'ClassifyRuleViewSet',
     'ClassifyResultViewSet',
+    'BillCategoryOptionsView',
     'RatioViewSet',
     'SurvivalCategoryViewSet',
     'SurvivalUnitViewSet',
@@ -125,4 +135,8 @@ __all__ = [
     'PropertyItemViewSet',
     'PropertySummaryView',
     'PropertyMetaView',
+    'BodyPartViewSet',
+    'BodyNeedViewSet',
+    'BodySummaryView',
+    'BodyMetaView',
 ]

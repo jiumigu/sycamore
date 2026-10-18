@@ -48,14 +48,33 @@ const assetItems = computed(() => {
   const s = props.overview.summary
   return [
     // 🔴 「金融资产」= 全部非自用资产合计（**含**应收借出）——
-    // 下面「应收借出」是它的明细拆解，不是并列的另一项，别把它们相加。
+    // 下面四行是它的拆解，不是并列的另外四项，别把它们和金融资产相加。
+    //
+    // 🔴 拆解必须**加得回去**（v3.62.28 —— 用户报「账面数据对不上」）：
+    //    金融资产 = 流动资金 + 非流动资金 + 公积金 + 应收借出
+    // 改前只有「流动资金」一行，`T+0 可取 = 否` 的余额
+    // （实测三张储蓄卡 206,752.88）不属于任何一行 ⇒ 拆项之和比金融资产
+    // 少一截，而两边各自都看着正常。四个桶由后端 rollup_items 按定义
+    // 互斥划分，前端只展示、不判断、不折算。
     {
       key: 'financial_assets',
       label: '金融资产',
       value: s.financial_assets,
       hint: '全部非自用资产合计，已包含应收借出',
     },
-    { key: 'flow_total', label: '流动资金', value: s.flow_total },
+    {
+      key: 'flow_total',
+      label: '流动资金',
+      value: s.flow_total,
+      hint: 'T+0 可取用的钱（应急金按这个算）；取不出来的在下一行',
+    },
+    {
+      key: 'non_liquid',
+      label: '非流动资金',
+      value: s.non_liquid,
+      hint: '计入资产但 T+0 取不出来的余额：定期、理财、被锁定的存款等。'
+        + '某笔钱算不算，由科目主数据里的「T+0 可取」开关决定',
+    },
     { key: 'accumulationfund', label: '公积金', value: props.overview.accounts.accumulationfund },
     { key: 'lend', label: '应收借出', value: s.lend, hint: '上面「金融资产」的其中一部分' },
     { key: 'borrow', label: '负债', value: s.borrow },

@@ -191,7 +191,11 @@ def _match_attribution(task, rules_index, activity_type_of=None):
 
 
 def compute_time_attribution(period):
-    """窗口内 ATracker 任务经外挂规则映射后的五类归因小时 + 覆盖率。"""
+    """窗口内 ATracker 任务经外挂规则映射后的六类归因小时 + 覆盖率。
+
+    ⚠️ `hours` 的键集由 `ATTRIBUTION_CHOICES_LIST` 派生 ⇒ 新增 L1 词自动跟随，
+    本函数无需改动（v3.60.36 加「体验」时即是如此）。
+    """
     from apps.temporal.models import TaskMeta, TemporalTask
     from .models import RedemptionAttrRule
 
@@ -219,6 +223,10 @@ def compute_time_attribution(period):
     theoretical = days_elapsed * THEORETICAL_DAILY_HOURS
     coverage_rate = round(covered / theoretical, 4) if theoretical else 0.0
     # 占比 = 「成长」小时 / 有记录小时（对外字段名仍是 toward_ratio，见 models 里的说明）
+    # ⚠️ v3.60.36 起「体验」独立成格 ⇒ 本比值**不再包含旅游时长**。
+    #    实测（2026-10-12）：本窗口（2026-10-01 起）内「旅游观景」为 **0 条**，
+    #    所以**当前读数不变**；将来窗口内一旦出现旅游记录，同一批数据在新旧口径下才会不同 ——
+    #    那是**有意的口径变更**，不是回归（改口径即刻回溯，是本模块的既定特性）。
     toward_ratio = round(hours['成长'] / covered, 4) if covered else 0.0
 
     return {

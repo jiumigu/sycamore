@@ -28,6 +28,17 @@ export function getJoyTypeStats(params?: Record<string, unknown>) {
   return request({ url: '/sugar/records/joy_type_stats/', method: 'get', params })
 }
 
+/**
+ * 快乐程度档位表（后端唯一真源）。
+ *
+ * 录入弹窗要在**拖滑块时**立刻显示档位词，那时还没有记录、拿不到 `reward_label`，
+ * 所以整张表必须下发一次。前端**不许**自己抄一份边界（曾经抄过四份，抄出了
+ * 「弹窗说非常开心、列表说很高兴」）。
+ */
+export function getHappinessBands() {
+  return request({ url: '/sugar/records/happiness_bands/', method: 'get' })
+}
+
 // ─── 小确幸模板 API ───
 
 export function getSugarTemplates() {

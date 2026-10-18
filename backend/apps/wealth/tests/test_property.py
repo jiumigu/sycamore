@@ -439,6 +439,26 @@ class TestPreview:
         assert api.post(PREVIEW, payload, format='json').status_code == 400
         assert api.post(ITEMS, payload, format='json').status_code == 400
 
+    def test_preview_carries_badge_keys_like_the_saved_row(self):
+        """试算行是个 **dict** —— 徽标三个字段必须容忍「键不在上面」（v3.60.33）
+
+        漏写一个 `allow_null` 就把整个试算接口打成 **500**，而界面上只表现成
+        「点了试算没反应」。这里把两件事一起钉住：接口不炸 + 试算仍是
+        「按保存后的样子先说一遍」。
+        """
+        api = APIClient()
+        category = _category(api)
+
+        preview = api.post(PREVIEW, _payload(category), format='json')
+        assert preview.status_code == 200, preview.content.decode()
+
+        row = preview.json()
+        saved = _create(api, category)
+        for key in ('treasure_badge', 'treasure_record_id', 'treasure_suggest_category'):
+            assert key in row, f'{key} 没进试算结果 —— 前端拿到的是 undefined'
+            assert key in saved, f'{key} 没进保存结果'
+            assert row[key] == saved[key], f'{key} 试算与保存不一致'
+
     def test_preview_ignores_scrap_fields_when_not_scrapped(self):
         """试算体现的是「保存之后会变成什么样」——
         状态不是在用，那两个字段就不该参与计算。"""

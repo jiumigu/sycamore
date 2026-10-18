@@ -436,6 +436,18 @@ export function getClassifyUnclassified(params?: { yearmon?: string; limit?: num
   return request({ url: '/wealth/classify/results/unclassified/', method: 'get', params })
 }
 
+/**
+ * 快速记账的「分类 / 子分类」候选值（只读、实时算）。
+ *
+ * 🔴 分类体系**只有一个来源**，就是这个接口 —— 后端把「账本的真实层级」
+ *    与「口径配置里登记过的分类名」取并集后下发。
+ *    前端**不许**再写一份分类数组：`QuickBillForm.vue` 里原来那 17 项硬编码
+ *    与真实账本完全对不上，而分类有两处定义时，永远不知道哪一处是真的。
+ */
+export function getBillCategoryOptions(params?: { user_id?: number }) {
+  return request({ url: '/wealth/classify/bill-options/', method: 'get', params })
+}
+
 /* ── 财务规划比率（P2-A）────────────────────────────────────────
  * 比率是**派生结果**：只读、实时算、无主键。故这里只有 get，
  * 没有任何 create/update —— 想改结果就去改上游（资产快照 / 分类规则 / 负债明细）。

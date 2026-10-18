@@ -76,7 +76,9 @@ import * as ElementPlusIcons from '@element-plus/icons-vue'
 import { Expand, Fold, Box, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import request from '@/shared/utils/request'
 import { allMenuItems, defaultGroups, type MenuItem } from '@/shared/config/menuConfig'
-import { getMenuPrefs, getMenuGroups, type MenuGroupData } from '@/shared/api/coreApi'
+import { getMenuGroups, type MenuGroupData } from '@/shared/api/coreApi'
+// 归档判据唯一实现（与各模块页的归档横幅共用同一把尺子）
+import { loadMenuPrefs, isMenuArchived } from '@/shared/composables/useMenuArchive'
 
 const route = useRoute()
 
@@ -85,8 +87,6 @@ const isCollapsed = ref(false)
 const showArchived = ref(true)
 const inboxStats = ref({ pending: 0 })
 
-/** 用户菜单偏好：menu_key -> { is_favorite, sort_order } */
-const menuPrefs = ref<Record<string, { is_favorite: boolean; sort_order?: number }>>({})
 /** 分组配置（后端权威），加载失败时回退 defaultGroups */
 const groups = ref<(MenuGroupData & { group_name: string })[]>([])
 
@@ -104,12 +104,8 @@ const visibleGroups = computed(() => {
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
 })
 
-/** 是否归档：有偏好记录看记录；无记录看 defaultArchived */
-const isArchived = (item: MenuItem): boolean => {
-  const pref = menuPrefs.value[item.key]
-  if (pref) return !pref.is_favorite
-  return !!item.defaultArchived
-}
+/** 是否归档：判据委托 useMenuArchive（唯一实现），此处只做 MenuItem → key 的适配 */
+const isArchived = (item: MenuItem): boolean => isMenuArchived(item.key)
 
 /** 某分组下的常用菜单 */
 const groupMenus = (groupKey: string): MenuItem[] => {
@@ -134,15 +130,10 @@ const isRouteActive = (path: string) => {
 // ========== 数据加载 ==========
 const fetchMenuData = async () => {
   try {
-    const [prefsRes, groupsRes] = await Promise.all([
-      getMenuPrefs(),
+    const [, groupsRes] = await Promise.all([
+      loadMenuPrefs(),   // 偏好由 composable 统一持有，失败内部已兜底
       getMenuGroups(),
     ])
-    const prefs: Record<string, { is_favorite: boolean; sort_order?: number }> = {}
-    ;(prefsRes.data as Array<{ menu_key: string; is_favorite: boolean; sort_order?: number }>).forEach(p => {
-      prefs[p.menu_key] = { is_favorite: p.is_favorite, sort_order: p.sort_order }
-    })
-    menuPrefs.value = prefs
     groups.value = groupsRes.data?.results?.length ? groupsRes.data.results : groupsRes.data || []
   } catch (e) {
     console.error('加载菜单配置失败，使用默认配置', e)

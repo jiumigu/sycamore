@@ -17,16 +17,37 @@
  *    兜成「保存失败」等于把可行动的信息丢掉（项目硬坑：只回「保存失败」= 用户只能瞎猜）。
  */
 
+/**
+ * DRF 用这几个 key 装「整表级」错误，它们**不是字段名**，
+ * 显示成「non_field_errors：xxx」只会让用户更懵。
+ */
+const NON_FIELD_KEYS = new Set(['detail', 'non_field_errors'])
+
+/** 从错误值里取第一句 —— DRF 的字段错误是 `['消息']`，也有直接给字符串的 */
+function firstLine(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
+  return ''
+}
+
 /** 从 DRF 的几种错误体里挑出一句人话 */
 function pickMessage(data: unknown): string {
   if (typeof data === 'string') return data
-  if (data && typeof data === 'object') {
-    const record = data as Record<string, unknown>
-    if (typeof record.detail === 'string') return record.detail
-    for (const value of Object.values(record)) {
-      if (typeof value === 'string') return value
-      if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
-    }
+  if (!data || typeof data !== 'object') return ''
+  const record = data as Record<string, unknown>
+
+  // `detail` 是整表级错误，最明确，先认它
+  if (typeof record.detail === 'string') return record.detail
+
+  // 🔴 字段级错误要**带上字段名**。
+  //    2026-10-16 的现场：映射码超长，后端回 `{"code": ["映射码最长 20 个字符…"]}`，
+  //    但这条链上多处只显示「消息」本身 —— 一句话掉进提示条，用户不知道是
+  //    哪一格填错了。带上 key 至少能定位；正解是后端给中文 error_messages，
+  //    让消息自己说清字段名（见 AssetAccountFormSerializer）。
+  for (const [key, value] of Object.entries(record)) {
+    const text = firstLine(value)
+    if (!text) continue
+    return NON_FIELD_KEYS.has(key) ? text : `${key}：${text}`
   }
   return ''
 }

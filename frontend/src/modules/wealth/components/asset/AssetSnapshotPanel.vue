@@ -5,6 +5,9 @@
         <h3>资产快照（按科目）</h3>
         <span class="panel-header__hint">
           每月一期、明细按科目录入 —— 科目可增删，加「证券账户」不用改表结构
+          <template v-if="!hasSelfUse">
+            ；记入自用资产（房 / 车）后，会自动多出「总资产」「可变现净值」两列
+          </template>
         </span>
       </div>
       <div class="panel-header__right">
@@ -45,7 +48,13 @@
           </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column label="总资产" width="106" align="right" class-name="col-amount">
+      <el-table-column
+        v-if="hasSelfUse"
+        label="总资产"
+        width="106"
+        align="right"
+        class-name="col-amount"
+      >
         <template #default="{ row }">{{ maskAmount(row.total_assets, privacyMode) }}</template>
       </el-table-column>
       <el-table-column label="负债" width="98" align="right" class-name="col-amount">
@@ -58,7 +67,13 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="可变现净值" width="112" align="right" class-name="col-amount">
+      <el-table-column
+        v-if="hasSelfUse"
+        label="可变现净值"
+        width="112"
+        align="right"
+        class-name="col-amount"
+      >
         <template #default="{ row }">
           <el-tooltip placement="top">
             <template #content>剔除自用资产后的净资产 —— 能真正变成钱的部分</template>
@@ -241,8 +256,9 @@ import { Plus, WarningFilled } from '@element-plus/icons-vue'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
 import { maskAmount, maskFreeText } from '@/shared/utils/privacy'
 import { formatAmount } from '@/shared/utils/format'
+import { apiErrorText } from '@/shared/utils/apiError'
 import { useAssetStore } from '../../stores/assetStore'
-import { ASSET_CATEGORIES } from '../../types/wealthTypes'
+import { ASSET_CATEGORIES, ASSET_NON_LIQUID_KINDS } from '../../types/wealthTypes'
 import type {
   AssetAccountItem, AssetSnapshotRow, AssetSnapshotFormData,
 } from '../../types/wealthTypes'
@@ -291,6 +307,28 @@ const groupedAccounts = computed(() =>
     .filter(g => g.accounts.length > 0),
 )
 
+/**
+ * 本页是否出现过自用资产 —— 决定「总资产」「可变现净值」两列显不显示。
+ *
+ * 🔴 为什么可以隐藏（口径，见后端 `asset_service.rollup_items`）：
+ *      total_assets          = financial_assets + self_use_total
+ *      available_net_worth   = financial_assets − borrow
+ *      net_worth             = total_assets     − borrow
+ *    `self_use_total` 恒为 0 时，`total_assets ≡ financial_assets`、
+ *    `available_net_worth ≡ net_worth` —— 两列与前两列**逐字相等**，
+ *    留在表里就是同一笔钱显示两遍（用户 2026-10-17 报「几乎都是重复的」）。
+ *    实测那天全部 19 期快照 `self_use_total` 均为 0、科目主数据里也没有
+ *    `category='自用'` 的科目。
+ *
+ * ⚠️ 判据取「本页任意一期」而不是「当前行」：
+ *    el-table 的列是**表级**的，按行显隐会让同一张表的列忽隐忽现。
+ *    代价是切换「最近 N 期」时如果只有更早的期次带自用资产，列会跟着显隐 ——
+ *    那时数值本身也确实只在那些期次里有差异，所见即所得。
+ */
+const hasSelfUse = computed(() =>
+  snapshots.value.some(r => Number(r.self_use_total) > 0),
+)
+
 /** 应收类科目合计 − 快照头借出：非 0 的期次（只提示，不改数据） */
 const gapRows = computed(() =>
   snapshots.value.filter(r => Math.abs(r.receivable_gap) > 0.01),
@@ -309,7 +347,13 @@ const preview = computed(() => {
       continue
     }
     catTotals[acct.category] = (catTotals[acct.category] ?? 0) + amt
-    if (acct.is_liquid) liquid += amt
+    // 🔴 与后端 `rollup_items` **同一顺序**：类别 → 形态 → is_liquid。
+    //    应收类与公积金形态即使标成「T+0 可取」也不进这一项（v3.62.28 收紧），
+    //    否则这个预览会与保存后的结果差数 —— 而它存在的意义正是「填的时候能对得上」
+    //    （本项目的老毛病：预览一套尺子、落库另一套，两边都「看着正常」）。
+    const isNotLiquidKind = acct.category === '应收'
+      || ASSET_NON_LIQUID_KINDS.includes(acct.account_kind)
+    if (!isNotLiquidKind && acct.is_liquid) liquid += amt
   }
   const financial = ASSET_CATEGORIES
     .filter(c => c !== '自用')
@@ -399,7 +443,7 @@ async function handleSave() {
     showDialog.value = false
     ElMessage.success('已保存')
   } catch (e) {
-    ElMessage.error(apiError(e, '保存失败，请检查年月与金额'))
+    ElMessage.error(apiErrorText(e, '保存失败，请检查年月与金额'))
   }
 }
 
@@ -408,7 +452,7 @@ async function handleDelete(row: AssetSnapshotRow) {
     await store.removeSnapshot(row.id)
     ElMessage.success('已删除')
   } catch (e) {
-    ElMessage.error(apiError(e, '删除失败'))
+    ElMessage.error(apiErrorText(e, '删除失败'))
   }
 }
 
@@ -428,11 +472,6 @@ function refresh() {
  */
 defineExpose({ openDialog, refresh })
 
-/** 取后端返回的 detail 文案 */
-function apiError(e: unknown, fallback: string): string {
-  const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-  return typeof detail === 'string' ? detail : fallback
-}
 </script>
 
 <style scoped>

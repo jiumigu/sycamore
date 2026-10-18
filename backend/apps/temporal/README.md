@@ -11,6 +11,25 @@
 | `refresh_weekly_cache` | 刷新周度固化表 |
 | `**import_worklog**` | **工作日志 Excel → 「牛马工作」时间记录（v3.58.7）** |
 | `**reconstruct_worktime**` | **月度加班台账 → 逐日时间记录（反推，v3.60.8）** |
+| `**check_meta_consistency**` | **只读报告「常量表种子 vs 库真源」的三类差异（v3.60.37）** |
+
+### `check_meta_consistency`（v3.60.37）——「种子 vs 真源」漂移报告
+
+⚠️ 先读判据：`TASK_TO_L2` **不是真源，是「初始种子」**（详见「三层分类模型」小节）。
+
+```bash
+python manage.py check_meta_consistency            # 人类可读
+python manage.py check_meta_consistency --json     # 便于脚本消费
+python manage.py check_meta_consistency --strict   # 有差异则退出码 1（可挂 CI / 提交前）
+```
+
+| 类 | 症状 | 动作 |
+|---|---|---|
+| **A 僵尸** | 种子表里的任务名，库里没有 | 从种子表删掉 |
+| **B 漂移** | 两边都有、值不同 | **人工判哪个对**，再决定改哪边 |
+| **C 未收录** | 库里有、种子表没有 | 补录进种子表（否则将来重建库会落「未归类」） |
+
+🔴 只读：不写库、不改常量。用例 `tests/test_meta_consistency.py`（16 条）。
 
 ### `import_worklog`（v3.58.7；**v3.60.28 起认第二族表**）
 
@@ -97,7 +116,7 @@ python manage.py reconstruct_worktime <xlsx 路径> --apply    # 落库
 |-------|-------|------|
 | TemporalTask | temporal_time_atracker_tasks_list | 活动追踪任务（**managed=False 外部表，绝不加列**） |
 | OneDayPage | temporal_oneday_page_list | 日记记录（managed=False） |
-| WeeklyTimeCache | temporal_weekly_time_cache | 周度固化表（供周度追踪 / 周结构图，由 `refresh_weekly_cache` 或刷新接口重建） |
+| WeeklyTimeCache | temporal_weekly_time_cache | 周度固化表，由 `refresh_weekly_cache` 重建。⚠️ **当前无消费方** —— 168h 周结构走 `get_168h_structure()` **实时聚合源表**、不读它；消费它的 `weekly-tracking` 接口与前端页面**均已退役**（见「周度追踪」节） |
 | TaskMeta | temporal_task_meta | 任务元数据（`activity_type` = v0.3 的 **L2 类型**，9 类预设 + 未归类） |
 | ActivityGroup | temporal_activity_group | ⚠️ **已废弃** —— v0.3 起取消该层，表与 `TaskMeta.group` 列**保留不删**，代码不再读写 |
 
@@ -127,17 +146,30 @@ python manage.py reconstruct_worktime <xlsx 路径> --apply    # 落库
 ## 三层分类模型（v0.3，勿改回颠倒层级）
 
 ```
-L1 归因  五词：成长 / 关系 / 维持 / 谋生 / 流失   （真源 temporal/constants.py）
-L2 类型  TaskMeta.activity_type，9 类预设 + 未归类
+L1 归因  六词：成长 / 体验 / 关系 / 维持 / 谋生 / 流失   （真源 temporal/constants.py）
+L2 类型  TaskMeta.activity_type，10 类预设 + 未归类
 L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
 ```
 
 - ⚠️ **ActivityGroup 层已取消**，不要再引入中间层。叠加归因覆盖靠 `attr_rule`，不靠 group。
-- ⚠️ `default_attribution` 是**落库值**：改 `TASK_TO_L2` **不会**回头改已存在的行，须另跑数据迁移（`migrate_temporal_categories`）。
+- 🔴 `TASK_TO_L2` 是**初始种子、不是真源**（v3.60.37 拍板）：真源 = `temporal_task_meta`，
+  运行时所有统计（贡献图 / 时间统计 / 台账）都读库里的值。种子表**只在「库里还没有该 task_name」
+  时生效**（`_ensure_task_meta` 建档 / `migrate_temporal_categories` 回填），建完即永久退出运算
+  ⇒ 两边**允许**不一致，那不是 bug；但这不一致必须**看得见**。
+  - 想改一个**已经在用**的任务归类 ⇒ 改库里那行（前端「映射编辑器」），**改种子表没用**。
+  - ⚠️ `default_attribution` 是**落库值**：改种子表不会回头改已存在的行，须另跑数据迁移。
+    先例三条：`0010`（社交→关系）、`0011`（旅游观景→主动经历/体验）、
+    `0013`（运动健身 维持→成长 —— 这一条是**改库以对齐种子**，方向与前两条相反）。
+  - **新增 L1 词或改某个 task_name 的挂靠时，常量与迁移必须成对做** —— 只改常量是静默的部分修复。
+  - 漂移凭据：`manage.py check_meta_consistency`（只读，报 A/B/C 三类，见上）。
+- ⚠️ `ATTRIBUTION_ORDER`（价值序）**只许纯增量插入，不许挪动已有词次序**：并列时靠前者胜，挪位会让历史数据「并列取谁」的结果静默改变。钉在 `test_temporal_v03.py::test_relation_slot_and_order_invariance`。
 
 ## Constants
-4 类任务分类：生产与创造 / 维护与秩序 / 滋养与成长 / 连接与记录，含颜色和图标
-L1 归因五词与顺序见 `temporal/constants.py` 的 `ATTRIBUTION_CHOICES` / `ATTRIBUTION_ORDER` / `ATTRIBUTION_COUNTED`。
+- 旧四分类（`CATEGORY_COLORS` / `TASK_CATEGORY_MAPPING` 的值域）：**工作 / 学习 / 生活 / 兴趣记录**（含颜色与图标）。
+  ⚠️ 更早的名字「生产与创造 / 维护与秩序 / 滋养与成长 / 连接与记录」**已废弃** —— 值域只能是现在这四个，
+  因为它要被 `LEGACY_FOUR_TO_L2` 二次查表（塞第五个值进去会 KeyError）。
+- L1 归因**六词**与顺序见 `temporal/constants.py` 的 `ATTRIBUTION_CHOICES` / `ATTRIBUTION_ORDER` / `ATTRIBUTION_COUNTED`。
+- L2 类型 10 类预设见 `ACTIVITY_TYPE_PRESETS`；`TASK_TO_L2` 是 task_name 级**种子**（见上「三层分类模型」）。
 
 ## API Endpoints
 
@@ -175,7 +207,7 @@ CSV 导入复用同一函数但**不传 `end`**（保留 ATracker 自带时长�
 `contrib` 的两种响应形态：
 - **量值模式**（`mode: "value"`，默认 `hours`）：`data: [{date, value}]`，value 是该 metric 的当日聚合值。
 - **主导归因模式**（`metric=dominant_attr`，`mode: "attribution"`）：`data: [{date, value, attr, breakdown}]`——
-  `attr` 是当天**五个** L1 归因中时长最多者（并列按 `成长 > 关系 > 维持 > 谋生 > 流失` 价值序取靠前者，比较前先四舍五入到 2 位小数，保证与 `breakdown` 展示一致）；
+  `attr` 是当天**六个** L1 归因中时长最多者（并列按 `成长 > 体验 > 关系 > 维持 > 谋生 > 流失` 价值序取靠前者，比较前先四舍五入到 2 位小数，保证与 `breakdown` 展示一致）；
   当天无任何已归因时长（L2 类型为「未归类」）时 `attr = null`，前端画灰格；`value` 仍是当天总时长（供「峰值」展示）。
 
 **不计入贡献图的任务**（v3.60.27 · 单一真源 = `constants.CONTRIB_EXCLUDED_TASK_NAMES`）
@@ -208,12 +240,20 @@ CSV 导入复用同一函数但**不传 `end`**（保留 ATracker 自带时长�
 | GET | /oneday/week_stats/ | 周统计 |
 | DELETE | /oneday/bulk_delete/ | 批量删除 |
 
-### 周度追踪
+### 周度追踪（⚠️ 已退役，接口按设计稿保留）
+
+原功能：每周总投入 vs **30h/周基准** ⇒ 达标率 / 达标周数。
+v0.2 设计稿**决策 4 彻底移除 30h benchmark**（全记录后周总时长逼近 168h 硬上限，
+30h 从「及格线」跌成「地板」），替代品 = **「168h 周结构」**（回答「我的一周由什么组成」，
+可切 L1/L2 堆叠）。
+
 | 方法 | 端点 | 用途 |
 |------|------|------|
-| GET | /weekly-tracking/ | 周度追踪（?week_start=） |
-| POST | /weekly-tracking/refresh/ | 重建周度固化表 |
-| GET | /weekly-structure/ | 周结构图 |
+| GET | /weekly-tracking/ | 周度追踪（读固化表）—— ⚠️ **前端已无调用方**，按 v0.3 设计稿刻意保留（避免 404），别再接回前端 |
+| POST | /weekly-tracking/refresh/ | 重建周度固化表 —— 同上；另有管理命令 `refresh_weekly_cache`（支持 `--dry-run`） |
+| GET | /weekly-structure/ | ✅ **在用**：168h 周结构（替代 `weekly-tracking`），消费方 = 时间统计首页 `TimeStatsView.vue` |
+
+> 前端侧对应清理见 v3.60.34：孤儿页面 `WeeklyTrackingView.vue` 与两个 API 封装已移除。
 
 ### Logseq
 | 方法 | 端点 | 用途 |

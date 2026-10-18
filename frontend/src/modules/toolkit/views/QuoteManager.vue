@@ -104,6 +104,14 @@
             </el-tag>
           </template>
           <span class="review-count">📤 被推 {{ q.review_count }} 次</span>
+          <KeepMark
+            v-if="keepReady"
+            class="quote-keep"
+            :state="keepStateOf(q)"
+            :work-name="keepEntryOf(q.id)?.work_name ?? null"
+            :busy="keepBusy.has(q.id)"
+            @toggle="keepQuote(q)"
+          />
           <div class="quote-actions">
             <el-button size="small" text @click="openEdit(q)">✏️ 编辑</el-button>
             <el-button size="small" text type="danger" @click="handleDelete(q)">🗑️ 删除</el-button>
@@ -140,6 +148,9 @@ import { LANGUAGE_OPTIONS } from '../types/quoteTypes'
 import type { Quote } from '../types/quoteTypes'
 import { getQuoteList, getQuoteStats, deleteQuote } from '../api/quoteApi'
 import QuoteForm from '../components/QuoteForm.vue'
+import { useWorkKeep } from '@/modules/works/composables/useWorkKeep'
+import KeepMark from '@/modules/works/components/KeepMark.vue'
+import type { KeepState } from '@/modules/works/types/workTypes'
 
 const quotes = ref<Quote[]>([])
 const loading = ref(false)
@@ -257,7 +268,41 @@ function handleSaved() {
   fetchQuotes()
 }
 
-onMounted(() => { fetchStats(); fetchQuotes() })
+// ══════════════════════════════════════════════════════════════
+// 「值得留」（v3.62.0 同日补）
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 摘录本来就符合「从经历里长出来、以后还能再用」—— 之前只是没有出口。
+ *
+ * ⚠️ 读不到作品库（没跑迁移）时**整个标记不渲染**：
+ *    这是附加动作，不该在这一页喊「我坏了」；
+ *    而显示成「未勾」是**说谎**（那会让人以为真没勾过）。
+ */
+const {
+  ready: keepReady,
+  busy: keepBusy,
+  entryOf: keepEntryOf,
+  load: loadKeeps,
+  toggle: toggleKeep,
+} = useWorkKeep('quote')
+
+function keepStateOf(q: Quote): KeepState {
+  const row = keepEntryOf(q.id)
+  if (!row) return 'none'
+  return row.status === 'used' ? 'used' : 'pending'
+}
+
+/** 摘录没有「标题」这一说 ⇒ 用它的显示标题（与后端 `display_title` 同一把尺子） */
+function quoteTitle(q: Quote) {
+  return (q.short_title || q.content).replace(/\s+/g, ' ').trim().slice(0, 50)
+}
+
+async function keepQuote(q: Quote) {
+  await toggleKeep(q.id, quoteTitle(q), q.content.replace(/\s+/g, ' ').trim().slice(0, 300))
+}
+
+onMounted(() => { fetchStats(); fetchQuotes(); loadKeeps() })
 </script>
 
 <style scoped>
@@ -301,5 +346,6 @@ onMounted(() => { fetchStats(); fetchQuotes() })
 .tag-item { margin: 0 2px; }
 
 .quote-actions { margin-left: auto; display: flex; gap: 4px; }
+.quote-keep { flex-shrink: 0; margin-left: 4px; }
 .back-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; flex-wrap: nowrap; }
 </style>

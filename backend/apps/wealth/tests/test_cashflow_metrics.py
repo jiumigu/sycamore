@@ -175,6 +175,43 @@ class TestSerializerFieldAlignment:
         assert out['health_metrics']['emergency_fund_months'] == 10.0
         assert out['health_metrics']['debt_ratio_legacy'] == round(50 / 1000 * 100, 1)
 
+    @staticmethod
+    def _declared_but_missing(block: str) -> list[str]:
+        """service 算出来、但接口没下发的键（空列表 = 对齐）"""
+        data = _build_overview(_cf(jianbank=1000, lend=100), _est(100))
+        service_keys = set(data[block])
+        out_keys = set(CashFlowOverviewSerializer(data).data[block])
+        return sorted(service_keys - out_keys)
+
+    def test_summary_has_no_undeclared_key(self):
+        """service 的 summary 键，serializer 必须**全都**声明
+
+        🔴 DRF 的 `Serializer` 只输出**声明过**的键 —— service 多算一个键，
+           接口就静默少下发一个字段，前端拿到 `undefined`。
+
+        v3.62.28 正是这么翻车的：`_build_overview` 里加了 `summary['non_liquid']`，
+           忘了 `AccountSummarySerializer` 那一行，于是「非流动资金」在界面上
+           显示 `¥0.00` 显示了一整版，而其余数字**全对** ⇒ 看着像
+           「本来就没有这笔钱」，谁也不会去怀疑接口少了一个字段。
+
+        ⚠️ 为什么当时那批用例全绿：它们断言的是 `get_cashflow_overview()['summary']`
+           ——**service 直出、绕过了序列化器**。断言打在真源层是对的，
+           但「接口实际下发什么」必须另有一条用例守着，否则序列化层完全没有覆盖。
+        """
+        missing = self._declared_but_missing('summary')
+        assert not missing, (
+            '这些 summary 键没在 AccountSummarySerializer 里声明，接口会静默丢掉：'
+            f'{missing}'
+        )
+
+    def test_health_metrics_has_no_undeclared_key(self):
+        """health_metrics 同理 —— 同一张卡上的比率漏一个，也是无声的"""
+        missing = self._declared_but_missing('health_metrics')
+        assert not missing, (
+            '这些 health_metrics 键没在 HealthMetricsSerializer 里声明，接口会静默丢掉：'
+            f'{missing}'
+        )
+
 
 class TestWindowKeys:
     """估算窗口 = 锚定月**之前**的 N 个完整月（v3.58.24）"""

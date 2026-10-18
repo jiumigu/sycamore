@@ -58,6 +58,7 @@ class WealthPropertyCategory(models.Model):
         # 不设 Meta.ordering：ordering 会被注入 SELECT 而静默破坏聚合（项目硬坑②），
         # 本项目 managed 表统一不设，排序交给服务层。
         db_table = 'wealth_property_category'
+        db_table_comment = '物件资产 · 类别（只装「用途」这一把尺子）'
         verbose_name = '物件类别'
         verbose_name_plural = '物件类别'
         constraints = [
@@ -146,6 +147,7 @@ class WealthProperty(models.Model):
 
     class Meta:
         db_table = 'wealth_property'
+        db_table_comment = '物件资产 · 一件耐用品：买了多少钱 / 规划用多久 / 还在不在'
         verbose_name = '物件资产'
         verbose_name_plural = '物件资产'
         # ⚠️ 新写 Index 一律显式写 name= —— Django 6.0 自动命名变更会凭空产出 RenameIndex。

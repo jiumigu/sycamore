@@ -3,8 +3,13 @@
     <div class="ratio-card__head">
       <span class="ratio-card__label">
         {{ item.label }}
-        <!-- 口径气泡：公式 / 要点 / 档位全部来自后端，前端一句文案都不写 -->
-        <MetricTooltip :meta="meta" />
+        <!--
+          口径气泡：公式 / 要点 / 档位全部来自后端，前端一句文案都不写。
+          ⚠️ `hint` 只在**有值**时进气泡：有值时它是「这个数是什么」（读一次就够的说明），
+             没值时它是「下一步该做什么」（如「先补一期资产盘点」）—— 那是**出口**，
+             必须留在页面上（§79.2 / §79.5：「把出口收进气泡＝把路埋了」）。
+        -->
+        <MetricTooltip :meta="meta" :hint="item.available ? item.hint : ''" />
       </span>
       <el-tag
         v-if="item.available && item.level"
@@ -65,7 +70,11 @@
       >期初 vs 期末</el-button>
     </div>
 
-    <div v-if="item.hint" class="ratio-card__hint">{{ item.hint }}</div>
+    <!--
+      🔴 只在**没有值**时留在页面上 —— 此时这句是补救动作（「先补一期资产盘点」），
+         属于出口。有值时的说明句已经进了标题旁的 ⓘ 气泡。
+    -->
+    <div v-if="item.hint && !item.available" class="ratio-card__hint">{{ item.hint }}</div>
 
     <!-- 不可用：说清原因与补救动作，不显示 0 -->
     <div v-if="!item.available" class="ratio-card__reason">
@@ -73,7 +82,11 @@
       <span>{{ item.reason }}</span>
     </div>
 
-    <div class="ratio-card__formula">{{ item.formula }}</div>
+    <!--
+      ⚠️ 底部原本还有一行 `item.formula`，已删 —— 它与标题旁 ⓘ 气泡里的
+         `meta.formula` 是**同一个字符串**（两处都取自 `ratio_meta(key)['formula']`），
+         属于同一事实的两个出口。留着就是「口径有两份」，改后端只改一处时必然对不上。
+    -->
   </div>
 </template>
 
@@ -306,10 +319,5 @@ const notes = computed(() => {
   font-size: 12px;
   color: var(--el-color-warning);
 }
-.ratio-card__formula {
-  margin-top: auto;
-  padding-top: 10px;
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-}
+/* `.ratio-card__formula` 的样式已随那一行一起删 —— 公式只在 ⓘ 气泡里显示 */
 </style>

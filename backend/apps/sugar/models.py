@@ -26,6 +26,7 @@ class EnergyTemplate(models.Model):
 
     class Meta:
         db_table = 'sugar_energy_template'
+        db_table_comment = '能量清单模板：系统预设与自定义同表，用 is_system 区分'
         verbose_name = '能量清单模板'
         verbose_name_plural = '能量清单模板'
         ordering = ['sort_order', 'id']
@@ -56,6 +57,7 @@ class EnergyLog(models.Model):
 
     class Meta:
         db_table = 'sugar_energy_log'
+        db_table_comment = '能量清单完成记录：完成一次记一条；reward_processed 是发奖的幂等标记'
         verbose_name = '能量清单完成记录'
         verbose_name_plural = '能量清单完成记录'
         ordering = ['-completed_at']
@@ -79,6 +81,7 @@ class EnergyDailyStats(models.Model):
 
     class Meta:
         db_table = 'sugar_energy_daily_stats'
+        db_table_comment = '每日能量统计：按天缓存的汇总，每人每天一行'
         verbose_name = '每日能量统计'
         verbose_name_plural = '每日能量统计'
         unique_together = ['user_id', 'stat_date']
@@ -110,6 +113,7 @@ class SugarTemplate(models.Model):
 
     class Meta:
         db_table = 'sugar_template'
+        db_table_comment = '小确幸模板：快速记录小确幸时的候选清单'
         verbose_name = '小确幸模板'
         verbose_name_plural = '小确幸模板'
         ordering = ['category', 'sort_order']
@@ -162,6 +166,7 @@ class SugarRecord(models.Model):
 
     class Meta:
         db_table = 'sugar_record'
+        db_table_comment = '小确幸记录：快乐程度 5-20；reward_synced 是发奖的幂等标记'
         verbose_name = '小确幸记录'
         verbose_name_plural = '小确幸记录'
         ordering = ['-time', '-s_id']

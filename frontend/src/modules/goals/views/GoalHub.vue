@@ -201,6 +201,17 @@
               截止：{{ m.target_date?.slice(0, 10) || '未设置' }}
             </template>
           </span>
+          <!-- 「值得留」：放在**列表行**上，且**已完成 / 未完成都能点**。
+               ⚠️ 读不到作品库时整个不渲染（附加动作，不在这一行喊「我坏了」）；
+                  显示成「未勾」才是说谎。 -->
+          <KeepMark
+            v-if="keepReady"
+            class="milestone-keep"
+            :state="keepStateOf(m)"
+            :work-name="keepEntryOf(m.id)?.work_name ?? null"
+            :busy="keepBusy.has(m.id)"
+            @toggle="keepMilestone(m)"
+          />
           <el-button size="small" text @click.stop="editMilestoneDate(m)" class="date-edit-btn" v-if="!m.target_date">📅</el-button>
           <el-button size="small" text @click.stop="editMilestoneDate(m)" class="date-edit-btn" v-else>📅</el-button>
           <el-button size="small" text @click.stop="handleEditMilestone(milestoneGoal!, m)">✏️</el-button>
@@ -360,6 +371,29 @@
       </el-tag>
     </div>
 
+    <!-- 「值得留下」（v3.62.0）：**独立一行**，不需要填任何东西。
+         🔴 打勾不用现在写 —— 一周后「本周状态」页末才是写的地方。 -->
+    <div class="keep-row">
+      <el-checkbox v-model="keepIt">这件事里有东西值得留下</el-checkbox>
+      <!-- ⚠️ `el-popover` 而不是 `el-tooltip`：两者插槽语义**是反的** ——
+           tooltip 的默认插槽是「触发元素」、正文要走 `#content`；
+           popover 才是「`#reference` 触发 + 默认插槽正文」。
+           写错不报错，只是正文被当成触发内容**内联渲染、常驻可见**。 -->
+      <el-popover placement="top" :width="350" trigger="hover" :show-after="120">
+        <template #reference>
+          <el-icon class="keep-icon"><QuestionFilled /></el-icon>
+        </template>
+        <div class="keep-tip">
+          <p>勾了<b>不用现在写</b>什么 —— 它只把这个里程碑放进「待提炼」。</p>
+          <p>
+            哪天你顺手了，在<b>「本周状态」页末</b>把它收成一件东西
+            （一份清单、一个方法、一段记录都算）。
+          </p>
+          <p>作品 ≠ 文章 —— 只有自己看的也算。</p>
+        </div>
+      </el-popover>
+    </div>
+
     <template #footer>
       <el-button @click="showCompleteDialog = false">取消</el-button>
       <el-button type="success" @click="confirmComplete" :disabled="!selfReview.trim()">
@@ -373,7 +407,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, RefreshRight, Lightning, PieChart } from '@element-plus/icons-vue'
+import { Plus, Refresh, RefreshRight, Lightning, PieChart, QuestionFilled } from '@element-plus/icons-vue'
 import { useGoalStore } from '../stores/goalStore'
 import { useGoalBoardStore } from '../stores/goalBoardStore'
 import * as goalApi from '../api/goalApi'
@@ -386,6 +420,13 @@ import CreateActionDialog from '../components/CreateActionDialog.vue'
 import ActionDrawer from '../components/ActionDrawer.vue'
 import QuickGoalDialog from '../components/QuickGoalDialog.vue'
 import { getPresetByType } from '@/shared/api/coreApi'
+// 「值得留下」那个勾（v3.62.0）：**前端串联**调作品库，与收件箱那三个
+// 「同时登记到…」是同一个模式 —— 勾是用户的额外动作，不是「完成」的固有属性，
+// 所以不往 goals 后端加代码（那样六个 app 都要反向依赖作品库）。
+// ⚠️ 打勾失败**绝不阻断完成**（它只是个标记）。
+import { useWorkKeep } from '@/modules/works/composables/useWorkKeep'
+import KeepMark from '@/modules/works/components/KeepMark.vue'
+import type { KeepState } from '@/modules/works/types/workTypes'
 
 const goalStore = useGoalStore()
 const boardStore = useGoalBoardStore()
@@ -573,6 +614,7 @@ async function handleMilestoneToggle(goal: Goal, milestone: Milestone, status: s
     selfReview.value = milestone.self_review || ''
     completingDifficulty.value = milestone.difficulty_met || ''
     completingNextAction.value = milestone.next_action || ''
+    keepIt.value = false          // 每次打开都从「不勾」开始 —— 别继承上一次
     showCompleteDialog.value = true
     return
   }
@@ -599,8 +641,18 @@ async function confirmComplete() {
       difficulty_met: completingDifficulty.value,
       next_action: completingNextAction.value,
     }, completingGoalId.value)
+    // 🔴 打勾放在**完成之后**，且**失败不阻断** ——
+    //    它是个附加标记，不能因为作品库还没迁移就把「完成里程碑」也弄成失败。
+    // ⚠️ 顺序要紧：先打勾再关弹窗（关掉之后 `completingMilestone` 可能已被清空）。
+    if (keepIt.value) {
+      const m = completingMilestone.value
+      const ok = await keepMilestoneCapture(m.id, m.title, selfReview.value.slice(0, 300))
+      // 失败时 composable 已经 warning 过一次，这里只补「完成」那一半的回执
+      ElMessage.success(ok ? '已完成，并标记为「值得留」' : '里程碑已完成')
+    } else {
+      ElMessage.success('里程碑已完成')
+    }
     showCompleteDialog.value = false
-    ElMessage.success('里程碑已完成')
     refreshAll()
   } catch {
     ElMessage.error('操作失败，请重试')
@@ -632,6 +684,46 @@ const completionNote = ref('')
 const selfReview = ref('')
 const completingDifficulty = ref('')
 const completingNextAction = ref('')
+/**
+ * 「这件事里有东西值得留下」—— 打勾**不用现在写任何东西**。
+ *
+ * 🔴 为什么这里不直接让他写「提炼物」：这里写出来的必然是感想，
+ *    而感想已经由「此刻感悟」承担了。**提炼需要距离感，距离感只能靠时间买到。**
+ */
+const keepIt = ref(false)
+
+/**
+ * 里程碑列表行上的「值得留」标记。
+ *
+ * 🔴 为什么要**两个**入口：
+ *    a. 原来只有完成弹窗最底部那一个 ⇒ 得先点 ✅ 弹出弹窗、再滚到底才看得见；
+ *    b. **已经完成的里程碑再也勾不上** —— 那个弹窗只在「点完成」那一刻开一次。
+ *       这是「字段长期填不进去 ≠ 用户懒」那一族：是入口的问题，不是习惯的问题。
+ * ⚠️ 但两个入口**共用同一份状态**（都读作品库），不是一个本地布尔加一个接口 ——
+ *    否则两边各说各话，而且**不报错**（一个显示勾了、一个显示没勾）。
+ */
+const {
+  ready: keepReady,
+  busy: keepBusy,
+  entryOf: keepEntryOf,
+  load: loadMilestoneKeeps,
+  keep: keepMilestoneCapture,
+  toggle: toggleMilestoneKeep,
+} = useWorkKeep('milestone')
+
+/** 行内标记的三态 —— 由作品库那份数据决定，本页不另存一份布尔 */
+function keepStateOf(m: Milestone): KeepState {
+  const row = keepEntryOf(m.id)
+  if (!row) return 'none'
+  return row.status === 'used' ? 'used' : 'pending'
+}
+
+/** 行内点击：没勾就勾、勾了就取消（`used` 的会被拦下并说明去哪儿处理） */
+async function keepMilestone(m: Milestone) {
+  await toggleMilestoneKeep(
+    m.id, m.title, (m.self_review || m.completed_note || '').slice(0, 300),
+  )
+}
 
 const quickPhrases = ref<string[]>([])
 
@@ -808,6 +900,8 @@ function onSaved() {
 onMounted(() => {
   refreshAll()
   loadQuickPhrases()
+  // 附加动作：读不到时整个标记不渲染，不阻断本页（异常已在 composable 里吞掉）
+  loadMilestoneKeeps()
 })
 </script>
 
@@ -983,6 +1077,12 @@ onMounted(() => {
     color: #999;
     white-space: nowrap;
   }
+
+  /* 行内「值得留」标记 —— `flex-shrink: 0`：标题是 `flex: 1`，
+     不写这一条标记会被长标题挤没（而它正是这一行的重点）。 */
+  .milestone-keep {
+    flex-shrink: 0;
+  }
 }
 
 .date-edit-btn {
@@ -1020,4 +1120,20 @@ onMounted(() => {
   p { margin: 6px 0; font-size: 15px; }
   .complete-deadline { font-size: 13px; color: var(--el-text-color-secondary); }
 }
+
+/* 「值得留下」那一行：「待提炼」这个去处必须**看得见**，
+   不然勾的意思是「我又要走一遍流程吗」——而它其实什么也不用填。 */
+.keep-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+.keep-icon {
+  color: var(--el-text-color-secondary); cursor: help;
+  border-bottom: 1px dashed var(--el-border-color);
+}
+.keep-icon:hover { color: var(--el-color-primary); }
+.keep-tip { max-width: 340px; font-size: 12px; line-height: 1.8; }
+.keep-tip p { margin: 0 0 6px; }
+.keep-tip p:last-child { margin-bottom: 0; }
 </style>

@@ -800,3 +800,153 @@ def available_periods(user_id: int = 1, limit: int = 24) -> list[str]:
         .order_by('-year', '-month')[:limit]
     )
     return [f"{r['year']:04d}-{r['month']:02d}" for r in rows if r['year'] and r['month']]
+
+
+# ══════════════════════════════════════════════════════════════
+# 录入候选 —— 快速记账的分类 / 子分类
+# ══════════════════════════════════════════════════════════════
+
+
+def get_bill_category_options(user_id: int = 1) -> dict:
+    """快速记账表单里「分类 / 子分类」两个下拉的候选值。
+
+    🔴 **两份来源取并集，缺一不可**：
+
+    | 来源 | 给什么 | 少了它会怎样 |
+    |---|---|---|
+    | **账本** `wealth_bill_list` | 分类→子分类的**真实层级** + 按笔数的排序 | 选不到「早午晚餐」这类高频子分类 |
+    | **口径配置** `WealthClassifyRule` | 用户**登记过**的分类名（含账本尚未出现过的） | 新登记的分类记账时选不到 |
+
+    ⚠️ **层级只能在账本里取**：`wealth_classify_rule` 的 `rule_field` 下
+       `category` 与 `subcategory` 是**两个平行的匹配字段** ——
+       一条「匹配字段 = 子分类，匹配值 = 数码装备」的规则**不声明**它属于哪个分类。
+       真实层级（数码装备 ⊂ 学习进修）只存在于账本数据里。
+
+    ⚠️ **不能退化成「只用口径配置」**：那张表里的 subcategory 匹配值是
+       「**已经需要单独建规则**」的那批（职业收入 / 利息收入 / 数码装备…），
+       实测 14 个；而账本里实际用过 **60 个**子分类 —— 最常用的
+       「早午晚餐 3026 笔 / 日常用品 573 / 水果-牛奶 573 / 线上生鲜 249 / 话费 246」
+       **一个都不在里面**，因为它们被「分类 = 食品酒水 / 日常生活」的分类级规则
+       整体覆盖，不需要单独建子分类规则。只取口径配置 = 把候选从 60 砍到 14，
+       那是**功能倒退**，不是「口径统一」。
+
+    ⚠️ 只取 `is_active=True` 的规则：停用意味着「这条不再参与归类」，
+       那么它登记的分类名也不该再出现在**新建**账单项的候选里
+       （否则新记的账永远归不了类）。历史账单里的旧值不受影响 ——
+       表单保留自由输入，编辑老单子时原值照常显示。
+
+    ⚠️ **`_bill_queryset` 已清序**（外部表 `Meta.ordering` 注入会拆碎
+       `values().annotate()` 的 GROUP BY，项目硬坑②）。
+
+    返回::
+
+        {
+          'categories':        [{'value': '食品酒水', 'count': 3977}, ...],
+          'subcategories':     {'食品酒水': [{'value': '早午晚餐', 'count': 3026}, ...], ...},
+          'subcategories_all': [{'value': '早午晚餐', 'count': 3026}, ...],
+          'ungrouped':         [{'value': '零花钱', 'count': 0}, ...],
+        }
+
+    排序：**按笔数降序**（常用的排前面，这才是「每天要录一笔」场景需要的顺序）；
+    账本中为 0 笔（只登记在口径配置里）的排在各自末尾，按名称。
+
+    ⚠️ `subcategories` 的**键序按 `categories` 排**（不能拿 set 去拼 —— set 迭代顺序
+       不可预测，同一请求两次会给出不同键序，前端据此拼的列表也跟着乱）。
+
+    ⚠️ `subcategories_all` = 跨分类去重后的**全局**子分类表，同样按笔数降序，
+       **由后端算好**：前端未选分类时直接用它。🔴 不让前端把 `subcategories`
+       自己拍平 —— 拍平就得在前端再决定一次顺序，那又是一份局部口径
+       （第一版就踩了：按各分类键序拼接，把「早午晚餐 3026 笔」排到了
+       「公交 134 笔」后面）。
+
+    `ungrouped` = 口径配置里登记过、但账本中找不到归属的子分类名
+    （含账本里 `category` 为空却有 `subcategory` 的「孤儿」行）。
+    它**不参与** `subcategories_all` 之外的分发，只作为「这些值还没归到任何分类」
+    的一份可核对清单留存。
+    """
+    # ── ① 账本：真实层级 + 笔数 ──
+    rows = (
+        _bill_queryset(user_id)
+        .values('category', 'subcategory')
+        .annotate(n=Count('id'))
+    )
+
+    cat_count: dict[str, int] = {}
+    sub_of_cat: dict[str, dict[str, int]] = {}
+    sub_without_cat: dict[str, int] = {}
+
+    for row in rows:
+        cat = str(row['category'] or '').strip()
+        sub = str(row['subcategory'] or '').strip()
+        n = row['n']
+        if cat:
+            cat_count[cat] = cat_count.get(cat, 0) + n
+            if sub:
+                bucket = sub_of_cat.setdefault(cat, {})
+                bucket[sub] = bucket.get(sub, 0) + n
+        elif sub:
+            # 分类为空的「孤儿」子分类：不能硬塞进某个分类，单独兜住
+            sub_without_cat[sub] = sub_without_cat.get(sub, 0) + n
+
+    # ── ② 口径配置：用户登记过的分类名 ──
+    rule_cats: set[str] = set()
+    rule_subs: set[str] = set()
+    for field, value in (
+        WealthClassifyRule.objects
+        .filter(user_id=user_id, is_active=True)
+        .values_list('rule_field', 'match_value')
+    ):
+        text = str(value or '').strip()
+        if not text:
+            continue
+        if field == 'category':
+            rule_cats.add(text)
+        elif field == 'subcategory':
+            rule_subs.add(text)
+
+    def _rank(counts: dict[str, int]) -> list[tuple[str, int]]:
+        """账本里有的按笔数降序（同笔数按名称，保证顺序确定）。"""
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    def _as_rows(ranked: list[tuple[str, int]], extra: set[str]) -> list[dict]:
+        """账本行在前，口径配置独有的补在后（0 笔，按名称）。"""
+        known = {value for value, _ in ranked}
+        return (
+            [{'value': v, 'count': n} for v, n in ranked]
+            + [{'value': v, 'count': 0} for v in sorted(extra - known)]
+        )
+
+    ranked_cats = _rank(cat_count)
+    subcategories = {}
+    # ⚠️ key 的顺序**按 categories 排**（不能拿 set 拼 —— set 的迭代顺序不可预测，
+    #    会让同一个请求两次返回不同的键序，前端据此拼出来的全局列表也跟着乱）。
+    for cat in [c for c, _ in ranked_cats] + [c for c in sorted(rule_cats) if c not in cat_count]:
+        subcategories[cat] = _as_rows(
+            _rank(sub_of_cat.get(cat, {})),
+            # 口径配置里登记的子分类名若在本分类下账本里没有，不硬塞给每个分类；
+            # 交给 ungrouped / subcategories_all 统一兜住
+            # （否则「数码装备」会同时挂在十几个分类下）。
+            set(),
+        )
+
+    # 全局候选：所有子分类合到一张表（跨分类去重、按笔数降序）。
+    # 🔴 这一份也由**后端**算，不让前端自己把 `subcategories` 拍平 ——
+    #    拍平就必然要在前端再决定一次顺序，那又是一份局部口径（第一版就踩了：
+    #    前端按各分类的键序拼接，结果「早午晚餐(3026 笔)」排到了「公交(134 笔)」后面）。
+    sub_counts_all: dict[str, int] = {}
+    for bucket in sub_of_cat.values():
+        for sub, n in bucket.items():
+            sub_counts_all[sub] = sub_counts_all.get(sub, 0) + n
+    for sub, n in sub_without_cat.items():
+        sub_counts_all[sub] = sub_counts_all.get(sub, 0) + n
+
+    # 子分类的全局兜底（账本孤儿 + 口径配置里在账本中找不到归属的值）
+    assigned = {s for bucket in sub_of_cat.values() for s in bucket}
+    ungrouped = _as_rows(_rank(sub_without_cat), rule_subs - assigned)
+
+    return {
+        'categories': _as_rows(ranked_cats, rule_cats),
+        'subcategories': subcategories,
+        'subcategories_all': _as_rows(_rank(sub_counts_all), rule_subs),
+        'ungrouped': ungrouped,
+    }

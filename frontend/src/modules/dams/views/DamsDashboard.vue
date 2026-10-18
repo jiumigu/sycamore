@@ -1,7 +1,7 @@
 <template>
   <div class="dams-dashboard">
-    <!-- 归档提示 -->
-    <el-alert title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
+    <!-- 归档提示（仅在当前仍处于归档状态时显示，重新启用后自动消失） -->
+    <el-alert v-if="ready && isArchived" title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
     <h1 class="page-title">数字资产管理</h1>
 
     <!-- 注意力分区总览 -->
@@ -42,6 +42,10 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useDamsStore } from '../stores/damsStore'
 import type { DamsFileResourceList } from '../types/damsTypes'
+import { useMenuArchive } from '@/shared/composables/useMenuArchive'
+
+// 归档横幅的判据唯一实现在 useMenuArchive（存档态含用户偏好，非写死的 defaultArchived）
+const { ready, isArchived } = useMenuArchive('dams')
 import AttentionMap from '../components/AttentionMap.vue'
 import FileList from '../components/FileList.vue'
 import FileForm from '../components/FileForm.vue'

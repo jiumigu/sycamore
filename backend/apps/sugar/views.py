@@ -7,6 +7,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from .constants import SUGAR_HAPPINESS_BANDS, SUGAR_HAPPINESS_MAX, SUGAR_HAPPINESS_MIN
 from .energy_service import EnergyService
 from .models import EnergyLog, EnergyTemplate, SugarRecord, SugarTemplate
 from .serializers import (
@@ -121,6 +122,27 @@ class SugarRecordViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         service = SugarRecordService()
         service.delete(s_id=instance.s_id)
+
+    @action(detail=False, methods=['get'])
+    def happiness_bands(self, request):
+        """快乐程度档位表 —— 前端录入预览用的唯一来源（前端零副本）。
+
+        `reward_label` / `reward_color` 是本表按行算出来的结果下发；
+        这里是整张表本身，供「还没保存、正在拖滑块」时使用 ——
+        两个出口同源，所以不会出现「弹窗说非常开心、列表说很高兴」。
+        """
+        return Response({
+            'min': SUGAR_HAPPINESS_MIN,
+            'max': SUGAR_HAPPINESS_MAX,
+            'bands': [
+                {
+                    'max_level': band['max_level'],
+                    'label': band['label'],
+                    'color': band['color'],
+                }
+                for band in SUGAR_HAPPINESS_BANDS
+            ],
+        })
 
     @action(detail=False, methods=['get'])
     def joy_type_stats(self, request):

@@ -548,11 +548,11 @@ class TestItemSaveClearsCycleFields:
         data = {
             'category_id': category.id, 'name': '羽绒服', 'quantity': 2,
             'unit_id': unit.id, 'satiety': '', 'grade': 'first',
-            'status': 'stocked', 'priority': '', 'days_per_unit': 1095,
+            'status': 'stocked', 'days_per_unit': 1095,
             'uses_per_unit': None, 'use_cycle_num': None,
             'use_cycle_unit': 'day', 'use_times': None,
             'stocktake_cycle_days': None, 'restock_threshold': None,
-            'hours_per_unit': None, 'expire_date': None, 'notes': '',
+            'expire_date': None, 'notes': '',
         }
         data.update(over)
         return data
@@ -895,7 +895,12 @@ class TestServiceGuards:
         assert second['created_units'] == 0
 
     def test_seed_creates_categories_with_modes(self):
-        """五个类别（v3.59.7 起多了「医药」）与各自的消耗模式"""
+        """四个类别与各自的消耗模式（v3.59.7 起多了「医药」）
+
+        ⚠️ v3.62.13：「数字」（书与课程，`time_based`）已退役 ——
+           判据见 `constants.SURVIVAL_CATEGORY_SEEDS` 里那段注释
+           （「一册能读多少天」不是可观测的量，用户原话「根本不可预估」）。
+        """
         svc.seed_survival_defaults()
         modes = {
             c.name: c.consume_mode
@@ -903,8 +908,10 @@ class TestServiceGuards:
         }
         assert modes == {
             '吃': 'meal', '穿': 'depreciation', '用': 'on_demand',
-            '数字': 'time_based', '医药': 'on_demand',
+            '医药': 'on_demand',
         }
+        # 光删种子不够 —— 还得钉住它不会被别的路径重新建出来
+        assert not SurvivalCategory.objects.filter(name='数字').exists()
         # 配餐类的跨配方口径必须是 min —— 与算法实际行为一致，不谎报
         eat = SurvivalCategory.objects.get(name='吃')
         assert eat.aggregate_mode == 'min'
@@ -1245,7 +1252,7 @@ class TestLifeFromRecipe:
         item = _item(category, '牛奶', 30, box, satiety='snack')
         assert svc._item_row(item)['uses_recipe'] is False
 
-    @pytest.mark.parametrize('mode', ['on_demand', 'depreciation', 'time_based'])
+    @pytest.mark.parametrize('mode', ['on_demand', 'depreciation'])
     def test_non_meal_category_is_never_by_recipe(self, mode):
         """非配餐类一律按物品自身口径 —— 没填就该老实显示「未填」"""
         category = _category('用', mode=mode, aggregate='sum')

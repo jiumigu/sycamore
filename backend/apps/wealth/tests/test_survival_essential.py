@@ -282,7 +282,7 @@ class TestEssentialOrdering:
 class TestSeedEssentials:
     def test_defaults_seed_categories_and_essentials(self):
         result = svc.seed_survival_defaults()
-        assert result['created_categories'] >= 5          # 吃 / 穿 / 用 / 数字 / 医药
+        assert result['created_categories'] >= 4          # 吃 / 穿 / 用 / 医药
         assert result['essentials']['created'] > 0
         assert result['essentials']['missing_categories'] == []
         assert SurvivalEssential.objects.filter(user_id=1).count() > 0

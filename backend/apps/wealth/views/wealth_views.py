@@ -86,6 +86,7 @@ from ..services.classify_service import (
     create_rule, update_rule, delete_rule, seed_classify_rules,
     preview_rule_impact,
     classify_summary, get_unclassified_candidates, available_periods,
+    get_bill_category_options,
 )
 from ..services.ratio_service import (
     get_ratio_overview, get_ratio_trend, available_anchor_months,
@@ -1593,6 +1594,30 @@ class ClassifyResultViewSet(viewsets.ViewSet):
                 limit = CLASSIFY_CANDIDATE_LIMIT
         rows = get_unclassified_candidates(yearmon=yearmon, limit=limit)
         return Response(UnclassifiedCandidatesSerializer(rows).data)
+
+
+class BillCategoryOptionsView(APIView):
+    """快速记账的「分类 / 子分类」候选值（只读、实时算）。
+
+    🔴 存在的理由：这两份候选以前**各写了一份硬编码数组**在前端表单里
+       （`QuickBillForm.vue` 的 17 项中文分类），与真实账本完全对不上 ——
+       库里实际用的是「食品酒水 / 日常生活 / 行车交通…」，硬编码那份是
+       「餐饮 / 交通 / 购物…」，全表 6588 行里只碰巧命中 3 行。
+       分类体系只能有**一个来源**，且必须能从数据里自证。
+
+    ⚠️ `/classify/bill-options/` 是**静态路径**，写在 urls.py 的静态区
+       （在 `include(router.urls)` 之前）—— 否则会被 `classify/rules/<pk>/`
+       那类动态路由抢走（v3.60.16 的现场，见 urls.py 顶部注释）。
+
+    口径与两份来源的合并规则全部在
+    `services.classify_service.get_bill_category_options`，视图不做任何计算。
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        user_id = request.query_params.get('user_id', 1)
+        return Response(get_bill_category_options(user_id=int(user_id)))
 
 
 # ══════════════════════════════════════════════════════════════

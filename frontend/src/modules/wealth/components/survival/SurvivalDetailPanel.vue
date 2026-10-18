@@ -209,9 +209,8 @@
             <span class="survival-table__strong">{{ formatDays(row.expected) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="可读时长" width="100">
-          <template #default="{ row }">{{ formatHours(row.hours_total, '—') }}</template>
-        </el-table-column>
+        <!-- （「可读时长」列随「数字」类别退役 —— v3.62.13。它整列只在
+             `time_based` 下才有值，而那个类别已经不存在了。） -->
         <!-- 上次盘点取自**盘点工作表**（它带着随时间变的列），
              不在这里自己从历史里推 —— 「没设周期就不催」那条规则在后端 -->
         <el-table-column label="上次盘点" width="150">
@@ -270,7 +269,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { useSurvivalStore } from '../../stores/survivalStore'
 import SurvivalComboPanel from './SurvivalComboPanel.vue'
 import {
-  formatDays, formatHours, formatLastStocktake, formatMeals, formatUseCycle, roleTagType,
+  formatDays, formatLastStocktake, formatMeals, formatUseCycle, roleTagType,
 } from '../../utils/survivalFormat'
 import type {
   SurvivalCategoryResult, SurvivalLineDetail, SurvivalRecipeResult, SurvivalScenarioTriple,
@@ -292,12 +291,15 @@ defineEmits<{
 
 const store = useSurvivalStore()
 
-/** 每种消耗模式该填什么，一句话说清 —— 「聚合口径」这种词没人猜得出来 */
+/** 每种消耗模式该填什么，一句话说清 —— 「聚合口径」这种词没人猜得出来
+ *
+ * （`time_based`「填『一册按我的节奏能读多少天』」随「数字」类别退役 —— v3.62.13。
+ *   它那句提示本身就是这次删除的理由：那个问题问不出可观测的答案。）
+ */
 const MODE_HINTS: Record<string, string> = {
   depreciation: '填「一件还能穿多少天」：一件大衣还能穿 3 年就填 1095',
   on_demand: '天天用的填「一份能用多少天」（一包纸巾用 10 天填 10）；'
     + '不是天天用的切到「按次」填「一份能用几次 × 多久用一次」',
-  time_based: '填「一册按我的节奏能读多少天」，另可填每册需要多少小时',
 }
 
 const modeHint = computed(() => (

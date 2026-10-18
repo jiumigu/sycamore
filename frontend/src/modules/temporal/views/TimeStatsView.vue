@@ -208,6 +208,7 @@ import * as echarts from 'echarts'
 import SunburstChart from '../components/SunburstChart.vue'
 import Weekly168Chart from '../components/Weekly168Chart.vue'
 import { formatAmount } from '@/shared/utils/format'
+import { ATTRIBUTION_COLOR_MAP } from '../types/temporalTypes'
 
 const store = useTemporalStore()
 
@@ -238,8 +239,11 @@ const trendRef = ref<HTMLElement>()
 let trendChart: echarts.ECharts | null = null
 const trendEmpty = ref(false)
 
+// 🔴 归因色唯一真源在 `types/temporalTypes.ts` 的 ATTRIBUTION_COLOR_MAP。
+//    本处曾是**内联的第二份副本**（加词时漏改 ⇒ 新词静默落到灰色兜底，不报错），
+//    v3.60.36 收口回来。`|| '#94A3B8'` 只兜「归因名不在表里」这种异常情况。
 function attrColor(name: string | number) {
-  return { 成长: '#10B981', 关系: '#A855F7', 维持: '#6366F1', 谋生: '#0EA5E9', 流失: '#F87171' }[String(name)] || '#94A3B8'
+  return ATTRIBUTION_COLOR_MAP[String(name)] || '#94A3B8'
 }
 
 // ─── 导入 ───

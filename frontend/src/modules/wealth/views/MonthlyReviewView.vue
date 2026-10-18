@@ -49,18 +49,12 @@
     <!-- 历史复盘列表 -->
     <el-card shadow="never" class="section-card">
       <!--
-        ⚠️ 这句必须留着：本表自 2026-06 起不再登记余额类字段（见
-        docs/wealth_balance_list-字段退役决策稿-20261003.md）。
-        不说明的话，回头看会以为是系统出了 bug 或自己忘了填 —— 而两件事该采取的行动相反。
+        ⚠️ 「本表只登记收支流」的停登说明**没有删**，只是收进了列表标题旁的 ⓘ 气泡
+        （见 MonthlyListTable.vue 的 .lh-tip）—— 原先它是一条 ≈70px 的 el-alert。
+        内容是「读一次就够的说明」，按 §79 的分流判据该进气泡；但**它必须还在**，
+        否则回头看会以为系统出了 bug 或自己忘了填 —— 而两件事该采取的行动相反。
+        （字段退役决策见 docs/wealth_balance_list-字段退役决策稿-20261003.md）
       -->
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        class="scope-note"
-        title="本表只登记「收支流」"
-        description="余额类字段（存款余额 / 公积金 / 借出 / 负债 / 真正在手里的）自 2026-06 起不在此登记，已统一到「资产盘点」——按科目盘一次，这里的「存款余额」就会自动引用那一期。"
-      />
       <MonthlyListTable
         :items="store.monthlyList?.items ?? []"
         :total="store.monthlyList?.total ?? 0"
@@ -211,8 +205,6 @@ onMounted(() => {
 .section-card {
   margin-bottom: 16px;
 }
-/* 停登说明：与下方列表同卡，读起来才知道它在解释哪张表 */
-.scope-note { margin-bottom: 14px; }
 .section-card :deep(.el-card__body) { padding: 20px; }
 
 .text-income { color: #52c41a; }

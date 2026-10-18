@@ -6,6 +6,7 @@ from rest_framework.response import Response
 
 from .models import Book
 from .serializers import (
+    BookBulkUpdateSerializer,
     BookCreateUpdateSerializer,
     BookDetailSerializer,
     BookListSerializer,
@@ -117,6 +118,26 @@ class BookViewSet(viewsets.ModelViewSet):
         book = self.get_object()
         BookService.mark_completed(book)
         return Response({'status': 'ok'})
+
+    @action(detail=False, methods=['post'])
+    def bulk_update(self, request):
+        """批量改「阅读状态」/「阅读深度」（阅读管理页的批量工具条）。
+
+        `requested` 与 `updated` **分开报**：传进来的编号里可能有已被删掉的，
+        只回一个数会让前端把「命中 3 条」说成「改了 5 条」—— 静默的谎。
+
+        至于「哪些状态能批量改」，口径在 `BookBulkUpdateSerializer`（排除「弃读」）。
+        """
+        serializer = BookBulkUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        updated = BookService.bulk_update(
+            data['bids'],
+            status=data.get('status'),
+            reading_depth=data.get('reading_depth'),
+        )
+        return Response({'updated': updated, 'requested': len(data['bids'])})
 
     @action(detail=False, methods=['delete'])
     def bulk_delete(self, request):

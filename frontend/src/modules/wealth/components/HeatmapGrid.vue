@@ -46,14 +46,14 @@
         {{ tooltip.data?.age_year }}岁 · 第{{ tooltip.data?.week_number }}周
       </div>
       <div class="heatmap__tooltip-row">
-        <span>收入</span><span class="heatmap__tooltip-income">¥+{{ fmt(tooltip.data?.income) }}</span>
+        <span>收入</span><span class="heatmap__tooltip-income">{{ formatSignedAmount(tooltip.data?.income, 2, true) }}</span>
       </div>
       <div class="heatmap__tooltip-row">
-        <span>支出</span><span class="heatmap__tooltip-expense">¥-{{ fmt(tooltip.data?.expense) }}</span>
+        <span>支出</span><span class="heatmap__tooltip-expense">{{ formatSignedAmount(tooltip.data ? -tooltip.data.expense : null) }}</span>
       </div>
       <div class="heatmap__tooltip-row">
         <span>净结余</span>
-        <span :class="netColorClass(tooltip.data?.net)">¥{{ fmt(tooltip.data?.net) }}</span>
+        <span :class="netColorClass(tooltip.data?.net)">{{ formatSignedAmount(tooltip.data?.net) }}</span>
       </div>
       <div v-if="isCovered(tooltip.index ?? -1)" class="heatmap__tooltip-coverage">
         ✅ 现金流覆盖
@@ -64,7 +64,7 @@
 
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
-import { formatAmount } from '@/shared/utils/format'
+import { formatSignedAmount } from '@/shared/utils/format'
 import { useWealthStore } from '../stores/wealthStore'
 import type { WeekCalendarEntry } from '../types/wealthTypes'
 
@@ -152,12 +152,6 @@ function cellClasses(index: number): Record<string, boolean> {
 function netColorClass(net: number | undefined): string {
   if (net === undefined) return ''
   return net >= 0 ? 'heatmap__tooltip-positive' : 'heatmap__tooltip-negative'
-}
-
-/** 格式化金额 */
-function fmt(val: number | undefined): string {
-  if (val === undefined) return '0.00'
-  return formatAmount(val)
 }
 
 /** 点击选中 */

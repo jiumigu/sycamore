@@ -391,6 +391,10 @@ import { getOnedayDailyDetail } from '@/modules/temporal/api/temporalApi'
 import type { OneDayPage } from '../types/temporalTypes'
 import LogseqViewer from '../components/LogseqViewer.vue'
 import { getPresetByType } from '@/shared/api/coreApi'
+// 「值得留」标签 → 作品库的「待提炼」（v3.62.0）。四个入口同一个模式：**前端串联**。
+// ⚠️ 标签选项**不在这里写死** —— 它是 core 的预设表里的一项（迁移 seed 的），
+//    这样用户在「系统预设」页也看得到、也删得掉（界面枚举随接口下发）。
+import { capture as captureWork, getCaptures, uncapture } from '@/modules/works/api/workApi'
 
 const store = useTemporalStore()
 
@@ -616,6 +620,44 @@ function openEditDialog(row: OneDayPage) {
   dialogVisible.value = true
 }
 
+/**
+ * 内置标签「值得留」——它与里程碑/收件箱/读书那三个勾是**同一个含义**，
+ * 只是入口长得不一样（日记流是靠标签，那三处是靠勾选框）。
+ *
+ * 🔴 刻意**不做**「打了标签就自动生成草稿」：日记是你的**原始素材**，
+ *    不该被自动改写成别的东西。
+ */
+const KEEP_TAG = '值得留'
+
+/**
+ * 把日记的「值得留」标签**同步**到作品库的待提炼。
+ *
+ * ⚠️ 标签**取消**时也同步撤掉那条标记 —— 否则「我明明取消了啊」会一直挂在收口台上。
+ *    但**已收进作品的不撤**（后端会拒）：那件事已经成了一样东西的来源，
+ *    不该因为改了个标签就断链。
+ * ⚠️ 全程 try —— 它是个附加标记，失败绝不能阻断日记保存。
+ */
+async function syncDiaryKeep(oid: number, title: string, tags: string[]) {
+  const has = tags.includes(KEEP_TAG)
+  try {
+    if (has) {
+      await captureWork({
+        source_type: 'diary',
+        source_id: oid,
+        title: title || `日记 ${oid}`,
+      })
+      return
+    }
+    // ⚠️ 接口层是 axios 包装 ⇒ 必须 `.data`（少了这层会得到一个对象、
+    //    没有 `.find`，而 `?.` 之类又容易把它伪装成「没标记」）
+    const res = await getCaptures({ source_type: 'diary' })
+    const mine = res.data.find((r) => r.source_id === oid && r.status === 'pending')
+    if (mine) await uncapture(mine.id)
+  } catch {
+    /* 见上：附加标记 */
+  }
+}
+
 async function handleSubmit() {
   if (!formRef.value) return
   const valid = await formRef.value.validate().catch(() => false)
@@ -633,13 +675,18 @@ async function handleSubmit() {
   Object.keys(data).forEach(k => { if (data[k] === null || data[k] === undefined) delete data[k] })
 
   try {
+    let oid: number | undefined
     if (dialogType.value === 'create') {
-      await store.createOneDay(data)
+      const created: any = await store.createOneDay(data)
+      oid = created?.oid
       ElMessage.success('创建成功')
     } else if (formData.oid) {
       await store.updateOneDay(formData.oid, data)
+      oid = formData.oid
       ElMessage.success('更新成功')
     }
+    // 「值得留」→ 作品库。放在保存**之后**、**不阻断**（见 syncDiaryKeep）。
+    if (oid) await syncDiaryKeep(oid, formData.title, tagList.value)
     dialogVisible.value = false
     fetchData()
     store.fetchStats()

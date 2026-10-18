@@ -175,8 +175,6 @@ def _item_row(item: SurvivalItem, used_item_ids: set[int] | None = None) -> dict
         'grade_label': item.get_grade_display() if item.grade else '',
         'status': item.status,
         'status_label': item.get_status_display(),
-        'priority': item.priority,
-        'priority_label': item.get_priority_display() if item.priority else '',
         'days_per_unit': float(item.days_per_unit) if item.days_per_unit is not None else None,
         # 按次计量的四个「原话」字段 —— 下发原值，让界面自己拼
         # 「每 3 天用 1 次」，不做任何换算（换算是 calc 独一份的活）。
@@ -202,7 +200,6 @@ def _item_row(item: SurvivalItem, used_item_ids: set[int] | None = None) -> dict
         'restock_threshold': (
             float(item.restock_threshold) if item.restock_threshold is not None else None
         ),
-        'hours_per_unit': float(item.hours_per_unit) if item.hours_per_unit is not None else None,
         'expire_date': str(item.expire_date) if item.expire_date else None,
         'purchase_date': str(item.purchase_date) if item.purchase_date else None,
         'purchase_cost': float(item.purchase_cost) if item.purchase_cost is not None else None,
@@ -465,7 +462,6 @@ _PREVIEW_DEFAULTS = {
     'grade': '',
     'status': 'stocked',
     'days_per_unit': None,
-    'hours_per_unit': None,
     'uses_per_unit': None,
     'use_cycle_num': None,
     'use_cycle_unit': None,
@@ -669,7 +665,7 @@ def get_analysis(reference_date: date | None = None) -> dict:
 
     shortest_name, shortest_days = calc.find_bottleneck(result_rows)
 
-    # 综合口径 = 跨类别取最小（吃/穿/用/数字并列，短板决定）。
+    # 综合口径 = 跨类别取最小（吃/穿/用/医药并列，短板决定）。
     # 与类别内部不同：类别内部可以「可替代求和」，但类别之间不能 ——
     # 有饭吃不能替代没衣穿。
     overall_days = {}
@@ -867,9 +863,6 @@ def get_meta() -> dict:
         'satiety_counted': list(SURVIVAL_SATIETY_COUNTED),
         'grades': [{'value': v, 'label': l} for v, l in SurvivalItem._meta.get_field('grade').choices],
         'statuses': [{'value': v, 'label': l} for v, l in SurvivalItem._meta.get_field('status').choices],
-        'priorities': [
-            {'value': v, 'label': l} for v, l in SurvivalItem._meta.get_field('priority').choices
-        ],
         'roles': [
             {'value': v, 'label': l} for v, l in SurvivalRecipeLine._meta.get_field('role').choices
         ],

@@ -156,6 +156,61 @@ CREATE TABLE IF NOT EXISTS `wealth_balance_list` (
   PRIMARY KEY (`yearmon`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
+
+# wealth_regular_list（WealthRegularList managed=False 镜像）
+#
+# 🔴 v3.62.20 补：这张表**一直没被镜像**，但迁移 0030 要给它发
+#    `ALTER TABLE ... COMMENT`。`--reuse-db` 的旧测试库里它恰好存在，
+#    所以此前看不出问题；一旦 `--create-db` 重建，迁移会直接
+#    `Table 'wealth_regular_list' doesn't exist` 而整轮测试中断。
+#    （这也是「外部表必须逐个镜像」这条约定的漏网之鱼。）
+_CREATE_REGULAR_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS `wealth_regular_list` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `begin_date` date DEFAULT NULL,
+  `end_date` date DEFAULT NULL,
+  `value` float DEFAULT NULL,
+  `flag` tinyint(1) DEFAULT NULL,
+  `interest` float DEFAULT NULL,
+  `remark` varchar(100) DEFAULT NULL,
+  `bankinfo` varchar(20) DEFAULT NULL,
+  `rate` float DEFAULT NULL,
+  `user_id` int DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+# hobby_dance_list（DanceRecord managed=False 外部表镜像）
+#
+# 🔴 2026-10-16 补：它是**唯一没有镜像的外部表**。此前一直没暴雷，是因为
+#    dance app 至今没有用例用到它；哪天有人给舞蹈记录写用例，`--create-db`
+#    重建测试库后就会直接报「表不存在」—— 属于「等着踩」的坑。
+#    DDL 与 `sqlmigrate dance 0001` 的输出逐字对齐（两处刻意的偏差：
+#    ① 加 `IF NOT EXISTS`，与本文件其余镜像一致；② 末尾显式写 COLLATE，
+#    因为 0001 的建表语句本轮刚从 utf8mb3 改为 utf8mb4 COLLATE utf8mb4_0900_ai_ci）。
+_CREATE_DANCE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS `hobby_dance_list` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `study_time` date DEFAULT NULL COMMENT '学习日期',
+  `score` int DEFAULT NULL COMMENT '自我评分（1-10）',
+  `teacher_name` varchar(20) DEFAULT NULL COMMENT '授课老师',
+  `dance_type` varchar(12) NOT NULL DEFAULT 'jazz' COMMENT '舞蹈类型：jazz, hiphop, 古典, 身体开发, MV, 形体软开',
+  `difficulty` varchar(10) NOT NULL DEFAULT '入门' COMMENT '难度等级：入门, 入门小班, 二星, 进阶',
+  `weekinfo` varchar(10) DEFAULT NULL COMMENT '周几（周一~周日）',
+  `remark` varchar(100) DEFAULT NULL COMMENT '备注',
+  `file_path` varchar(100) DEFAULT NULL COMMENT '录屏文件地址',
+  `year` int DEFAULT NULL COMMENT '年份',
+  `month` int DEFAULT NULL COMMENT '月份',
+  `quarter` int DEFAULT NULL COMMENT '季度',
+  `duration_minutes` int DEFAULT 60 COMMENT '课程时长（分钟）',
+  `energy_level` int DEFAULT NULL COMMENT '体能消耗（1-5）',
+  `improvement_note` varchar(200) DEFAULT NULL COMMENT '进步/待改进点',
+  PRIMARY KEY (`id`),
+  KEY `idx_study_time` (`study_time`),
+  KEY `idx_dance_type` (`dance_type`),
+  KEY `idx_teacher` (`teacher_name`),
+  KEY `idx_difficulty` (`difficulty`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+"""
 # travel_list_info（TravelRecord managed=False 镜像，summary 聚合器依赖）
 _CREATE_TRAVEL_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS `travel_list_info` (
@@ -631,9 +686,7 @@ CREATE TABLE IF NOT EXISTS `wealth_survival_item` (
   `satiety` varchar(20) NOT NULL,
   `grade` varchar(20) NOT NULL,
   `status` varchar(20) NOT NULL,
-  `priority` varchar(20) NOT NULL,
   `days_per_unit` numeric(10, 1) NULL,
-  `hours_per_unit` numeric(8, 1) NULL,
   `uses_per_unit` numeric(10, 2) NULL,
   `use_cycle_num` numeric(6, 2) NULL,
   `use_cycle_unit` varchar(10) NULL,
@@ -728,7 +781,6 @@ CREATE TABLE IF NOT EXISTS `wealth_survival_snapshot_category` (
   `usable_item_count` integer NOT NULL,
   `item_count` integer NOT NULL,
   `snack_days` numeric(12, 2) NULL,
-  `hours_total` numeric(12, 1) NULL,
   `issue_count` integer NOT NULL,
   `trustworthy` bool NOT NULL,
   `category_id` integer NULL,
@@ -920,6 +972,228 @@ CREATE TABLE IF NOT EXISTS `wealth_survival_flow` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+# ⚠️ 自我运转（v3.61.0）：5 张 managed 表。
+#    DDL 与 `manage.py sqlmigrate selfrun 0001` 的输出逐字对齐。
+#    ⚠️ 迁移里 `selfrun_metric` 是「先建表、后 ALTER 加 stage_id」，
+#       这里直接写成**最终状态**（含 `stage_id` 列），两条路径终点必须一致。
+#    FK 一律**不带 ON DELETE**（Django 在应用层管级联）。
+#    建表顺序：stage → metric → metric_log → period → checkin
+#    （metric_log / checkin 的外键指向 metric，period 指向 stage）。
+_CREATE_SELFRUN_STAGE_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_stage` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `name` varchar(100) NOT NULL,
+  `start_date` date NOT NULL,
+  `end_date` date NULL,
+  `status` varchar(10) NOT NULL,
+  `pause_reason` varchar(20) NULL,
+  `paused_since` date NULL,
+  `resume_at` date NULL,
+  `last_seen_at` datetime(6) NULL,
+  `summary` longtext NOT NULL,
+  `summary_snapshot` json NULL,
+  `summary_at` datetime(6) NULL,
+  `note` varchar(200) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_SELFRUN_METRIC_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_metric` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `template_key` varchar(40) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `period_type` varchar(10) NOT NULL,
+  `unit` varchar(20) NOT NULL,
+  `direction` varchar(10) NOT NULL,
+  `goal_value` numeric(12, 2) NULL,
+  `floor_value` numeric(12, 2) NULL,
+  `goal_why` varchar(200) NOT NULL,
+  `floor_why` varchar(200) NOT NULL,
+  `agg` varchar(20) NOT NULL,
+  `source_kind` varchar(20) NOT NULL,
+  `source_config` json NOT NULL,
+  `status` varchar(10) NOT NULL,
+  `sort_order` integer NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `stage_id` integer NOT NULL,
+  CONSTRAINT `selfrun_metric_stage_id_40fb8076_fk_selfrun_stage_id` FOREIGN KEY (`stage_id`) REFERENCES `selfrun_stage` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_SELFRUN_METRIC_LOG_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_metric_log` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `action` varchar(20) NOT NULL,
+  `field_name` varchar(30) NULL,
+  `from_value` json NULL,
+  `to_value` json NULL,
+  `reason` varchar(20) NULL,
+  `reason_note` varchar(200) NOT NULL,
+  `at` datetime(6) NOT NULL,
+  `metric_id` integer NOT NULL,
+  CONSTRAINT `selfrun_metric_log_metric_id_257d9b4d_fk_selfrun_metric_id` FOREIGN KEY (`metric_id`) REFERENCES `selfrun_metric` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_SELFRUN_PERIOD_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_period` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `period_type` varchar(10) NOT NULL,
+  `period_key` varchar(20) NOT NULL,
+  `period_start` date NOT NULL,
+  `period_end` date NOT NULL,
+  `is_partial` bool NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `readings` json NULL,
+  `config_fingerprint` varchar(64) NOT NULL,
+  `skipped_metric_ids` json NOT NULL,
+  `answer_sheet` json NULL,
+  `review_text` longtext NOT NULL,
+  `review_edits` json NOT NULL,
+  `closed_at` datetime(6) NULL,
+  `is_backfilled` bool NOT NULL,
+  `backfilled_at` datetime(6) NULL,
+  `reopened_at` datetime(6) NULL,
+  `reopen_count` integer NOT NULL,
+  `reopen_reason` varchar(200) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `stage_id` integer NOT NULL,
+  CONSTRAINT `uniq_selfrun_period_stage_type_key` UNIQUE (`stage_id`, `period_type`, `period_key`),
+  CONSTRAINT `selfrun_period_stage_id_f2601e98_fk_selfrun_stage_id` FOREIGN KEY (`stage_id`) REFERENCES `selfrun_stage` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_SELFRUN_CHECKIN_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_checkin` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `checkin_date` date NOT NULL,
+  `value` numeric(12, 2) NOT NULL,
+  `note` varchar(200) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `metric_id` integer NOT NULL,
+  CONSTRAINT `selfrun_checkin_metric_id_1ce953f8_fk_selfrun_metric_id` FOREIGN KEY (`metric_id`) REFERENCES `selfrun_metric` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# ⚠️ selfrun 0002（本轮）：模板库落库 + 按期目标。
+#    DDL 与 `manage.py sqlmigrate selfrun 0002` 的输出逐字对齐。
+#    ⚠️ 建表顺序：template（无依赖）→ metric_plan（外键指向 metric，必须排在它之后）。
+#    ⚠️ 本轮**没有**给已有表加列，所以不需要 `information_schema` 补列探测。
+#    🔴 注意：`--no-migrations` 下 Django 直接按 model 建表，
+#       迁移里的 `RunPython(seed_templates)` **不会执行** ⇒
+#       测试库里 `selfrun_template` 是**空的**。用例不许依赖那 9 条 seed 数据。
+_CREATE_SELFRUN_TEMPLATE_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_template` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `key` varchar(40) NOT NULL UNIQUE,
+  `name` varchar(100) NOT NULL,
+  `period_type` varchar(10) NOT NULL,
+  `unit` varchar(20) NOT NULL,
+  `direction` varchar(10) NOT NULL,
+  `goal_value` numeric(12, 2) NULL,
+  `floor_value` numeric(12, 2) NULL,
+  `goal_why` varchar(200) NOT NULL,
+  `floor_why` varchar(200) NOT NULL,
+  `agg` varchar(20) NOT NULL,
+  `source_kind` varchar(20) NOT NULL,
+  `source_config` json NOT NULL,
+  `sort_order` integer NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_SELFRUN_METRIC_PLAN_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_metric_plan` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `period_key` varchar(20) NOT NULL,
+  `scope` varchar(10) NOT NULL,
+  `goal_value` numeric(12, 2) NULL,
+  `floor_value` numeric(12, 2) NULL,
+  `goal_why` varchar(200) NOT NULL,
+  `floor_why` varchar(200) NOT NULL,
+  `note` varchar(200) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `metric_id` integer NOT NULL,
+  CONSTRAINT `uniq_selfrun_plan_metric_key_scope` UNIQUE (`metric_id`, `period_key`, `scope`),
+  CONSTRAINT `selfrun_metric_plan_metric_id_c72d1bce_fk_selfrun_metric_id` FOREIGN KEY (`metric_id`) REFERENCES `selfrun_metric` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# ⚠️ 作品（v3.62.0）：2 张 managed 表。
+#    DDL 与 `manage.py sqlmigrate works 0001` 的输出逐字对齐。
+#    ⚠️ 建表顺序：work（无依赖）→ capture（外键指向 work）。
+#    FK 一律**不带 ON DELETE**（Django 在应用层管级联）。
+#    ⚠️ 主键是 `bigint`（works 用的是 `DEFAULT_AUTO_FIELD = BigAutoField`），
+#       不要照抄 selfrun 那几张表的 `integer` —— 主键类型必须与迁移一致。
+_CREATE_WORKS_WORK_SQL = """
+CREATE TABLE IF NOT EXISTS `works_work` (
+  `id` bigint AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `name` varchar(120) NOT NULL,
+  `summary` varchar(200) NOT NULL,
+  `kind` varchar(20) NOT NULL,
+  `status` varchar(10) NOT NULL,
+  `channel` varchar(40) NOT NULL,
+  `note` varchar(200) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_WORKS_CAPTURE_SQL = """
+CREATE TABLE IF NOT EXISTS `works_capture` (
+  `id` bigint AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `source_type` varchar(20) NOT NULL,
+  `source_id` integer NOT NULL,
+  `title` varchar(200) NOT NULL,
+  `excerpt` varchar(300) NOT NULL,
+  `status` varchar(10) NOT NULL,
+  `captured_at` datetime(6) NOT NULL,
+  `work_id` bigint NULL,
+  CONSTRAINT `uniq_works_capture_source` UNIQUE (`source_type`, `source_id`),
+  CONSTRAINT `works_capture_work_id_083900a2_fk_works_work_id` FOREIGN KEY (`work_id`) REFERENCES `works_work` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# 身上之物（v3.62.4）：2 张 managed 表。DDL 逐字照抄 `sqlmigrate wealth 0028`
+# 的输出（含主键类型与**约束名**）—— 手写时最容易顺手加 `ON DELETE`，
+# 而真实迁移里的 FK 约束**不带** ON DELETE（Django 在应用层管级联）。
+# ⚠️ 顺序不能反：`wealth_body_need` 的两个 FK 指向 `wealth_property` 与
+#    `wealth_survival_item`，第三个指向 `wealth_body_part`，
+#    三者都必须先建好（本位置在文件末尾，前两个天然已建）。
+_CREATE_BODY_PART_SQL = """
+CREATE TABLE IF NOT EXISTS `wealth_body_part` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `user_id` integer NOT NULL,
+  `name` varchar(30) NOT NULL,
+  `sort_order` integer NOT NULL,
+  `note` varchar(200) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  CONSTRAINT `wealth_body_part_user_name_uniq` UNIQUE (`user_id`, `name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_BODY_NEED_SQL = """
+CREATE TABLE IF NOT EXISTS `wealth_body_need` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `user_id` integer NOT NULL,
+  `name` varchar(60) NOT NULL,
+  `find_status` varchar(20) NOT NULL,
+  `satisfaction` varchar(10) NULL,
+  `wish` longtext NOT NULL,
+  `note` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `property_id` integer NULL,
+  `survival_item_id` integer NULL,
+  `part_id` integer NOT NULL,
+  CONSTRAINT `wealth_body_need_property_id_cb49b61a_fk_wealth_property_id` FOREIGN KEY (`property_id`) REFERENCES `wealth_property` (`id`),
+  CONSTRAINT `wealth_body_need_survival_item_id_c144fd53_fk_wealth_su` FOREIGN KEY (`survival_item_id`) REFERENCES `wealth_survival_item` (`id`),
+  CONSTRAINT `wealth_body_need_part_id_f11c9581_fk_wealth_body_part_id` FOREIGN KEY (`part_id`) REFERENCES `wealth_body_part` (`id`),
+  KEY `wealth_body_need_user_part_idx` (`user_id`, `part_id`),
+  KEY `wealth_body_need_status_idx` (`find_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
 # ⚠️ 0021 给**已存在**的 `wealth_survival_item` 加了 6 列，这是本项目第一次
 #    「给 survival 组的既有表加列」。`--reuse-db` 复用的旧测试库里那张表还是
 #    0019 的样子，而 `CREATE TABLE IF NOT EXISTS` 遇到已存在的表**什么也不做** ——
@@ -1002,6 +1276,69 @@ def _patch_core_user_profile_columns(cursor) -> None:
             'ALTER TABLE `core_user_profile` ADD COLUMN `quote_pool_max_len` '
             'integer UNSIGNED NOT NULL DEFAULT 500',
         )
+
+
+# ── 好恶物档案馆（v3.60.32）──
+# `treasure_good_thing` 是 **managed** 表：`--no-migrations` 下「首次建库」时
+# Django 会用当前模型把它建出来（含全部新列），但 `--reuse-db` 复用的旧测试库里
+# 那张表还是 0002 的样子 —— 而 `CREATE TABLE IF NOT EXISTS` 遇到已存在的表
+# **什么也不做** ⇒ 新列不存在，用例一片 OperationalError
+# （看着像代码错、其实是环境错）。处置与 `wealth_survival_item` 一致：
+# 先查 information_schema，缺列才补（幂等、不删不动）。
+#
+# 列定义取自 `sqlmigrate treasure 0003` 的 ALTER 原文。
+# ⚠️ Django 生成的是「ADD COLUMN ... DEFAULT x NOT NULL」跟一条「DROP DEFAULT」；
+#    这里保留 DEFAULT，只为给**已存在的行**一个值（Django 在应用层仍会自己填）。
+_TREASURE_COLUMNS_0003 = (
+    ('subject_kind', "varchar(10) NOT NULL DEFAULT '实物'"),
+    ('method_group', "varchar(20) NOT NULL DEFAULT ''"),
+    ('property_id', 'integer NULL'),
+    ('survival_item_id', 'integer NULL'),
+)
+
+# 🔴 索引是**另一件事**：`CREATE TABLE` 补不了已存在表上的索引，得显式查
+#    `information_schema.STATISTICS` 再建。少了这一步，「一件实物只能有一条评价」
+#    这条约束在测试库里**根本不存在** —— 而用例会以为它生效了
+#    （用 ORM 走 `objects.create()` 绕过序列化器时，DB 是唯一的防线）。
+_TREASURE_CONSTRAINTS_0003 = (
+    ('uniq_treasure_good_thing_property', 'UNIQUE (`property_id`)'),
+    ('uniq_treasure_good_thing_survival_item', 'UNIQUE (`survival_item_id`)'),
+)
+
+
+def _patch_treasure_columns(cursor) -> None:
+    """给已存在的 `treasure_good_thing` 补 0003 的列与唯一索引（幂等、不删不动）。"""
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'treasure_good_thing'
+        """,
+    )
+    existing = {row[0] for row in cursor.fetchall()}
+    if not existing:
+        return          # 表还没建：Django 侧用当前模型建表，已经带着新列
+    for name, definition in _TREASURE_COLUMNS_0003:
+        if name in existing:
+            continue
+        # 列名与定义都是本文件里的字面量，不来自外部输入
+        cursor.execute(
+            f'ALTER TABLE `treasure_good_thing` ADD COLUMN `{name}` {definition}',
+        )
+    cursor.execute(
+        """
+        SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'treasure_good_thing'
+        """,
+    )
+    indexes = {row[0] for row in cursor.fetchall()}
+    for name, definition in _TREASURE_CONSTRAINTS_0003:
+        if name in indexes:
+            continue
+        cursor.execute(
+            f'ALTER TABLE `treasure_good_thing` ADD CONSTRAINT `{name}` {definition}',
+        )
+
+
 @pytest.fixture(scope='session')
 def django_db_setup(django_db_setup, django_db_blocker):
     """在 Django 迁移建库之后，补齐原生 SQL 表"""
@@ -1018,7 +1355,9 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_RELATIONSHIP_TABLE_SQL)
             cursor.execute(_CREATE_INTERACTION_TABLE_SQL)
             cursor.execute(_CREATE_BALANCE_TABLE_SQL)
+            cursor.execute(_CREATE_REGULAR_TABLE_SQL)
             cursor.execute(_CREATE_TRAVEL_TABLE_SQL)
+            cursor.execute(_CREATE_DANCE_TABLE_SQL)
             cursor.execute(_CREATE_TOOLKIT_DEF_TABLE_SQL)
             cursor.execute(_CREATE_TRACKER_TABLE_SQL)
             cursor.execute(_CREATE_RECORD_TABLE_SQL)
@@ -1071,3 +1410,26 @@ def django_db_setup(django_db_setup, django_db_blocker):
             # 库存流水（v3.60.18 · P0）：外键指向 `wealth_survival_item`，
             # 故排在它之后（本文件最末尾，天然满足）
             cursor.execute(_CREATE_SURVIVAL_FLOW_SQL)
+            # 好恶物档案馆（v3.60.32）：给已存在的 treasure 表补 4 列 + 2 个唯一索引。
+            # 排在物件 / 物品两张表之后 —— 两个新外键分别指向它们。
+            _patch_treasure_columns(cursor)
+            # 自我运转（v3.61.0）：5 张 managed 表。顺序不能改 ——
+            # metric 指向 stage，metric_log / checkin 指向 metric，period 指向 stage。
+            cursor.execute(_CREATE_SELFRUN_STAGE_SQL)
+            cursor.execute(_CREATE_SELFRUN_METRIC_SQL)
+            cursor.execute(_CREATE_SELFRUN_METRIC_LOG_SQL)
+            cursor.execute(_CREATE_SELFRUN_PERIOD_SQL)
+            cursor.execute(_CREATE_SELFRUN_CHECKIN_SQL)
+            # selfrun 0002（本轮）：模板库 + 按期目标。顺序不能改 ——
+            # `selfrun_metric_plan.metric_id` 指向 `selfrun_metric`。
+            cursor.execute(_CREATE_SELFRUN_TEMPLATE_SQL)
+            cursor.execute(_CREATE_SELFRUN_METRIC_PLAN_SQL)
+            # 作品（v3.62.0）：2 张 managed 表。顺序不能改 ——
+            # `works_capture.work_id` 指向 `works_work`。
+            cursor.execute(_CREATE_WORKS_WORK_SQL)
+            cursor.execute(_CREATE_WORKS_CAPTURE_SQL)
+            # 身上之物（v3.62.4）：2 张 managed 表。顺序不能改 ——
+            # `wealth_body_need` 的三个 FK 指向 body_part / wealth_property /
+            # wealth_survival_item，三者都已在上方建好。
+            cursor.execute(_CREATE_BODY_PART_SQL)
+            cursor.execute(_CREATE_BODY_NEED_SQL)

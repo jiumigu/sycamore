@@ -31,6 +31,27 @@
 
   ⚠️ 「状态」与「状况」是**两列**，不合并：状态决定它进不进四卡与合计，
      状况只影响净值那一格（标了「损坏」就按 0 计，见设计稿 §4.3 订正条）。
+
+  ── 分页（v3.60.35） ──
+
+  78 件家当一屏放不下，所以这里分了页。**前端分页，不是后端分页**：
+  后端刻意不开 `?ordering=` / `?page=`（理由见上），排序与筛选都在这一层 ⇒
+  分页也只能在这一层切「显示」。
+
+  🔴 四条判据（写错任一条都是**静默**的；判据本体与常量统一在
+     `utils/survivalPaging.ts` 的文件头，这里只列本表的落点）：
+     ① **只切显示** —— `rows` 仍是**全量**结果，计数 / 空态 / 排序都读它，
+        切片只发生在 `pageRows` 一处。让计数读切片 ⇒ 统计静默变成「本页的数」
+     ② **先排全量、再切片** —— `rows` 已经先筛再排（见它上面的注释），
+        切片排在它后面。反过来只排当前页，而**表头箭头照常高亮**
+     ③ **筛选一变回第 1 页** + 总页数变小把当前页拉回范围。
+        不拉回 ⇒「筛剩 3 件却停在第 3 页」= 一张空表，读作「筛选坏了」
+     ④ 勾选跨页保留并念出分布 —— **本表没有勾选**（物件资产没有批量动作），
+        所以分页的杀伤半径在这里**只有排序**；哪天加了批量选择，这条要补上
+
+  ⚠️ 与生存资源那四个列表**共用** `utils/survivalPaging.ts` 的常量与判据
+     （每页条数选项 / 默认值 / 分页栏显示条件），本组件不再各留一份 ——
+     两处各写一份迟早分叉，而分叉是静默的。
 -->
 
 <template>
@@ -95,7 +116,13 @@
         清空筛选
       </el-button>
       <span v-if="sortHint" class="property-table__sort-hint">{{ sortHint }}</span>
-      <span class="property-table__count">共 {{ rows.length }} 件</span>
+      <!--
+        🔴 计数读的是**全量结果**（`countLabel` 里用 `rows.length`），不是当前页。
+           而「有筛选时必须把被筛掉的也念出来」是分页的配套 ——
+           筛剩 3 件却只显示「共 3 件」+ 1 页，读作「我库里只有 3 件家当」，
+           而实际只是条件把 75 件挡住了。同生存资源清单的 `countLabel`。
+      -->
+      <span class="property-table__count">{{ countLabel }}</span>
     </div>
 
     <el-empty
@@ -106,7 +133,7 @@
 
     <el-table
       v-else
-      :data="rows"
+      :data="pageRows"
       size="small"
       class="property-table__grid"
       row-key="id"
@@ -114,7 +141,25 @@
     >
       <el-table-column label="物件" min-width="180">
         <template #default="{ row }">
-          <div class="property-table__name">{{ row.name }}</div>
+          <div class="property-table__name">
+            <span>{{ row.name }}</span>
+            <!--
+              评价徽标 + 行内两秒快记（v3.60.32）。
+              ⚠️ 徽标真源在好恶物档案馆，这里**只读**：本模块不加「是不是好东西」字段。
+              🔴 「状况」与「评价」是两把正交的尺子：状况正常的东西可以是 👎
+                 （型号选错了），状况坏了的东西仍可以是 👍（用了 12 年，值了）。
+            -->
+            <TreasureQuickMark
+              kind="property"
+              :target-id="row.id"
+              :name="row.name"
+              :badge="row.treasure_badge"
+              :record-id="row.treasure_record_id"
+              :suggest-category="row.treasure_suggest_category"
+              :condition="row.condition"
+              @saved="emit('treasure-saved')"
+            />
+          </div>
           <div v-if="row.spec || row.location" class="property-table__meta">
             <span v-if="row.spec">{{ row.spec }}</span>
             <span v-if="row.spec && row.location"> · </span>
@@ -213,11 +258,37 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <!--
+      分页 —— 常量与判据走 `utils/survivalPaging.ts`（单一实现）。
+
+      🔴 显示条件 `shouldShowPager(rows.length)` 的判据是「**存在**能让它分页的
+         每页条数」、**不是**「当前每页条数下有多页」：写成后者，用户选一次
+         「100 条/页」之后 `78 > 100` 为假 ⇒ 分页栏**连同每页条数选择器一起消失**，
+         他再也调不回 20 —— 而「选 100」是「一屏看全部」的正常出口，不是误操作。
+         **出口不能自己关掉自己。**
+
+      ⚠️ `total` 传的是**全量结果数**（`rows.length`），与 `countLabel` 同源；
+         传 `pageRows.length` 会让「第 2 页」根本不存在。
+
+      ⚠️ 分页状态（页码 / 每页条数）**刻意不持久化**：它是查看态、不是数据。
+         切到「类别维护」页签再回来由 `v-show` 保住即可（同筛选的处置）。
+    -->
+    <div v-if="shouldShowPager(rows.length)" class="property-table__pagination">
+      <el-pagination
+        v-model:current-page="page"
+        v-model:page-size="pageSize"
+        :page-sizes="PAGE_SIZE_OPTIONS"
+        :total="rows.length"
+        size="small"
+        layout="prev, pager, next, sizes"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { usePropertyStore } from '../../stores/propertyStore'
 import {
   amountSortHint, formatMoneyOrDash, formatOverdue, formatUsedVsPlanned,
@@ -226,7 +297,14 @@ import {
 import type {
   AmountSortOrder,
 } from '../../utils/propertyFormat'
+// 分页常量与判据 —— 与生存资源那四个列表**同一份**（唯一实现）。
+// ⚠️ 文件名带 `survival` 是历史（它出生在那一轮），但它服务的是整个 wealth
+//    模块的列表；改名要动四个生存组件的 import，属无谓涟漪。
+import {
+  DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, pageCountOf, pageSlice, shouldShowPager,
+} from '../../utils/survivalPaging'
 import type { PropertyItem, PropertyOption } from '../../types/propertyTypes'
+import TreasureQuickMark from '../common/TreasureQuickMark.vue'
 
 const props = defineProps<{
   /** 全部物件（未筛选）—— 筛选与排序都在这个组件里做 */
@@ -236,6 +314,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   edit: [id: number]
   delete: [id: number]
+  /** 行内快记写成功 ⇒ 父组件刷新列表（徽标要立刻变实色） */
+  'treasure-saved': []
 }>()
 
 const store = usePropertyStore()
@@ -283,6 +363,45 @@ const rows = computed<PropertyItem[]>(() => {
 
 const sortHint = computed(() => amountSortHint(sortOrder.value))
 
+// ─── 分页（v3.60.35） ───
+//
+// ⚠️ 先看清 `rows`：它是**全量**结果（先筛再排）。分页只在它之上切一段喂给表格，
+//    计数 / 空态 / 排序判据一律仍读 `rows` —— 见文件头判据 ①。
+// ⚠️ 下面两个是**纯查看态**：不写 store、不落 URL。切页签由 `v-show` 保住即可。
+
+/** 当前页（1 起） */
+const page = ref(1)
+
+/** 每页条数 —— 用户可调；选 100 即等于「不分页」（从第 1 件看到最后一件的出口） */
+const pageSize = ref(DEFAULT_PAGE_SIZE)
+
+/** 总页数（至少 1 —— 「一页都没有」不是一个可展示的状态） */
+const pageCount = computed(() => pageCountOf(rows.value.length, pageSize.value))
+
+/**
+ * 当前页的行 —— 喂给 `el-table` 的**唯一**数据源。
+ *
+ * 🔴 切片必须发生在**排序之后**（`rows` 已经排好全量）：反过来只排当前页，
+ *    而表头箭头照常高亮 —— 看不出错（文件头判据 ②）。
+ */
+const pageRows = computed<PropertyItem[]>(() => {
+  const [start, end] = pageSlice(page.value, pageSize.value)
+  return rows.value.slice(start, end)
+})
+
+/**
+ * 件数标签 —— 有筛选时把**被筛掉的**也念出来。
+ *
+ * ⚠️ 原先只写「共 N 件」（N = 筛选结果数）：筛剩 2 件时显示「共 2 件」，
+ *    配上分页栏的「1 页」，读作「我库里只有 2 件家当」—— 而实际是条件把
+ *    另外 76 件挡住了。这是分页的配套（同生存资源清单的 `countLabel`）。
+ */
+const countLabel = computed(() => {
+  const total = props.items.length
+  const shown = rows.value.length
+  return shown === total ? `共 ${total} 件` : `筛出 ${shown} / 共 ${total} 件`
+})
+
 function onSortChange(payload: { prop: string | null; order: string | null }) {
   if (payload.prop !== 'purchase_amount') return
   // element-plus 的 order 是 'ascending' / 'descending' / null
@@ -327,6 +446,31 @@ function statusTagType(value: string): 'success' | 'info' | 'primary' | 'warning
   if (value === 'scrapped') return 'info'
   return 'primary'
 }
+
+/**
+ * 筛选一变就回第 1 页。
+ *
+ * ⚠️ 这四项是 `defineModel` 的 ref（真值由父组件持有 —— 四卡点击要能直接改
+ *    「状态」这一项），watch 它们与 watch 本地 ref 同样有效。
+ * ⚠️ **不需要 `deep`**：四个都是字符串 / 数字。生存清单那边要 `deep: true`
+ *    是因为它的筛选项里有**原地增删的数组**（`.push` / `.splice` 不换引用，
+ *    非深度 watch 不触发）—— 这里没有数组，照抄 `deep` 只会掩盖将来真需要它的那天。
+ * ⚠️ 不动 `sortOrder`：排序是「我想怎么看」、筛选是「我要看哪些」；
+ *    筛一次就把排序方向清掉，等于每次都要重排一遍。
+ */
+watch([search, category, status, condition], () => {
+  page.value = 1
+})
+
+/**
+ * 结果变少导致当前页越界 ⇒ 拉回最后一页。
+ *
+ * 上面那条 watch 覆盖了「筛完只剩 1 页」，但**删物件 / store 刷新**不经过筛选，
+ * 也会让总页数变小 —— 那条路不能漏（否则停在空页上，读作「列表空了」）。
+ */
+watch(pageCount, (total) => {
+  if (page.value > total) page.value = total
+})
 </script>
 
 <style scoped>
@@ -357,6 +501,9 @@ function statusTagType(value: string): 'success' | 'info' | 'primary' | 'warning
 }
 .property-table__name {
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .property-table__meta {
   font-size: 12px;
@@ -385,5 +532,11 @@ function statusTagType(value: string): 'success' | 'info' | 'primary' | 'warning
 }
 .property-table__ok {
   color: var(--el-text-color-secondary);
+}
+/* 与生存资源四个列表同款（居中 + 上方 10px）—— 同一模块里的分页栏不该长得不一样 */
+.property-table__pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
 }
 </style>

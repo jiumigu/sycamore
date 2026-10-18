@@ -99,6 +99,19 @@ export interface PropertyItemBase {
   tags: string[]
   created_at: string | null
   updated_at: string | null
+  /**
+   * 好恶物档案馆回流的评价（v3.60.32）—— **只读**。
+   *
+   * 🔴 真源唯一在 `treasure`，本模块不加「是不是好东西」字段、也不缓存。
+   *    `null` = 还没评过 ⇒ 界面什么都不显示（不是灰色的「无」）。
+   * ⚠️ 它与 `status`（我还要不要它）、`condition`（它好不好使）是**三把正交的尺子**：
+   *    状况正常的东西可以是 👎，状况坏了的东西仍可以是 👍。
+   */
+  treasure_badge: string | null
+  /** 已有评价时那条档案的 id —— 点徽标去**同一条**补理由，不是再建一条 */
+  treasure_record_id: number | null
+  /** 快记浮层的类别预填建议（后端按物件类别猜的）—— 前端不自己映射 */
+  treasure_suggest_category: string
 }
 
 /**

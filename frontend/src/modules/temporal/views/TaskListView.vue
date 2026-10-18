@@ -47,7 +47,21 @@
     <el-table ref="tableRef" :data="tasks" v-loading="loading" stripe size="small" max-height="560"
       @selection-change="onSelectionChange" row-key="id">
       <el-table-column type="selection" width="40" reserve-selection />
-      <el-table-column label="任务（L3）" prop="task_name" min-width="130" show-overflow-tooltip />
+      <el-table-column label="任务（L3）" width="220">
+        <template #default="{ row }">
+          <div class="task-cell">
+            <div class="task-name">{{ row.task_name }}</div>
+            <el-tooltip
+              v-if="row.task_description"
+              placement="top"
+              :content="row.task_description"
+              :show-after="200"
+            >
+              <div class="task-desc">{{ flatDesc(row.task_description) }}</div>
+            </el-tooltip>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="开始时间" width="140">
         <template #default="{ row }">{{ (row.start_time || '').slice(0, 16) }}</template>
       </el-table-column>
@@ -200,6 +214,14 @@ function typeStyle(name: string) {
 // 一行 = 一条 ATracker 原始记录（v3.58.5 起不再按「任务名 + 日期」合并）：
 //   start_time / end_time / duration_hours 同属该条记录 → 「时长 == 结束 − 开始」。
 // 若仍不一致（源数据里计时器暂停等），以「记录时长」为准，这里显式标出来避免误读。
+
+// 🔴 任务说明（`task_description`）是**导入的工作日志**，自带换行与缩进。
+//    表格里要压成**一行**才省略得掉 —— `white-space: nowrap` 遇到 `\n` 仍会换行，
+//    所以先把所有连续空白（含换行）归一成一个空格。
+function flatDesc(v: string): string {
+  return String(v).replace(/\s+/g, ' ').trim()
+}
+
 function endTimeText(row: any): string {
   const e = String(row.end_time || '')
   if (!e) return ''
@@ -360,6 +382,13 @@ onMounted(async () => { await loadTasks() })
   .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
     .page-title { margin: 0; font-size: 18px; font-weight: 600; } }
   .filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  // 任务列：两行（任务名 + 说明），都单行省略。
+  // 🔴 列宽给**固定值**而不再用 min-width —— 无宽度的列会被 el-table 拉去吸收剩余宽度，
+  //    这正是「任务名很短、那一列却空出一条」的原因。
+  .task-cell { line-height: 1.4;
+    .task-name { font-weight: 500; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .task-desc { font-size: 12px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+  }
   .bulk-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; font-size: 13px; color: #4b5563; }
   .muted { color: #b8bcc4; }
   .th-tip { border-bottom: 1px dashed #cbd5e1; cursor: help; }

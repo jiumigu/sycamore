@@ -26,6 +26,7 @@ class Quote(models.Model):
 
     class Meta:
         db_table = 'toolkit_quote'
+        db_table_comment = '摘录馆：收藏的句子 / 段落'
         ordering = ['-created_at']
         verbose_name = '摘录'
 
@@ -56,6 +57,7 @@ class CityCoordinate(models.Model):
 
     class Meta:
         db_table = 'toolkit_city_coordinate'
+        db_table_comment = '城市坐标：中国城市经纬度，旅行路线算距离的参照表'
         ordering = ['province', 'name']
         verbose_name = '城市坐标'
         indexes = [
@@ -151,6 +153,7 @@ class TravelRoutePreset(models.Model):
 
     class Meta:
         db_table = 'toolkit_travel_route_preset'
+        db_table_comment = '旅行路线预设：保存好的常用路线'
         ordering = ['-created_at']
         verbose_name = '旅行路线预设'
 
@@ -211,6 +214,7 @@ class CareerEnergyAudit(models.Model):
 
     class Meta:
         db_table = 'toolkit_career_energy_audit'
+        db_table_comment = '职业能量审计：定期给当前职业状态逐项打分，看趋势'
         ordering = ['-audit_date']
         verbose_name = '职业能量审计记录'
 
@@ -283,6 +287,7 @@ class HealthSelfCheck(models.Model):
 
     class Meta:
         db_table = 'toolkit_health_self_check'
+        db_table_comment = '身体健康自查：体征逐项打勾 + 算健康分'
         ordering = ['-check_date']
         verbose_name = '身体健康自查'
 
@@ -304,6 +309,7 @@ class FreeSpendingCalculator(models.Model):
 
     class Meta:
         db_table = 'toolkit_free_spending'
+        db_table_comment = '自由支配额度：把流动资产 / 收入 / 债务折成「一次能花多少」'
         ordering = ['-created_at']
         verbose_name = '自由支配额度计算'
 
@@ -325,6 +331,7 @@ class FixedExpense(models.Model):
 
     class Meta:
         db_table = 'toolkit_fixed_expense'
+        db_table_comment = '固定开销：把一组固定支出折成月 / 日 / 年三个口径'
         ordering = ['-created_at']
         verbose_name = '固定开销计算'
 
@@ -344,7 +351,7 @@ class HourlyWageRecord(models.Model):
         ('flexible', '弹性工时'),
     ]
 
-    user_id = models.IntegerField(default=1)
+    user_id = models.IntegerField(default=1, verbose_name='用户ID')
     name = models.CharField(max_length=200, blank=True, default='', verbose_name='记录名称')
 
     # 计算模式
@@ -365,7 +372,7 @@ class HourlyWageRecord(models.Model):
         max_length=10, default='fixed', choices=FREELANCE_TIME_MODE_CHOICES,
         verbose_name='工时模式',
     )
-    freelance_days = models.IntegerField(null=True, blank=True, verbose_name='月工作天数')
+    freelance_days = models.IntegerField(null=True, blank=True, verbose_name='月工作天数（自由职业自填）')
     freelance_hours_per_day = models.DecimalField(
         null=True, blank=True, max_digits=3, decimal_places=1, verbose_name='日均工作时长',
     )
@@ -388,10 +395,13 @@ class HourlyWageRecord(models.Model):
     hourly_wage = models.DecimalField(max_digits=8, decimal_places=2, verbose_name='时薪(元/时)')
 
     notes = models.TextField(blank=True, default='', verbose_name='备注')
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
 
     class Meta:
         db_table = 'toolkit_hourly_wage'
+        db_table_comment = '时薪计算：把月薪连同通勤与工时折算成真实时薪'
+        verbose_name = '时薪计算记录'
+        verbose_name_plural = '时薪计算记录'
         ordering = ['-created_at']
 
     def __str__(self):
@@ -416,6 +426,7 @@ class ElectricityRecord(models.Model):
 
     class Meta:
         db_table = 'toolkit_electricity_record'
+        db_table_comment = '用电记录：抄表读数与区间用电量'
         ordering = ['-record_date']
         verbose_name = '用电记录'
 
@@ -452,6 +463,7 @@ class DecisionTracker(models.Model):
 
     class Meta:
         db_table = 'toolkit_decision_tracker'
+        db_table_comment = '决策追踪：一个待定决策的长期观察容器（倾向持续采样，到期汇总）'
         ordering = ['-created_at']
         verbose_name = '决策追踪'
 
@@ -501,6 +513,7 @@ class DecisionRecord(models.Model):
 
     class Meta:
         db_table = 'toolkit_decision_record'
+        db_table_comment = '决策记录：单次倾向采样；可选项来自所属追踪的 lean_options'
         ordering = ['-record_date', '-id']
         verbose_name = '决策记录'
         indexes = [
@@ -523,6 +536,7 @@ class AskScene(models.Model):
 
     class Meta:
         db_table = 'toolkit_ask_scene'
+        db_table_comment = 'AI 问答库 · 场景：区分工作 / 备考 / 写作等业务场景'
         ordering = ['sort', 'id']
         verbose_name = 'AI 问答场景'
 
@@ -547,6 +561,7 @@ class AskTopic(models.Model):
 
     class Meta:
         db_table = 'toolkit_ask_topic'
+        db_table_comment = 'AI 问答库 · 主题：聚合同一问题的全部回答（跨 AI、跨会话）'
         ordering = ['-created_at']
         verbose_name = 'AI 问答主题'
 
@@ -581,6 +596,7 @@ class AskAnswer(models.Model):
 
     class Meta:
         db_table = 'toolkit_ask_answer'
+        db_table_comment = 'AI 问答库 · 回答：一次回答；追问靠 parent 连成多轮链'
         ordering = ['-asked_at', '-id']
         verbose_name = 'AI 回答记录'
         indexes = [

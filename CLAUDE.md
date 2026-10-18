@@ -24,7 +24,7 @@ Sycamore —— 个人人生管理系统，为单人使用设计。聚合每日�
 ```
 backend/
 ├── sycamore/         # 项目配置（settings/urls/asgi/wsgi）
-├── apps/             # 19 个 app（INSTALLED_APPS 为准）
+├── apps/             # 20 个 app（INSTALLED_APPS 为准）
 │   ├── core/         # 基础设施（分页 / 用户画像 / 通知）
 │   ├── temporal/     # 时间感知（日记 + 时间统计 + 活动追踪）
 │   ├── health/       # 健康管理
@@ -37,6 +37,7 @@ backend/
 │   ├── reward/       # 奖励池
 │   ├── goals/        # 目标管理
 │   ├── redemption/   # 三年赎回期
+│   ├── selfrun/      # 自我运转（KPI 制定→执行→复盘→事后分析）
 │   ├── lifesample/   # 人生样本
 │   ├── treasure/     # 好东西
 │   ├── food/         # 美食记录

@@ -35,6 +35,13 @@ from .property_models import (
     WealthPropertyCategory,
     WealthProperty,
 )
+# 身上之物（v3.62.4）—— 「我该有什么、找到了没有」：不靠任何数量，只记结论。
+# ⚠️ 必须排在上面两个之后：body_models 的 FK 分别指向 wealth_property 与
+#    wealth_survival_item，两者都得先被 import。
+from .body_models import (
+    WealthBodyPart,
+    WealthBodyNeed,
+)
 __all__ = [
     'WealthLifeWeekCalendar',
     'WealthCurrentScenario',
@@ -65,4 +72,6 @@ __all__ = [
     'SurvivalFlow',
     'WealthPropertyCategory',
     'WealthProperty',
+    'WealthBodyPart',
+    'WealthBodyNeed',
 ]

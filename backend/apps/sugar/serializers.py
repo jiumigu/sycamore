@@ -1,5 +1,10 @@
 from rest_framework import serializers
 
+from .constants import (
+    SUGAR_HAPPINESS_MAX,
+    SUGAR_HAPPINESS_MIN,
+    resolve_happiness_band,
+)
 from .models import EnergyLog, EnergyTemplate, SugarRecord, SugarTemplate
 
 
@@ -7,6 +12,7 @@ class SugarRecordSerializer(serializers.ModelSerializer):
     """小确幸记录序列化器"""
 
     reward_label = serializers.SerializerMethodField()
+    reward_color = serializers.SerializerMethodField()
     category_display = serializers.SerializerMethodField()
     time = serializers.DateField(input_formats=['%Y-%m-%d', '%Y-%m-%d %H:%M:%S'], required=False)
 
@@ -15,7 +21,7 @@ class SugarRecordSerializer(serializers.ModelSerializer):
         fields = [
             's_id', 'years', 'month', 'title', 'level_of_happiness',
             'time', 'category', 'category_display', 'tags', 'joy_type', 'notes',
-            'reward_amount', 'reward_synced', 'reward_label',
+            'reward_amount', 'reward_synced', 'reward_label', 'reward_color',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['s_id', 'reward_synced', 'created_at', 'updated_at']
@@ -23,27 +29,27 @@ class SugarRecordSerializer(serializers.ModelSerializer):
     def get_reward_label(self, obj) -> str:
         return _reward_label(obj.level_of_happiness)
 
+    def get_reward_color(self, obj) -> str:
+        """档位配色 —— 前端不按分数自己算颜色（那会是第二份档位边界）。"""
+        return resolve_happiness_band(obj.level_of_happiness)['color']
+
     def get_category_display(self, obj):
         return obj.get_category_display() if obj.category else None
 
     def validate_level_of_happiness(self, value):
-        if value < 5 or value > 20:
-            raise serializers.ValidationError('快乐程度必须在 5 ~ 20 之间')
+        if value < SUGAR_HAPPINESS_MIN or value > SUGAR_HAPPINESS_MAX:
+            raise serializers.ValidationError(
+                f'快乐程度必须在 {SUGAR_HAPPINESS_MIN} ~ {SUGAR_HAPPINESS_MAX} 之间'
+            )
         return value
 
 
 def _reward_label(level) -> str:
-    """根据快乐程度返回标签（5-20分制）"""
-    v = float(level)
-    if v <= 7:
-        return '小开心'
-    elif v <= 10:
-        return '开心'
-    elif v <= 13:
-        return '很高兴'
-    elif v <= 16:
-        return '超开心'
-    return '幸福爆炸'
+    """根据快乐程度返回档位词（5-20 分制，五档）。
+
+    档位边界在 `constants.SUGAR_HAPPINESS_BANDS` —— 这里只取词，不写边界。
+    """
+    return resolve_happiness_band(level)['label']
 
 
 class SugarTemplateSerializer(serializers.ModelSerializer):

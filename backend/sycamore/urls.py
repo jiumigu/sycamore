@@ -24,4 +24,6 @@ urlpatterns = [
     path('api/redemption/', include('apps.redemption.urls')),
     path('api/core/', include('apps.core.urls')),
     path('api/treasure/', include('apps.treasure.urls')),
+    path('api/selfrun/', include('apps.selfrun.urls')),
+    path('api/works/', include('apps.works.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

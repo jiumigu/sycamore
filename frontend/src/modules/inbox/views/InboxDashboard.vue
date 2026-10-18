@@ -148,6 +148,28 @@
               <el-input v-model="completeForm.rewardReason" placeholder="如：完成了一件拖延很久的事" />
             </el-form-item>
           </template>
+
+          <!-- 作品（v3.62.0）：与上面三个勾**并排、同长相** ——
+               它是同一件事的下一个入口，不是第二次设计。 -->
+          <div class="keep-row">
+            <el-checkbox v-model="completeForm.keepIt">📦 这条值得留下（收进「待提炼」）</el-checkbox>
+            <!-- ⚠️ `el-popover` 而不是 `el-tooltip`（两者插槽语义是反的）：
+                 tooltip 的默认插槽是「触发元素」、正文要走 `#content`；
+                 popover 才是「`#reference` 触发 + 默认插槽正文」。
+                 写错不报错，只是正文被当成触发内容**内联渲染、常驻可见**。 -->
+            <el-popover placement="top" :width="340" trigger="hover" :show-after="120">
+              <template #reference>
+                <el-icon class="keep-icon"><QuestionFilled /></el-icon>
+              </template>
+              <div class="keep-tip">
+                <p>勾了<b>不用现在写</b>什么 —— 它只把这条放进「待提炼」。</p>
+                <p>
+                  在<b>「本周状态」页末</b>把它收成一件东西
+                  （一份清单、一个方法、一段记录都算）。
+                </p>
+              </div>
+            </el-popover>
+          </div>
         </div>
       </el-form>
 
@@ -162,10 +184,12 @@
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Upload } from '@element-plus/icons-vue'
+import { Upload, QuestionFilled } from '@element-plus/icons-vue'
 import { useInboxStore } from '../stores/inboxStore'
 import type { InboxItem } from '../types/inboxTypes'
 import * as sugarApi from '@/modules/sugar/api/sugarApi'
+// 「值得留下」→ 作品库的「待提炼」。与上面三个「同时登记到…」同源：**前端串联**。
+import { capture as captureWork } from '@/modules/works/api/workApi'
 import * as rewardApi from '@/modules/reward/api/rewardApi'
 import * as goalsApi from '@/modules/goals/api/goalApi'
 import QuickInput from '../components/QuickInput.vue'
@@ -216,6 +240,9 @@ const completeForm = reactive({
   difficulty: 3,
   failType: '',
   lesson: '',
+  // 作品（v3.62.0）：跟上面三个「同时登记到…」**同一个模式** ——
+  // 勾只是把这条放进「待提炼」，**不需要现在写任何东西**。
+  keepIt: false,
 })
 
 // 失败类型：前端显示 → 后端存储值映射
@@ -240,6 +267,7 @@ function resetCompleteForm() {
   completeForm.difficulty = 3
   completeForm.failType = ''
   completeForm.lesson = ''
+  completeForm.keepIt = false
 }
 
 onMounted(() => {
@@ -311,6 +339,22 @@ async function confirmComplete() {
         transaction_type: 'inbox_complete',
         description: `收件箱完成小奖励：${item.content}`,
       })
+    }
+
+    // 5. 标记「值得留下」（作品库）——
+    //    🔴 **单独 try**：它是附加标记，不能因为它失败就把「已完成」也报成失败。
+    //    勾的意思只是「这条以后可能长成一件东西」，此刻不用写任何字。
+    if (completeForm.keepIt) {
+      try {
+        await captureWork({
+          source_type: 'inbox',
+          source_id: item.id,
+          title: item.content,
+          excerpt: (completeForm.note || '').slice(0, 300),
+        })
+      } catch {
+        ElMessage.warning('已完成；「值得留下」没记上（作品库可能还没就绪）')
+      }
     }
 
     ElMessage.success('已完成')
@@ -423,4 +467,20 @@ async function confirmComplete() {
   font-size: 13px;
   color: #6B7280;
 }
+
+/* 「值得留下」那一行：与上面三个勾同长相，但**多一个去处说明** ——
+   「收进待提炼」如果不摆在眼前，勾的意思是「我又要走一遍流程吗」。 */
+.keep-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+.keep-icon {
+  color: var(--el-text-color-secondary); cursor: help;
+  border-bottom: 1px dashed var(--el-border-color);
+}
+.keep-icon:hover { color: var(--el-color-primary); }
+.keep-tip { max-width: 330px; font-size: 12px; line-height: 1.8; }
+.keep-tip p { margin: 0 0 6px; }
+.keep-tip p:last-child { margin-bottom: 0; }
 </style>

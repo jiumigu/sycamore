@@ -107,6 +107,18 @@
             <el-tag v-if="row.accepted_count" size="small" type="success" class="accepted-tag">采纳 {{ row.accepted_count }}</el-tag>
           </template>
         </el-table-column>
+        <!-- 「值得留」：勾在**主题**上（一个主题 = 一件「我搞清楚了 X」） -->
+        <el-table-column label="值得留" width="92" align="center">
+          <template #default="{ row }">
+            <KeepMark
+              v-if="keepReady"
+              :state="keepStateOf(row)"
+              :work-name="keepEntryOf(row.id)?.work_name ?? null"
+              :busy="keepBusy.has(row.id)"
+              @toggle="keepTopic(row)"
+            />
+          </template>
+        </el-table-column>
         <el-table-column label="最近提问" width="150">
           <template #default="{ row }">{{ formatDateTime(row.latest_asked_at) || '-' }}</template>
         </el-table-column>
@@ -403,6 +415,9 @@ import {
   getAskAcceptedSummary,
 } from '../../api/askLibraryApi'
 import type { AskTopicItem, AskAnswerItem, AskSceneItem, AskSummaryTopic } from '../../api/askLibraryApi'
+import { useWorkKeep } from '@/modules/works/composables/useWorkKeep'
+import KeepMark from '@/modules/works/components/KeepMark.vue'
+import type { KeepState } from '@/modules/works/types/workTypes'
 
 const AI_OPTIONS = ['WorkBuddy', 'Claude Code', 'ChatGPT', 'Gemini', 'Kimi', '豆包', 'DeepSeek', '通义千问']
 const VERDICT_MARK: Record<string, string> = { 采纳: '✅ 采纳', 备用: '📎 备用', 不采用: '✖ 不采用' }
@@ -422,6 +437,40 @@ const query = reactive<{ search: string; ai: string; tag: string; scene: string;
 
 function truncate(s: string, n: number): string {
   return (s || '').length > n ? `${(s || '').slice(0, n)}…` : s || ''
+}
+
+// ══════════════════════════════════════════════════════════════
+// 「值得留」（v3.62.0 同日补）
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 一次问答能长出来的东西是「我搞清楚了 X 这件事」——
+ * 所以勾在**主题**上，不在单条回答上：
+ *
+ * - 一条回答脱离主题就没有上下文（哪个 AI、在什么背景下问的），
+ *   收进「待提炼」后标题会变成一句没头没尾的话；
+ * - 一个主题下往往有多个 AI / 多轮追问的答案，逐条勾会把「待提炼」灌满碎渣，
+ *   与「把散的东西收成一件」正好相反。
+ *
+ * ⚠️ 读不到作品库时整个标记不渲染（附加动作，不在这页喊「我坏了」）。
+ */
+const {
+  ready: keepReady,
+  busy: keepBusy,
+  entryOf: keepEntryOf,
+  load: loadKeeps,
+  toggle: toggleKeep,
+} = useWorkKeep('ask')
+
+function keepStateOf(row: AskTopicItem): KeepState {
+  const hit = keepEntryOf(row.id)
+  if (!hit) return 'none'
+  return hit.status === 'used' ? 'used' : 'pending'
+}
+
+async function keepTopic(row: AskTopicItem) {
+  const oneLine = (row.question || '').replace(/\s+/g, ' ').trim()
+  await toggleKeep(row.id, (row.title || oneLine).slice(0, 50), oneLine.slice(0, 300))
 }
 function formatDateTime(iso?: string | null): string {
   if (!iso) return ''
@@ -921,6 +970,8 @@ async function exportAcceptedSummary(command: string) {
 
 onMounted(() => {
   loadAll()
+  // 附加动作：读不到时整个标记不渲染，不阻断本页（异常已在 composable 里吞掉）
+  loadKeeps()
 })
 </script>
 

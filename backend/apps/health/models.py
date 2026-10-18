@@ -59,6 +59,7 @@ class WeightRecord(models.Model):
 
     class Meta:
         db_table = 'health_weight_record'
+        db_table_comment = '体重记录：每人每天一条；体重与体脂率'
         verbose_name = '体重记录'
         verbose_name_plural = '体重记录'
         ordering = ['-record_date']
@@ -120,6 +121,7 @@ class WeightGoal(models.Model):
 
     class Meta:
         db_table = 'health_weight_goal'
+        db_table_comment = '体重目标：进行中的那个目标；当前第几个月随里程碑推进回写'
         verbose_name = '体重目标'
         verbose_name_plural = '体重目标'
         indexes = [
@@ -163,6 +165,7 @@ class WeightMilestone(models.Model):
 
     class Meta:
         db_table = 'health_weight_milestone'
+        db_table_comment = '月度里程碑：某个体重目标下每月一条（月初体重 → 月目标体重）'
         verbose_name = '月度里程碑'
         verbose_name_plural = '月度里程碑'
         ordering = ['month_number']
@@ -191,6 +194,7 @@ class UserBodyInfo(models.Model):
 
     class Meta:
         db_table = 'health_user_body_info'
+        db_table_comment = '用户身体信息：身高 / 性别 / 年龄，单用户一行；BMI 靠它算'
         verbose_name = '用户身体信息'
         verbose_name_plural = '用户身体信息'
 
@@ -221,6 +225,7 @@ class MenstrualRecord(models.Model):
 
     class Meta:
         db_table = 'health_menstrual_record'
+        db_table_comment = '好朋友记录：一次记录一行；周期跨度与偏移量由前端按上一条算出'
         ordering = ['-start_date']
         verbose_name = '好朋友记录'
         verbose_name_plural = '好朋友记录'
@@ -249,6 +254,7 @@ class WeightGoalAdjustment(models.Model):
 
     class Meta:
         db_table = 'health_weight_goal_adjustment'
+        db_table_comment = '体重目标调整记录：append-only；⚠️ 本表用「斤」，体重目标表用「公斤」'
         ordering = ['-adjusted_at']
         verbose_name = '目标调整记录'
         verbose_name_plural = '目标调整记录'

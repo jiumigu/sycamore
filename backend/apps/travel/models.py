@@ -71,6 +71,7 @@ class TravelPlan(models.Model):
 
     class Meta:
         db_table = 'travel_plan'
+        db_table_comment = '旅行计划：出发前做预算、旅行中逐项打卡'
         ordering = ['-start_date']
         verbose_name = '旅行计划'
 
@@ -103,6 +104,7 @@ class TravelPlanItem(models.Model):
 
     class Meta:
         db_table = 'travel_plan_item'
+        db_table_comment = '旅行计划子项：美食 / 景点 / 交通 / 住宿，每条对应计划里的一项'
         ordering = ['item_type', 'sort_order']
         verbose_name = '旅行计划子项'
 
@@ -158,6 +160,7 @@ class TravelWish(models.Model):
 
     class Meta:
         db_table = 'travel_wish'
+        db_table_comment = '旅行心愿单：想去的地方 / 想吃的美食；「沉淀」后才写进 travel_list_info'
         ordering = ['province', 'category', 'name']
         verbose_name = '旅行心愿'
         indexes = [

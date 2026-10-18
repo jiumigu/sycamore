@@ -25,6 +25,9 @@ from ..serializers.property_serializers import (
     PropertySummarySerializer,
 )
 from ..services import property_service as svc
+# 评价徽标：真源在 treasure 侧，这里只**消费**（v3.60.32）。
+# ⚠️ 方向是 wealth → treasure 的单向只读依赖；treasure 不反向 import wealth 的 view。
+from apps.treasure.badges import attach_badges
 
 
 class PropertyCategoryViewSet(viewsets.ModelViewSet):
@@ -118,6 +121,8 @@ class PropertyItemViewSet(viewsets.ModelViewSet):
             condition=q.get('condition') or None,
             search=q.get('search') or None,
         )
+        # 徽标一次查完这一页（不是逐行查）—— 逐行查就是 N+1。
+        attach_badges(rows, 'property')
         return Response(PropertyItemSerializer(rows, many=True).data)
 
     def create(self, request, *args, **kwargs):
@@ -127,6 +132,7 @@ class PropertyItemViewSet(viewsets.ModelViewSet):
             row = svc.create_item(dict(serializer.validated_data))
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        attach_badges([row], 'property')
         return Response(
             PropertyItemSerializer(row).data, status=status.HTTP_201_CREATED,
         )
@@ -141,6 +147,7 @@ class PropertyItemViewSet(viewsets.ModelViewSet):
             row = svc.update_item(instance.id, dict(serializer.validated_data))
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        attach_badges([row], 'property')
         return Response(PropertyItemSerializer(row).data)
 
     def destroy(self, request, *args, **kwargs):
@@ -151,6 +158,7 @@ class PropertyItemViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         row = svc.get_item(instance.id)
+        attach_badges([row], 'property')
         return Response(PropertyItemSerializer(row).data)
 
     @action(detail=False, methods=['post'])
@@ -168,6 +176,11 @@ class PropertyItemViewSet(viewsets.ModelViewSet):
             row = svc.preview_item(dict(serializer.validated_data))
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        # ⚠️ 试算行也要过一遍徽标回流：试算的定位就是「按保存后的样子先说一遍」，
+        #    少三个键就不叫同一副样子了。`id` 为空 ⇒ 徽标必然 `None`，这是对的：
+        #    还没落库的物件不可能已经有评价（也正因如此它在 v3.60.32 漏了这一步，
+        #    直接把 `PropertyItemSerializer` 喂 dict —— 结果整个试算 500）。
+        attach_badges([row], 'property')
         return Response(PropertyItemSerializer(row).data)
 
 
