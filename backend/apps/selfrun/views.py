@@ -18,7 +18,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import services
+from . import readers, services
 from .constants import (
     DIRECTION_CHOICES, MONTHLY_QUESTION_COUNT, PERIOD_STATUS_CHOICES,
     PERIOD_STATUS_LABEL, PERIOD_TYPE_CHOICES, PERIOD_TYPE_PREFIX,
@@ -921,6 +921,20 @@ class StageCopyView(SelfRunBaseView):
 # ══════════════════════════════════════════════════════════════
 # 跨模块：/dashboard 第一屏小卡（**唯一的跨模块改动**）
 # ══════════════════════════════════════════════════════════════
+
+class RunwayView(SelfRunBaseView):
+    """仪表盘「跑道」卡：还能撑几个月、撑到哪天、样本够不够。🔴 不写库。
+
+    与 KPI 白名单 `redemption.runway` **同一个函数**（`readers.runway_reading()`）——
+    同一件事两份实现，两张屏上的数迟早分叉，而分叉是静默的。
+
+    🔴 算不出来时 `months=None` + `issue.code`，**不是 0**：
+       `0` 是「余额确实归零」，与「还没有速度可外推」结论相反。
+    """
+
+    def get(self, request):
+        return Response({**readers.runway_reading(), 'written': {}})
+
 
 class OverviewView(SelfRunBaseView):
     """仪表盘小卡：当前状态 + 心跳。🔴 不写库。"""

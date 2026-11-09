@@ -1,6 +1,6 @@
 # Inbox — 收件箱
 
-> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+> 文档对齐 v3.64.40 ｜ 最后核对 2026-11-09
 
 ## Models
 | Model | Table | 用途 |
@@ -11,10 +11,14 @@
 ## Services
 - `ConverterService`：统一转换入口，支持转为 Goal / Milestone / Sugar(EnergyTemplate) / Complete / Archive
 - `InboxImportService`：批量导入（parse_csv / parse_markdown_tasks / parse_plain_text + import_items），导入项 `source='import'`
-  - CSV 列名双兼容：`content`/`title`、`due_date`/`target_date` 及中文别名（内容/事项、类别/阶段、截止日期、状态、优先级、备注/描述）
-  - 备考导入映射：类别固定为 `study`（学习）；原 category/阶段 列作为备考阶段 → 标签 `tags`（`备考,基础期`）+ 备注 `[阶段: 基础期]`
+  - 三个解析器签名统一：返回 `{'items': [...], 'skipped': [{row, content, reason}]}`（v3.64.39）
+  - CSV 列名双兼容：`content`/`title`、`due_date`/`target_date`、`tags`/`标签`、`阶段`/`stage` 及中文别名（内容/事项、类别/分类、截止日期、状态、优先级、备注/描述）
+  - **类别读行内 `category`**（code 或中文标签都认），不再写死 `study`；空值落 `other`（v3.64.39）
+  - **旧模板兼容**：`category` 列的值既不是 code 也不是类别标签（如「基础期」）⇒ 视作阶段名进 `tags`，类别落 `other`
+  - `阶段`/`stage` 列 → `tags` + 备注 `[阶段: 基础期]`
   - 优先级显式且非「中」→ 备注 `[优先级: 高/低]`（同时写入 priority 字段）；中优先级只写字段不写备注
-  - 日期多格式解析：`2026-08-25` / `2026/8/25` / `2026年8月25日` / `2026.8.25` / `20260825`，失败回退 dateutil 模糊解析
+  - 日期多格式解析：`2026-08-25` / `2026/8/25` / `2026年8月25日` / `2026.8.25` / `20260825`，失败回退 dateutil 模糊解析；**解析失败进 `skipped`，不再静默存 `None`**
+  - 缺标题列的行进 `skipped`（带物理行号），不再 `continue` 吃掉
   - 状态归一化：已完成/完成/已办/done → done，其余中文标签 → 对应 code
 - 标记完成时可联动创建小确幸记录和快乐银行奖励（前端处理，非 `ConverterService` 职责）
 
@@ -29,7 +33,7 @@
 | POST | /items/&lt;id&gt;/complete/ | 标记完成（可选 completion_note 备注）。前端联动：可同时创建小确幸记录 (`POST /sugar/records/`) 和奖励流水 (`POST /reward/transactions/` with `source_type=inbox_complete`) |
 | POST | /items/&lt;id&gt;/convert/ | 转为其他模块（action=convert_to_goal/convert_to_milestone/convert_to_sugar，milestone 需传 goal_id/milestone_name/target_date） |
 | POST | /items/batch/ | 批量操作（complete/archive/delete/convert） |
-| POST | /items/import/ | 批量导入（multipart 文件上传，按扩展名 .csv/.md/纯文本 自动识别解析，返回 success/created/failed/total/success_count/failed_count） |
+| POST | /items/import/ | 批量导入（multipart 文件上传，按扩展名 .csv/.md/纯文本 自动识别解析。返回 success/created/failed/total/success_count/failed_count；**`failed[]` 每项带 `row` 行号 + `reason`（解析跳过）或 `error`（入库失败）**，两种失败合成一条链，前端只读 `failed`） |
 | POST | /items/convert_to_goal/ | 批量转为目标（创建 Goal + 多条 Milestone） |
 | GET | /items/today_pending/ | 今日待处理（pending，按优先级排序） |
 | GET | /items/stats/ | 统计（总数/待处理/犹豫中/已完成/已处理/已废弃/分类统计/优先级统计） |

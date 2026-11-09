@@ -58,10 +58,19 @@ export interface BatchActionPayload {
   target_id?: number
 }
 
+/** 导入失败/跳过的一行。`reason` 来自解析阶段，`error` 来自入库阶段 —— 二者只有其一 */
+export interface ImportFailure {
+  /** 文件里的物理行号（表头算第 1 行）；入库阶段失败也可能为 null */
+  row: number | null
+  content: string
+  reason?: string
+  error?: string
+}
+
 export interface ImportResult {
   success: boolean
   created: Array<{ id: number; content: string }>
-  failed: Array<{ content: string; error: string }>
+  failed: ImportFailure[]
   total: number
   success_count: number
   failed_count: number

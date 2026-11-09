@@ -29,7 +29,7 @@
 |------|------|
 | `_window_bounds(start, end)` | 区间 `[start 00:00, end+1天 00:00)` 的 datetime 边界（**半开**） |
 | `compute_pool_balance(principal, start, end, injected=0)` | 现金池余额 = 本金 + 注入 − 为自己净消耗 |
-| `compute_avg_daily_self_net_detail(start, end)` | 日均的**完整读数** → 均值 + 窗口实际覆盖天数 + 窗口内真实日均（`thin` 判样本够不够） |
+| `compute_avg_daily_self_net_detail(start, end)` | 日均的**完整读数** → 均值（分母 = `min(实际天数, 30)`）+ 窗口实际覆盖天数 + `thin`（样本够不够 30 天） |
 | `compute_avg_daily_self_net(start, end)` | 近 30 日日均净支出（锚点 `min(今天, 终点)`）；只是上一个的均值那一项，**别在这上面再除一次** |
 | `compute_support_until(balance, avg_daily, anchor)` | 能撑到哪天 → `(日期\|None, zero_reason\|None)` |
 | `compute_tier_stats(start, end)` | 各档笔数（`Count`，**不是** `Sum('id')`）与发生额 |
@@ -44,15 +44,16 @@
 🔴 **计算函数一律吃显式区间 `(start, end)`，不吃对象**（v3.64.17 起）。
 留一个「还能吃 period」的兼容分支 = 同一个量两个入口，半年后没人知道该用哪个。
 
-⚠️ `avg_daily` 的分母固定 30 天，**不是**区间实际天数 —— 阶段刚开 3 天也除 30。
-这是既有口径、刻意没动（改它会让「撑到哪天」整体放大 10 倍以上）。
-已知局限：短窗口的日均偏低 ⇒ `support_until` 偏乐观。
+🔴 **`avg_daily` 的分母 = `min(区间实际天数, 30)`**（v3.64.39 定口径，用户认可）。
+满 30 天后与旧口径**一字不差**；阶段头 29 天不再被摊薄。
+旧口径固定除 30，实测阶段第 9 天 ¥2,006 / 30 = 66.88，而真实速度是 222.93 ——
+「撑到哪天」因此从 2028-01 被读成 2030-11，**差 3.3 倍且页面上看不出来**。
 
-🔴 **短样本必须自曝，不能靠读者猜**（v3.64.24）：`compute_avg_daily_self_net_detail()`
-把 `sample_days` 与 `net_per_day`（该窗口内的真实日均）一起交出去。
-实测：阶段第 5 天 ¥1,142.52，`avg_daily` = 38.08（÷30）、`net_per_day` = 228.50（÷5），**差 6 倍**。
-不给样本天数时，读者只会看到「每天花 38」这个被稀释的数，而 `support_until` 因此偏乐观
-（38 撑到 2033-12-14，228.5 撑到 2028-01，阶段终点是 2029-09-30）。
+🔴 **短样本仍要自曝**：`compute_avg_daily_self_net_detail()` 把 `sample_days` 与 `thin`
+一起交出去。分母改成实际天数之后，`thin` 的含义从「这个数被稀释了」变成
+「样本不足 30 天，速度可能还没经历月末大额，外推仍可能偏乐观」。
+⚠️ 不要恢复 `net_per_day` 这个键 —— 分母改成实际天数后它与 `avg_daily` 恒等，
+两个名字同一把尺子，半年后必然有人以为它们是两件事。
 
 🔴 **`covered_hours` = `hours` 六格（已四舍五入到两位）之和**，不是原始和的取整（v3.64.19）。
 屏幕上那六个格子是会被加起来的；总数若按原始值取整，两者会差 0.0x

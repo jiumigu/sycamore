@@ -190,21 +190,22 @@ def test_pool_balance_and_daily_allowance():
 
 
 def test_daily_use_rate_is_avg_over_allowance():
-    """预算占用 = 日均 ÷ 允许日均。样本不够时 `avg_daily` 被稀释，
-    但那正是要摆出来让人看见的东西（同屏还有样本天数）。"""
+    """预算占用 = 日均 ÷ 允许日均。日均分母是**实际天数**（v3.64.39 起），
+    阶段第 10 天就除 10，不再摊到 30。"""
     _bill(1, 800)
     ledger = stage_ledger(_long_stage(days=10, principal=96000, end_days=20))
     money = ledger['money']
-    # 800 摊到 30 天窗口 ⇒ 日均 26.67
-    assert money['pool']['avg_daily'] == round(800 / 30, 2)
+    # 800 ÷ 实际 10 天 ⇒ 日均 80（旧口径摊 30 天会读成 26.67）
+    assert money['pool']['avg_daily'] == round(800 / 10, 2)
     assert money['daily_use_rate'] == round(money['pool']['avg_daily'] / money['daily_allowance'], 4)
 
 
 def test_avg_daily_carries_sample_days():
-    """日均必须带样本天数：阶段只走了 10 天，30 天窗口里 20 天没有「为自己」的账。
+    """日均必须带样本天数：阶段只走了 10 天，`thin` 要说「样本不足 30 天」。
 
-    🔴 不标样本时，¥800 摊 30 天读成「每天 ¥26.67」，而这 10 天实际 ¥80/天 ——
-       差 3 倍且页面上完全看不出来（`support_until` 因此偏乐观）。
+    🔴 分母已改成实际天数 ⇒ 数值不再被稀释，`thin` 的含义也随之变了：
+       从「这个数偏低、要另算一个真实速度」变成「样本短，速度可能还没经历月末大额」。
+       但样本天数**仍要摆出来**，否则读者不知道 80 这个数是 10 天跑出来的。
     """
     _bill(1, 800)
     ledger = stage_ledger(_long_stage(days=10, principal=96000, end_days=20))
@@ -212,9 +213,9 @@ def test_avg_daily_carries_sample_days():
 
     assert money['avg_daily_sample_days'] == 10
     assert money['avg_daily_sample_thin'] is True
-    assert money['avg_daily_sample_net_per_day'] == round(800 / 10, 2)
-    # 均值小、真实速度大 —— 两个数都在，页面才有得解释
-    assert money['avg_daily_sample_net_per_day'] > money['pool']['avg_daily']
+    # 只有一个日均，没有第二把尺子
+    assert money['pool']['avg_daily'] == round(800 / 10, 2)
+    assert 'avg_daily_sample_net_per_day' not in money
 
 
 def test_no_principal_means_no_allowance_with_reason():
@@ -484,7 +485,8 @@ def test_runway_reader_returns_months():
     assert out['count'] == 1
     # 溯源行：构成放进 facts，但不许靠「相加」凑出 value（那是除法，不是求和）
     facts = out['breakdown'][0]['extra']['facts']
-    assert [f['label'] for f in facts] == ['现金池余额', '日均净支出']
+    assert [f['label'] for f in facts] == ['现金池余额', '日均净支出', '日均样本天数']
+    assert facts[2]['value'] == 30      # 满 30 天样本 ⇒ 与旧口径数值一致
     assert out['breakdown'][0]['value'] == out['value']
 
 
@@ -507,4 +509,68 @@ def test_runway_reader_without_long_stage():
     out = module_value(_FakeMetric(), timezone.localdate(), timezone.localdate())
     assert out['value'] is None
     assert out['issues'][0]['code'] == 'no_long_stage'
+    assert SelfRunStage.objects.count() == 0
+
+
+# ── 跑道卡端点（v3.64.41）：仪表盘与 KPI 必须是同一把尺子 ─────
+def test_runway_endpoint_matches_kpi():
+    """`/runway/` 与 KPI `redemption.runway` 的数字**必须完全相等**。
+
+    🔴 这是这条端点存在的全部意义：两张屏读同一个函数。任何一处另算一遍，
+       都会出现「仪表盘 14.7、KPI 15.2」这种两个都看着合理的分叉 ——
+       而分叉是静默的，没有任何报错会提示你。
+    """
+    _long_stage(days=30, principal=100000)
+    _bill(1, 900)      # 近 30 日净支出 900 ⇒ 日均 30
+
+    today = timezone.localdate()
+    data = APIClient().get(f'{URL}/runway/').json()
+    kpi = module_value(_FakeMetric(), today - dt.timedelta(days=7), today)
+
+    assert data['months'] == kpi['value'] == round((100000 - 900) / 30 / 30, 2)
+    assert data['sample_days'] == 30
+    assert data['thin'] is False
+    # 前端只查表、不猜键名 ⇒ 这批键缺一个就是「永远不显示」
+    for key in ('months', 'support_until', 'covers_stage', 'sample_days', 'thin',
+                'pool_balance', 'avg_daily', 'stage', 'issue', 'freshness_at'):
+        assert key in data
+
+
+def test_runway_endpoint_short_sample_says_shortfall():
+    """阶段第 3 天：日均按 **3 天**算（不摊到 30 天），且「撑不到终点」要说出来。
+
+    🔴 `covers_stage` 由后端判 —— 前端拿两个日期自己比是第二份口径，
+       且 `USE_TZ` 下 `new Date()` 必然差 8 小时（错得合法、看不出来）。
+    """
+    _long_stage(days=3, principal=100000, end_days=1000)
+    _bill(1, 900)      # 3 天 900 ⇒ 日均 300；余额 99100 ⇒ 约 330 天
+
+    data = APIClient().get(f'{URL}/runway/').json()
+    assert data['sample_days'] == 3
+    assert data['thin'] is True
+    assert data['avg_daily'] == 300.0
+    assert data['covers_stage'] is False
+
+
+def test_runway_covers_stage_none_without_end():
+    """阶段没设终点 ⇒ `covers_stage=None`，**不是 `True`**。
+
+    「没设终点」是没法回答，印成「撑得到」等于把「不知道」说成一个好消息。
+    """
+    stage = _long_stage(days=3, principal=100000)
+    stage.end_date = None
+    stage.save(update_fields=['end_date'])
+    _bill(1, 900)
+
+    data = APIClient().get(f'{URL}/runway/').json()
+    assert data['months'] is not None
+    assert data['covers_stage'] is None
+
+
+def test_runway_endpoint_without_long_stage():
+    """没有长阶段 ⇒ `no_long_stage` + `months=None`，且**不许**顺手建一行。"""
+    data = APIClient().get(f'{URL}/runway/').json()
+    assert data['issue']['code'] == 'no_long_stage'
+    assert data['months'] is None
+    assert data['stage'] is None
     assert SelfRunStage.objects.count() == 0

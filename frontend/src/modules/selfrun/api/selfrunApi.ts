@@ -15,7 +15,7 @@ import type {
   CurrentPeriodResponse, KpiTemplate, OverviewResponse, PeriodOption, PeriodType,
   PeriodExtras, PlanScope, PreviewResult, SelfRunCheckin, SelfRunMetric, SelfRunMetricLog,
   SelfRunMetricPlan, SelfRunPeriod, SelfRunStage, StageLedger, StageSummary, TargetsResponse,
-  TemplateEnum, Written,
+  TemplateEnum, Written, RunwayReading,
 } from '../types/selfrunTypes'
 
 // ══════════════════════════════════════════════════════════════
@@ -346,6 +346,15 @@ export function patchLedgerConfig(id: number, data: { pool_principal: number }) 
 
 export function getSelfRunOverview() {
   return request<OverviewResponse>({ url: '/selfrun/overview/', method: 'get' })
+}
+
+/** 跑道读数（仪表盘首屏第一张卡）。
+ *
+ * 与 KPI `redemption.runway` **同一个后端函数** —— 别在这里算「撑到哪个月」，
+ * 后端已经给了 `support_until`；前端只做显示。
+ */
+export function getRunway() {
+  return request<RunwayReading>({ url: '/selfrun/runway/', method: 'get' })
 }
 
 // ══════════════════════════════════════════════════════════════

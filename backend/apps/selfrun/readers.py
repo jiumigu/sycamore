@@ -437,60 +437,18 @@ def module_value(metric, start: dt.date, end: dt.date):
             freshness_at=fresh,
         )
 
-    # redemption.runway：现金池余额 ÷ 近 30 日日均净支出 ÷ 30 = **可支撑月数**
-    # 🔴 2026-11-02 起真算。此前这里写死 `value=None`，理由是「月结表『结余』
-    #    自 2026-06 起没填」—— 但赎回池的余额并不依赖那张表：它由
-    #    本金 + 注入 − 为自己净支出 直接算得出，速度由账单流水滚动 30 天给。
-    #    ⇒ 一个「算不出来的白名单项」挂了大半年，而它其实一直算得出来。
-    # 🔴 v3.64.20 起数据源从 `redemption_period` 换成**长阶段**：赎回期已是本模块
-    #    下的一个阶段，本金在 `ledger_config['pool_principal']`，窗口就是阶段起止。
-    #    白名单键名**保留** `redemption.runway`（它已经写进用户配好的 KPI 定义里，
-    #    改键名会让存量 KPI 静默失效 —— 那正是本模块最怕的长相）。
-    from apps.redemption import services as rs
-    from .services import get_open_long_stage
-
-    # 🔴 只读路径不许 `get_or_create`（铁律：GET 不写库）⇒ 取「正在跑的那个长阶段」，
-    #    没有就老实说「还没设」，不要顺手建一行。
-    stage = get_open_long_stage()
-    latest_bill = WealthBillList.objects.aggregate(d=Max('date'))['d']
-    fresh = _aware(latest_bill.date()) if latest_bill else None
-    if stage is None:
+    # redemption.runway：可支撑月数 —— 口径、余额、日均、样本天数全部由
+    # `runway_reading()` 给（**唯一实现**），这里只把它翻译成 KPI 的 reading 形状。
+    # 🔴 不许在这里再算一遍：仪表盘的跑道卡读的是同一个函数，两份实现必然在
+    #    某个边界上分叉（分母、anchor、排除注入的方式），而分叉是静默的。
+    rw = runway_reading()
+    if rw['issue'] is not None:
+        # 🔴 取不到时 `value=None` 而不是 0：没有速度可外推 ≠「只能再撑 0 个月」。
         return _empty(
-            value=None, count=0,
-            issues=[{'code': 'no_long_stage', 'hint': '还没有进行中的长阶段（阶段账本想算余额，得先有一个带本金的长阶段）'}],
-            freshness_at=fresh,
+            value=None, count=0, issues=[rw['issue']], freshness_at=rw['freshness_at'],
         )
 
-    principal = float((stage.ledger_config or {}).get('pool_principal') or 0)
-    end = stage.end_date or timezone.localdate()
-    injected, inject_ids = pool_inject_totals(stage.start_date, end)
-    pool = rs.compute_pool_balance(
-        principal, stage.start_date, end, injected, exclude_bill_ids=inject_ids,
-    )
-    avg_daily = rs.compute_avg_daily_self_net(stage.start_date, end)
-    if avg_daily < 0:
-        # 🔴 `0` 与负数不是一件事（v3.64.26）：净流入时不存在「撑到哪个月」，
-        #    更不叫「没有为自己 的账」—— 同一屏的档位分布里可能明明有十几笔。
-        return _empty(
-            value=None, count=0,
-            issues=[{
-                'code': 'net_inflow',
-                'hint': '近 30 天是净流入（进来的比花的多），不存在「撑多久」这回事',
-            }],
-            freshness_at=fresh,
-        )
-    if avg_daily == 0:
-        # 🔴 `None` 而不是 0：没有速度可外推 ≠「只能再撑 0 个月」，两者结论相反
-        return _empty(
-            value=None, count=0,
-            issues=[{
-                'code': 'no_self_expense',
-                'hint': '窗口内还没有「为自己」的账，日均净支出为 0，撑多久外推不出来',
-            }],
-            freshness_at=fresh,
-        )
-
-    months = round(pool['balance'] / avg_daily / 30, 2)
+    months = rw['months']
     return _empty(
         value=months,
         # 派生标量没有「源记录」，用 1 表示「一条读数」——
@@ -501,12 +459,122 @@ def module_value(metric, start: dt.date, end: dt.date):
             'label': '现金池 ÷ 日均净支出 ÷ 30',
             'value': months, 'count': 1, 'l2': None,
             'extra': {'note': '', 'facts': [
-                {'label': '现金池余额', 'value': pool['balance'], 'kind': 'amount'},
-                {'label': '日均净支出', 'value': avg_daily, 'kind': 'amount'},
+                {'label': '现金池余额', 'value': rw['pool_balance'], 'kind': 'amount'},
+                {'label': '日均净支出', 'value': rw['avg_daily'], 'kind': 'amount'},
+                # 样本不足 30 天时速度可能还没经历月末大额 ⇒ 天数必须同屏，
+                # 否则「约 N 个月」读数的人不知道它是几天跑出来的。
+                {'label': '日均样本天数', 'value': rw['sample_days'], 'kind': 'count'},
             ]},
         }],
-        freshness_at=fresh,
+        freshness_at=rw['freshness_at'],
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# ⑥ 跑道读数（仪表盘卡 + KPI 白名单共用）
+# ══════════════════════════════════════════════════════════════
+
+def runway_reading():
+    """现金池跑道：**算得出、撑到哪天、样本够不够** —— 三件事一起给。
+
+    🔴 **唯一实现**。调用方两个：KPI 白名单 `redemption.runway`（`module_value`）
+       与仪表盘「跑道」卡（`/selfrun/runway/`）。两个数只要有一处不同，
+       用户就会在两张屏上读到两个结论，而两边各自都看着合理。
+
+    口径与阶段账本（`services.stage_ledger`）**逐字一致**：
+      - 窗口 = `[stage.start_date, stage.end_date or today]`
+      - 余额 = 本金 + 注入 − 「为自己」净支出（注入账单同时从净消耗里排除，防双算）
+      - 日均 = 净支出 ÷ `min(已走天数, 30)`（v3.64.39 起，不再固定 ÷30）
+      - 「撑到哪天」的锚点 = `min(今天, 阶段终点)`
+
+    返回**永远是同一批键**（缺的写 `None`/`False`），前端只查 `issue.code` 表：
+      months / support_until / covers_stage / sample_days / thin /
+      pool_balance / avg_daily / stage / issue / freshness_at
+
+    🔴 `covers_stage` = 「按当前速度能不能撑到阶段终点」—— 由后端判，
+       不让前端拿两个日期自己比（那是第二份口径，且 `USE_TZ` 下必然差 8 小时）。
+       它才是「10 万过 3 年」这个问题的**直接答案**；`months` 只是它的过程量。
+
+    🔴 `issue` 有三个码：`no_long_stage`（没设阶段）、`net_inflow`（净流入，
+       不存在耗尽日）、`no_self_expense`（还没有「为自己」的账，外推不出来）。
+       三者都不是 0 —— 0 是「确实一条都没有」，与「算不出来」结论相反。
+    """
+    from apps.redemption import services as rs
+    from .services import get_open_long_stage
+
+    latest_bill = WealthBillList.objects.aggregate(d=Max('date'))['d']
+    fresh = _aware(latest_bill.date()) if latest_bill else None
+    out = {
+        'months': None, 'support_until': None, 'covers_stage': None,
+        'sample_days': 0, 'thin': False,
+        'pool_balance': None, 'avg_daily': None,
+        'stage': None, 'issue': None, 'freshness_at': fresh,
+    }
+
+    # 🔴 只读路径不许 `get_or_create`（铁律：GET 不写库）⇒ 取「正在跑的那个长阶段」，
+    #    没有就老实说「还没设」，不要顺手建一行。
+    stage = get_open_long_stage()
+    if stage is None:
+        out['issue'] = {
+            'code': 'no_long_stage',
+            'hint': '还没有进行中的长阶段（阶段账本想算余额，得先有一个带本金的长阶段）',
+        }
+        return out
+
+    out['stage'] = {
+        'id': stage.id,
+        'name': stage.name,
+        'start_date': stage.start_date.isoformat() if stage.start_date else None,
+        'end_date': stage.end_date.isoformat() if stage.end_date else None,
+    }
+
+    principal = float((stage.ledger_config or {}).get('pool_principal') or 0)
+    end = stage.end_date or timezone.localdate()
+    if end < stage.start_date:
+        end = stage.start_date      # 脏数据（终点早于起点）不能让区间反向
+    today = min(timezone.localdate(), end)
+
+    injected, inject_ids = pool_inject_totals(stage.start_date, end)
+    pool = rs.compute_pool_balance(
+        principal, stage.start_date, end, injected, exclude_bill_ids=inject_ids,
+    )
+    avg = rs.compute_avg_daily_self_net_detail(stage.start_date, end)
+    avg_daily = avg['avg_daily']
+
+    out.update({
+        'pool_balance': pool['balance'],
+        'avg_daily': avg_daily,
+        'sample_days': avg['sample_days'],
+        'thin': avg['thin'],
+    })
+
+    if avg_daily < 0:
+        # 🔴 `0` 与负数不是一件事（v3.64.26）：净流入时不存在「撑到哪个月」，
+        #    更不叫「没有为自己 的账」—— 同一屏的档位分布里可能明明有十几笔。
+        out['issue'] = {
+            'code': 'net_inflow',
+            'hint': '本阶段窗口内是净流入（进来的比花的多），不存在「撑多久」这回事',
+        }
+        return out
+    if avg_daily == 0:
+        out['issue'] = {
+            'code': 'no_self_expense',
+            'hint': '窗口内还没有「为自己」的账，日均净支出为 0，撑多久外推不出来',
+        }
+        return out
+
+    out['months'] = round(pool['balance'] / avg_daily / 30, 2)
+    until, _reason = rs.compute_support_until(pool['balance'], avg_daily, today)
+    out['support_until'] = until
+    # 「能不能撑到阶段终点」= 这 10 万块能不能过完这三年，比月数更直接。
+    # ISO 日期串可直接比较（`YYYY-MM-DD` 字典序 = 时间序），不必再转 date。
+    # ⚠️ 没设终点（`end_date=None`）⇒ `None`，不是 `True`：「没设终点」是没法回答，
+    #    印成「撑得到」会把「不知道」说成一个好消息。
+    out['covers_stage'] = (
+        until >= stage.end_date.isoformat()
+        if (until and stage.end_date) else None
+    )
+    return out
 
 
 # ══════════════════════════════════════════════════════════════

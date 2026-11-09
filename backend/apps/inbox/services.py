@@ -186,30 +186,68 @@ class InboxImportService:
             return None
 
     @staticmethod
-    def parse_csv(content: str) -> list:
-        """解析 CSV 内容（类别统一为「学习」，阶段信息存入标签与备注）
+    def _resolve_category(raw):
+        """`category` 列 → `(类别 code, 阶段名)`。
 
-        备考导入设计：
-        - 类别固定为 `study`（学习），不沿用原 category 列
-        - category/阶段 列作为备考阶段 → 标签 tags（`备考,基础期`）+ 备注 `[阶段: 基础期]`
-        - 优先级显式且非「中」→ 备注 `[优先级: 高]`（同时写入 priority 字段）
-        - 截止日期多格式解析，状态归一化
+        🔴 旧模板把**备考阶段**（基础期/强化期）写在 category 列，真正类别被写死成
+           `study`（2026-11-09 修）。一条规则分流，不猜：
+           值命中 `CATEGORY_CHOICES` 的 code 或中文标签 ⇒ 当类别；
+           不命中 ⇒ 当阶段名（进 tags），类别落 `other`。
+        🔴 空值 ⇒ `other`，不是 `study` —— 默认值不该替用户选一个他从没用过的类别。
+        """
+        value = (raw or '').strip()
+        if not value:
+            return 'other', ''
+        for code, label in InboxItem.CATEGORY_CHOICES:
+            if value in (code, label):
+                return code, ''
+        return 'other', value
+
+    @staticmethod
+    def parse_csv(content: str) -> dict:
+        """解析 CSV → `{'items': [...], 'skipped': [{row, content, reason}]}`
+
+        🔴 三处硬编码已拆（2026-11-09）：
+           1. 类别不再写死 `study`，读行内 `category` / `类别` / `分类`，见 `_resolve_category`；
+           2. tags 不再无条件前缀「备考」，读行内 `tags` / `标签`；旧模板的 category 列
+              （阶段名）由 `_resolve_category` 归入 tags；
+           3. 缺标题、日期解析不了的行**不再 `continue` 静默吃掉** ⇒ 进 `skipped` 带行号。
+              「成功 3 失败 2」说不出是哪两行，等于没报。
+        `row` 是文件里的物理行号（`DictReader.line_num`，表头算第 1 行）。
 
         Returns:
-            [{content, category, tags, due_date, status, priority, description}]
+            {'items': [{content, category, tags, due_date, status, priority, description, _row}],
+             'skipped': [{row, content, reason}]}
         """
         reader = csv.DictReader(StringIO(content))
-        items = []
+        items, skipped = [], []
         for row in reader:
+            row_no = reader.line_num
             title = InboxImportService._first_value(row, ('content', 'title', '内容', '事项'))
             if not title:
+                skipped.append({
+                    'row': row_no, 'content': '',
+                    'reason': '缺少标题列（content / title / 内容 / 事项）',
+                })
                 continue
 
-            stage = InboxImportService._first_value(row, ('category', '阶段', '类别'))
+            category, legacy_stage = InboxImportService._resolve_category(
+                InboxImportService._first_value(row, ('category', '类别', '分类'))
+            )
+            stage = InboxImportService._first_value(row, ('阶段', 'stage'))
             date_str = InboxImportService._first_value(row, ('due_date', 'target_date', '截止日期', '日期'))
             status_raw = InboxImportService._first_value(row, ('status', '状态'))
             priority_raw = InboxImportService._first_value(row, ('priority', '优先级'))
             description = InboxImportService._first_value(row, ('description', 'note', '备注', '描述'))
+            tags_raw = InboxImportService._first_value(row, ('tags', '标签'))
+
+            due_date = InboxImportService._parse_date(date_str) if date_str else None
+            if date_str and due_date is None:
+                skipped.append({
+                    'row': row_no, 'content': title[:60],
+                    'reason': f'截止日期无法解析：{date_str}',
+                })
+                continue
 
             status = (
                 'done' if status_raw in ('已完成', '完成', '已办', 'done')
@@ -226,25 +264,27 @@ class InboxImportService:
                 note_parts.append(description)
             note = ' '.join(note_parts)
 
-            tags_parts = ['备考']
-            if stage:
-                tags_parts.append(stage)
-            tags = ','.join(tags_parts)
+            tags = ','.join(t for t in (tags_raw, stage, legacy_stage) if t)
 
             items.append({
                 'content': title,
-                'category': 'study',
+                'category': category,
                 'tags': tags,
-                'due_date': InboxImportService._parse_date(date_str) if date_str else None,
+                'due_date': due_date,
                 'status': status,
                 'priority': priority,
                 'description': note,
+                '_row': row_no,
             })
-        return items
+        return {'items': items, 'skipped': skipped}
 
     @staticmethod
-    def parse_markdown_tasks(content: str) -> list:
-        """解析 Markdown 任务列表（- [ ] / - [x]），行尾 (YYYY-MM-DD) 识别为截止日期"""
+    def parse_markdown_tasks(content: str) -> dict:
+        """解析 Markdown 任务列表（- [ ] / - [x]），行尾 (YYYY-MM-DD) 识别为截止日期。
+
+        返回结构与 `parse_csv` 一致（`{'items', 'skipped'}`）—— 三种解析器签名统一，
+        视图层不必按格式分支取数。
+        """
         items = []
         for line in content.split('\n'):
             match = re.match(r'^\s*-\s*\[([ xX])\]\s*(.+)$', line)
@@ -266,11 +306,11 @@ class InboxImportService:
                 'priority': 'medium',
                 'description': '',
             })
-        return items
+        return {'items': items, 'skipped': []}
 
     @staticmethod
-    def parse_plain_text(content: str) -> list:
-        """解析纯文本：每行一个任务，跳过标题/分隔线"""
+    def parse_plain_text(content: str) -> dict:
+        """解析纯文本：每行一个任务，跳过标题/分隔线。返回结构同 `parse_csv`。"""
         items = []
         for line in content.split('\n'):
             line = line.strip()
@@ -307,7 +347,7 @@ class InboxImportService:
                     user_id=user_id,
                     content=item_data['content'][:500],
                     description=item_data.get('description', ''),
-                    category=item_data.get('category', 'study'),
+                    category=item_data.get('category', 'other'),
                     tags=item_data.get('tags', '') or None,
                     due_date=item_data.get('due_date'),
                     status=item_data.get('status', 'pending'),
@@ -316,7 +356,9 @@ class InboxImportService:
                 )
                 created.append({'id': inbox_item.id, 'content': inbox_item.content})
             except Exception as e:
+                # 行号一路带到前端：只说「失败 2 条」用户无法定位（2026-11-09）
                 failed.append({
+                    'row': item_data.get('_row'),
                     'content': item_data.get('content', '未知'),
                     'error': str(e),
                 })

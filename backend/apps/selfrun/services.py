@@ -2396,10 +2396,9 @@ def stage_ledger(stage):
             'daily_allowance_zero_reason': allowance_reason,
             'daily_use_rate': daily_use_rate,
             'daily_use_rate_zero_reason': rate_reason,
-            # 日均的样本可信度：阶段刚开时 30 天窗口里大半没有「为自己」的账，
-            # 均值被稀释 ⇒ 三个键必须一起摆出来，页面才说得清「¥38 是摊出来的」。
+            # 日均的样本可信度：分母已是 `min(实际天数, 30)`，数值不再被稀释；
+            # 但样本不足 30 天时速度可能还没经历月末大额 ⇒ 样本天数必须一起摆出来。
             'avg_daily_sample_days': avg['sample_days'],
-            'avg_daily_sample_net_per_day': avg['net_per_day'],
             'avg_daily_sample_thin': avg['thin'],
         },
         'works': _stage_works(start, end),

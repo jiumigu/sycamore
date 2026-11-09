@@ -409,22 +409,21 @@ function pct(v: number | null | undefined, digits = 1): string {
   return `${(v * 100).toFixed(digits)}%`
 }
 
-/** 日均那行的口径说明：「30 天窗口」在阶段刚开时会把真实速度稀释掉 6 倍，
- *  所以样本量必须摆出来。判据（够不够 30 天）由后端 `avg_daily_sample_thin` 给，
- *  前端**不自己比 30** —— 否则又是第二份阈值。 */
+/** 日均那行的口径说明：分母是 `min(实际天数, 30)`，数值不再被稀释；
+ *  但样本不足 30 天时速度可能还没经历月末大额。判据（够不够 30 天）由后端
+ *  `avg_daily_sample_thin` 给，前端**不自己比 30** —— 否则又是第二份阈值。 */
 const avgDailyHint = computed(() => {
   const m = ledger.value?.money
   if (!m) return ''
   if (m.avg_daily_sample_days <= 0) {
-    return '日均按「最近 30 天」滚动 ÷ 30 —— 阶段还没开始，没有可外推的速度。'
+    return '日均按本阶段已走天数实算 —— 阶段还没开始，没有可外推的速度。'
   }
   if (!m.avg_daily_sample_thin) {
-    return '日均按「最近 30 天」滚动 ÷ 30，样本已满 30 天。'
+    return '日均按最近 30 天滚动，样本已满 30 天。'
   }
   const days = m.avg_daily_sample_days
-  const real = formatAmount(m.avg_daily_sample_net_per_day, 0)
-  return `日均按「最近 30 天」滚动 ÷ 30 —— 本阶段样本只有 ${days} 天，`
-    + `这 ${days} 天实际 ¥${real}/天，所以「撑到哪天」偏乐观。`
+  return `日均按本阶段已走的 ${days} 天实算 —— 样本不足 30 天，`
+    + '还没经历月末大额，所以「撑到哪天」仍可能偏乐观。'
 })
 
 function tagStyle(tag: string) {

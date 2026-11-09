@@ -50,4 +50,6 @@ urlpatterns = [
 
     # ── 跨模块（仪表盘小卡）──────────────────────────────────
     path('overview/', views.OverviewView.as_view(), name='selfrun-overview'),
+    # 跑道：仪表盘首屏第一张卡。与 KPI `redemption.runway` 同一取数函数。
+    path('runway/', views.RunwayView.as_view(), name='selfrun-runway'),
 ]

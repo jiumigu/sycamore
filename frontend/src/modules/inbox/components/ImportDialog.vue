@@ -4,7 +4,7 @@
       <div class="import-hint">
         <p><strong>支持格式：</strong></p>
         <ul>
-          <li><strong>CSV</strong>：content/category/due_date/status/priority 列（兼容 title/target_date/note 与中文列名）。类别统一为「学习」；category 列作为备考阶段（基础期/强化期/冲刺期）存入标签与备注</li>
+          <li><strong>CSV</strong>：content / category / due_date / status / priority / tags 列（兼容 title、target_date、note 与中文列名）。category 写类别（待办/想法/学习…），备考阶段另写「阶段」列；两列都会进标签</li>
           <li><strong>Markdown</strong>：任务列表 <code>- [ ] 任务名</code>，行尾 <code>(2026-09-01)</code> 识别为截止日期</li>
           <li><strong>纯文本</strong>：每行一个任务</li>
         </ul>
@@ -42,6 +42,21 @@
           </div>
         </div>
       </div>
+
+      <!-- 失败清单：行号 + 原因。只说「失败 2 条」用户无法定位是哪两行 -->
+      <div v-if="failedRows.length > 0" class="fail-list">
+        <div class="fail-header">
+          {{ failedRows.length }} 行未导入
+        </div>
+        <div v-for="(f, idx) in failedRows.slice(0, 20)" :key="idx" class="fail-item">
+          <span class="fail-row">第 {{ f.row ?? '—' }} 行</span>
+          <span class="fail-content">{{ f.content || '（空行）' }}</span>
+          <span class="fail-reason">{{ f.reason || f.error }}</span>
+        </div>
+        <div v-if="failedRows.length > 20" class="fail-more">
+          还有 {{ failedRows.length - 20 }} 行…
+        </div>
+      </div>
     </div>
 
     <template #footer>
@@ -63,6 +78,7 @@ import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { importInboxItems } from '../api/inboxApi'
+import type { ImportFailure } from '../types/inboxTypes'
 
 const props = defineProps<{
   modelValue: boolean
@@ -83,6 +99,8 @@ const importing = ref(false)
 const fileList = ref<Array<{ name: string; raw?: File }>>([])
 const previewItems = ref<PreviewItem[]>([])
 const uploadedFile = ref<File | null>(null)
+/** 上一次导入里没进来的行（解析跳过 + 入库失败），带行号 */
+const failedRows = ref<ImportFailure[]>([])
 
 watch(
   () => props.modelValue,
@@ -99,6 +117,7 @@ const handleClose = () => {
 const resetForm = () => {
   fileList.value = []
   previewItems.value = []
+  failedRows.value = []
   uploadedFile.value = null
 }
 
@@ -154,7 +173,7 @@ const parsePreview = async (file: File) => {
 
 const downloadTemplate = () => {
   const blob = new Blob(
-    ['content,category,due_date,status,priority,description\nDay1 软件工程基础,基础期,2026-08-25,待处理,高,精读笔记\n'],
+    ['content,category,due_date,status,priority,tags,阶段\n软件工程基础,学习,2026-08-25,待处理,高,备考,基础期\n'],
     { type: 'text/csv' },
   )
   const url = URL.createObjectURL(blob)
@@ -178,13 +197,18 @@ const confirmImport = async () => {
 
     const res = await importInboxItems(formData)
     const data = res.data
+    failedRows.value = data.failed ?? []
     if (data.success) {
       ElMessage.success(`成功导入 ${data.success_count} 项待办`)
       emit('success', data.success_count)
       visible.value = false
       resetForm()
     } else {
-      ElMessage.warning(`导入完成：成功 ${data.success_count}，失败 ${data.failed_count}`)
+      // 部分成功也要刷新列表：已经入库的那几条不能等到下次进页面才出现
+      if (data.success_count > 0) emit('success', data.success_count)
+      ElMessage.warning(
+        `成功 ${data.success_count} 项，${data.failed_count} 行未导入（明细见下方清单）`,
+      )
     }
   } catch {
     ElMessage.error('导入失败，请检查文件格式')
@@ -289,6 +313,54 @@ const confirmImport = async () => {
         font-size: 13px;
         text-align: center;
       }
+    }
+  }
+
+  .fail-list {
+    margin-top: 12px;
+    border: 1px solid var(--el-color-warning-light-5);
+    border-radius: 6px;
+    overflow: hidden;
+
+    .fail-header {
+      padding: 8px 12px;
+      background: var(--el-color-warning-light-9);
+      color: var(--el-color-warning-dark-2);
+      font-size: 13px;
+    }
+
+    .fail-item {
+      display: flex;
+      gap: 8px;
+      padding: 4px 12px;
+      font-size: 12px;
+      border-top: 1px solid var(--el-border-color-lighter);
+
+      .fail-row {
+        color: var(--el-text-color-secondary);
+        min-width: 56px;
+      }
+
+      .fail-content {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .fail-reason {
+        color: var(--el-color-danger);
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
+    .fail-more {
+      padding: 6px 12px;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
     }
   }
 }

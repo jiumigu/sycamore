@@ -1,6 +1,6 @@
 # SelfRun — 自我运转
 
-> 文档对齐 v3.64.36 ｜ 最后核对 2026-11-07
+> 文档对齐 v3.64.41 ｜ 最后核对 2026-11-09
 
 KPI 的「制定 → 执行 → 复盘 → 事后分析」全生命周期。
 周量「有没有在动」，月量「动出结果没有」—— **两把正交的尺子**，不互相折算。
@@ -86,6 +86,10 @@ KPI 的「制定 → 执行 → 复盘 → 事后分析」全生命周期。
   不再是 `redemption_period`。**键名故意不改** —— 它已经写进用户配好的 KPI 定义里，
   改键名会让存量 KPI **静默**失效（取数器命中不了白名单 = 那条 KPI 变空，不报错）。
   空态码也从 `no_period` 改成 `no_long_stage`（两个码指的不是同一件事）。
+  🔴 v3.64.41 起这段计算抽成 `readers.runway_reading()`：KPI 与仪表盘
+  `GET /runway/` **共用同一个函数**，另外多给 `covers_stage`（按当前速度能否撑到
+  阶段终点；阶段没设终点时是 `None`，不是 `True`）。两张屏读两个数时，
+  用户没有任何办法判断哪个对 —— 所以只许有一份实现。
 - 心跳只 UPDATE `last_seen_at`，**不判好坏、不改任何 KPI、不建记录**。
 - 前端 `types/selfrunTypes.ts` 是枚举的**副本**（不是接口下发），改 `constants.py` 必须同步改它，否则静默少选项。
 
@@ -121,6 +125,7 @@ KPI 的「制定 → 执行 → 复盘 → 事后分析」全生命周期。
 | | GET/PATCH | /periods/&lt;pk&gt;/ | 详情 / 补写复盘（归档后仅 review_text / answer_sheet 可写） |
 | | POST | /periods/&lt;pk&gt;/reopen/ | 重开（必须写原因） |
 | 跨模块 | GET | /overview/ | 仪表盘小卡（只读、不写库） |
+| | GET | /runway/ | 仪表盘「跑道」卡（只读、不写库；与 KPI `redemption.runway` 同一取数函数） |
 
 ## 边界
 

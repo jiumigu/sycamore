@@ -93,16 +93,16 @@ def compute_pool_balance(principal, start, end, injected=0.0, exclude_bill_ids=(
 
 
 def compute_avg_daily_self_net_detail(start, end, days=30):
-    """滚动 N 天口径的**完整读数**：`avg_daily` + 窗口实际覆盖天数 + 该窗口的真实日均。
+    """滚动 N 天口径的**完整读数**：`avg_daily` + 窗口实际覆盖天数。
 
-    ⚠️ `avg_daily` 的分母仍固定 `days`（30），与旧口径**一字未改**；本函数只是把
-       「样本够不够」一并交出去，不另算一套。
-       （2026-11-05：阶段刚开 5 天时，¥1,142 摊到 30 天读成「每天 ¥38」，
-        而这 5 天实际是 ¥229/天 —— 差 6 倍且页面上看不出来。改分母会连带改
-        「撑到哪天」，那是独立的一次口径决定；这里只**标注**样本，不偷改数。）
-    🔴 `sample_days < days` ⇒ 短样本：`avg_daily` 必然偏低、`support_until` 偏乐观。
-       调用方必须把 `net_per_day`（真实速度）和样本天数一起摆出来，否则用户会把
-       一个被稀释 6 倍的数字当真相。
+    🔴 **分母 = `min(窗口实际天数, days)`**（2026-11-09 定口径，用户认可）。
+       旧实现固定除 `days`（30）：阶段第 5 天时 ¥1,142 摊到 30 天读成「每天 ¥38」，
+       而实际是 ¥229/天 —— 差 6 倍，且「撑到哪天」凭空乐观 4 年多
+       （38 撑到 2030-11，229 撑到 2028-01）。分母不摊薄之后，
+       **满 30 天后数值与旧口径完全相同**，只有阶段头 29 天会变（变对）。
+    🔴 `sample_days < days` ⇒ `thin`：样本不足 30 天，速度可能还没经历月末大额，
+       `support_until` 仍可能偏乐观。调用方必须把 `sample_days` 摆到页面上。
+       「样本短」现在是**提示**，不再是「数被稀释」的补丁。
     🔴 锚点是 `min(今天, 终点)`：已归档的阶段按**它收尾那天**往回滚 30 天，
        不能按今天 —— 否则拿归档三个月后的账去算它当时的日均。
     """
@@ -110,7 +110,7 @@ def compute_avg_daily_self_net_detail(start, end, days=30):
 
     anchor = min(date.today(), end)
     if anchor < start:
-        return {'avg_daily': 0.0, 'sample_days': 0, 'net_per_day': 0.0, 'thin': True}
+        return {'avg_daily': 0.0, 'sample_days': 0, 'thin': True}
     lo = max(anchor - timedelta(days=days), start)
     # 窗口是半开区间 [lo 00:00, anchor+1天 00:00) ⇒ 含 anchor 当天；上限夹到 days，
     # 免得「anchor−30 天」这种取法因含两端算出 31 天、与分母 30 打架。
@@ -128,15 +128,16 @@ def compute_avg_daily_self_net_detail(start, end, days=30):
     )
     net = float(agg['net'] or 0)
     return {
-        'avg_daily': round(net / days, 2),
+        # 分母是**实际覆盖天数**，不是写死的 30 —— 见 docstring
+        'avg_daily': round(net / sample_days, 2) if sample_days else 0.0,
         'sample_days': sample_days,
-        'net_per_day': round(net / sample_days, 2) if sample_days else 0.0,
         'thin': sample_days < days,
     }
 
 
 def compute_avg_daily_self_net(start, end, days=30):
-    """滚动 N 天「为自己」净消耗均值（支出−收入）/ N，作为同步推演的 daily_budget。
+    """滚动 N 天「为自己」净消耗均值（支出−收入）/ **实际覆盖天数**（≤ N），
+    作为同步推演的 daily_budget。
 
     ⚠️ 只是 `compute_avg_daily_self_net_detail` 的均值那一项 —— 口径只此一份，
        需要样本天数 / 真实日均的调用方请直接用 `_detail`，别在这上面再除一次。

@@ -23,6 +23,12 @@
       </div>
     </div>
 
+    <!-- 跑道（v3.64.41）：整个系统里**唯一在倒计时的量**。
+         放在四张「本周」卡之上 —— 那四张回答「这周有没有在动」，
+         这一张回答「这条路还能走多久」，后者才是决定要不要调整的那个。
+         🔴 口径与 KPI `redemption.runway`、阶段账本共用同一个后端函数。 -->
+    <RunwayCard ref="runwayCardRef" />
+
     <!-- 顶部统计行 -->
     <el-row :gutter="16" class="stats-row">
       <el-col :span="6">
@@ -170,6 +176,7 @@ import { getYearlyOverview } from '@/modules/summary/api/summaryApi'
 import { getWeekCount, getWeekStats } from '@/modules/temporal/api/temporalApi'
 import { getRandomRetro } from '@/modules/summary/api/summaryApi'
 import SelfRunCard from '@/modules/selfrun/components/SelfRunCard.vue'
+import RunwayCard from '@/modules/selfrun/components/RunwayCard.vue'
 import DailyGuardCard from '@/modules/temporal/components/DailyGuardCard.vue'
 import QuoteCard from '@/modules/toolkit/components/QuoteCard.vue'
 import type { InboxItem } from '@/modules/inbox/types/inboxTypes'
@@ -215,6 +222,8 @@ const alerts = reactive<AlertItem[]>([])
 const retroItem = ref<RetroItem | null>(null)
 /** 金句卡（共享组件）—— 「刷新」时要能重取一条 */
 const quoteCardRef = ref<InstanceType<typeof QuoteCard> | null>(null)
+/** 跑道卡（v3.64.41）—— 同一条刷新链路，别让它停在旧数上 */
+const runwayCardRef = ref<InstanceType<typeof RunwayCard> | null>(null)
 
 // ─── 独立加载状态 ───
 const loadingGoals = ref(true)
@@ -326,6 +335,7 @@ async function refreshAll() {
     fetchWeekStats(),
     fetchRandomRetro(),
     quoteCardRef.value?.refresh(),
+    runwayCardRef.value?.refresh(),
   ])
 }
 

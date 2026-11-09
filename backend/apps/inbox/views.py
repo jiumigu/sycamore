@@ -249,24 +249,33 @@ class InboxViewSet(viewsets.ModelViewSet):
 
         file_name = (file.name or '').lower()
         if file_name.endswith('.csv'):
-            items = InboxImportService.parse_csv(content)
+            parsed = InboxImportService.parse_csv(content)
         elif file_name.endswith('.md'):
-            items = InboxImportService.parse_markdown_tasks(content)
+            parsed = InboxImportService.parse_markdown_tasks(content)
         else:
-            items = InboxImportService.parse_plain_text(content)
+            parsed = InboxImportService.parse_plain_text(content)
 
-        if not items:
+        items, skipped = parsed['items'], parsed['skipped']
+        if not items and not skipped:
             return Response({'success': False, 'error': '未识别到有效的待办事项'}, status=status.HTTP_400_BAD_REQUEST)
 
-        result = InboxImportService.import_items(1, items)
+        # 单人系统：未接认证时 `request.user` 是 Anonymous（无 id）⇒ 兜底 1。
+        # 接入认证后这行自动跟着走，不要再写死 1（历史硬编码，2026-11-09 修）。
+        user_id = getattr(request.user, 'id', None) or 1
+        result = InboxImportService.import_items(user_id, items)
+
+        # 解析阶段被跳过的行与入库失败的行**合成一条清单**：前端只读 `failed`，
+        # 每条都带 `row`。分成两个键必然只渲染一个（这次修的就是这个坑）。
+        failed = skipped + result['failed']
+        total = result['total'] + len(skipped)
 
         return Response({
-            'success': result['failed_count'] == 0,
+            'success': not failed,
             'created': result['created'],
-            'failed': result['failed'],
-            'total': result['total'],
+            'failed': failed,
+            'total': total,
             'success_count': result['success_count'],
-            'failed_count': result['failed_count'],
+            'failed_count': len(failed),
         })
 
     @action(detail=False, methods=['get'])

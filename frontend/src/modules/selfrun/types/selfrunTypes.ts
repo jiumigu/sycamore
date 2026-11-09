@@ -701,6 +701,36 @@ export interface OverviewResponse {
   written: Written
 }
 
+/** 跑道（`GET /selfrun/runway/`）—— 仪表盘首屏第一张卡。
+ *
+ * 🔴 与 KPI `redemption.runway` 是**同一个后端函数**（`readers.runway_reading()`）；
+ *    前端零计算：`support_until` 只截前 7 位当年月，**禁 `new Date()`**。
+ * 🔴 `months === null` ⇒ 看 `issue.code`，**不是 0**：
+ *    `0` 是「余额确实归零」，与「还没有速度可外推」结论相反。
+ * 🔴 `thin` 由后端判（`sample_days < 30`），前端不自己比 30 —— 否则是第二份阈值。
+ */
+export interface RunwayReading {
+  months: number | null
+  /** `YYYY-MM-DD`，锚点 = 今天（后端给） */
+  support_until: string | null
+  /** 按当前速度能否撑到阶段终点：`false` = 撑不到（这才是「10 万过 3 年」的答案）；
+   *  `null` = 阶段没设终点 / 算不出来 —— 不是 `true` */
+  covers_stage: boolean | null
+  sample_days: number
+  thin: boolean
+  pool_balance: number | null
+  avg_daily: number | null
+  stage: {
+    id: number; name: string
+    start_date: string | null; end_date: string | null
+  } | null
+  issue: { code: RunwayIssueCode; hint: string } | null
+  freshness_at: string | null
+  written: Written
+}
+
+export type RunwayIssueCode = 'no_long_stage' | 'net_inflow' | 'no_self_expense'
+
 // ══════════════════════════════════════════════════════════════
 // 七、阶段账本（`GET /stages/<pk>/ledger/`）
 // ══════════════════════════════════════════════════════════════
@@ -773,11 +803,9 @@ export interface LedgerMoney {
   daily_use_rate: number | null
   /** `no_allowance` = 允许值缺失或 ≤0；`net_inflow` = 日均是负的（钱在变多），比值无意义 */
   daily_use_rate_zero_reason: string | null
-  /** 日均窗口的实际覆盖天数（阶段刚开时远小于 30） */
+  /** 日均窗口的实际覆盖天数（阶段刚开时远小于 30）；分母就是它，不再摊到 30 */
   avg_daily_sample_days: number
-  /** 该窗口内的**真实**日均 —— 样本不足时它远大于被稀释的 `pool.avg_daily` */
-  avg_daily_sample_net_per_day: number
-  /** `avg_daily_sample_days < 30` ⇒ 均值偏低、「撑到哪天」偏乐观，必须在页面上说出来 */
+  /** `avg_daily_sample_days < 30` ⇒ 样本短，速度可能还没经历月末大额，必须在页面上说出来 */
   avg_daily_sample_thin: boolean
 }
 
