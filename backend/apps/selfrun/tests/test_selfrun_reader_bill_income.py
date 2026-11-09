@@ -83,8 +83,17 @@ def _monthly_row(yearmon, otherincome=0.0):
 
 
 def _month_start():
+    """取数区间的起点：本月 1 号，但**至少回看 6 天**。
+
+    🔴 原本是 `today.replace(day=1)` —— 于是**每月 1–3 号这三天的用例必红**：
+       造数用 `_bill(3, …)`（3 天前），月初时它落在**上个月**，
+       而区间从本月 1 号起 ⇒ 取不到 ⇒ `final_value` 变 0。
+       2026-11-01 跑全量时就撞上了（`assert 0 == 12.64`），
+       看着像「取数器坏了」，其实是用例自己的日期炸弹。
+       区间只负责「把造数包进去」，月结表滞后那件事仍由 `_monthly_row('2026-08')` 测到。
+    """
     today = timezone.localdate()
-    return today.replace(day=1)
+    return min(today.replace(day=1), today - dt.timedelta(days=6))
 
 
 class TestFreshnessFollowsBillTable:

@@ -37,6 +37,7 @@ class WeightService:
             'monthly_lost_kg': None,
             'monthly_lost_jin': None,
             'monthly_target_kg': None,
+            'monthly_target_jin': None,
             'monthly_progress': 0,
             'bmi': None,
             'bmi_status': None,
@@ -83,15 +84,20 @@ class WeightService:
                     result['overall_progress'] = round(min(lost / total_to_lose * 100, 100), 1)
 
             # 月度进度
+            # 🔴 「本月目标」是**输入**（目标本身），不依赖「有没有今天的记录」——
+            #    以前只在 `latest` 存在时才赋值，且漏了 `monthly_target_jin`
+            #    这个键（前端 `WeightStats` 声明了它），于是「本月目标」恒显示 `--`。
             month_start = goal.current_month_start_weight
             monthly_target = goal.monthly_target_kg
+            if monthly_target:
+                result['monthly_target_kg'] = round(float(monthly_target), 2)
+                result['monthly_target_jin'] = round(float(monthly_target) * 2, 1)
             if month_start and monthly_target and latest:
                 month_start_kg = float(month_start)
                 monthly_target_kg = float(monthly_target)
                 monthly_lost = month_start_kg - float(latest.weight_kg)
                 result['monthly_lost_kg'] = round(monthly_lost, 2)
                 result['monthly_lost_jin'] = round(monthly_lost * 2, 1)
-                result['monthly_target_kg'] = monthly_target_kg
                 if monthly_target_kg > 0:
                     result['monthly_progress'] = round(min(monthly_lost / monthly_target_kg * 100, 100), 1)
 

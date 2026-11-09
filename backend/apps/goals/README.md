@@ -1,5 +1,7 @@
 # Goals — 目标管理
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
@@ -11,10 +13,12 @@
 
 ## Services
 - `GoalProgressService`：进度重算（有子目标时取子目标平均进度，无子目标时取里程碑完成占比；递归向上冒泡同步父目标进度），进度达 100% 自动切换为已完成并发放完成奖励金（仅一次）
+  - `ledger_progress()`：**可复算的账本进度**（里程碑占比；子目标取平均）；无账本返回 `None` 而不是 0，且**不写库**。与页面进度分开，响应字段是 `progress_ledger`（`progress_source` 说明当前进度的来源）
 - `QuickGoalService`：快速创建含批量里程碑模板的目标（月度/季度/每周模板）
 - `GoalCloneService`：复制目标及其里程碑和行为
 - `MilestoneRewardService`：里程碑完成时同步奖励池；打卡自动推进里程碑（按打卡日期匹配，未命中则推进下一个未完成里程碑）
 - `calculate_streak`：从 completion_log（`{"date": true}`）计算连续打卡天数（current/longest/total）
+- `goal_checkup.build_checkup()`：PDCA 的「C」—— **只读**过程检查，回答「哪些目标名义上还在进行、实际已经不动了」；阈值只在 `constants.py`（`STALL_DAYS=30`、`BEHIND_GAP=15`、`HORIZON_YEARS=10`），前端只查 `verdict`
 
 ## API Endpoints
 
@@ -30,9 +34,11 @@
 | POST | /goals/&lt;pk&gt;/toggle_milestone/ | 切换里程碑状态 |
 | POST | /goals/&lt;pk&gt;/recalculate/ | 手动重算进度 |
 | GET | /goals/stats/ | 统计总览 |
+| GET | /goals/checkup/ | **只读**过程检查（停滞 / 落后 / 逾期；不改任何数据） |
 | GET | /goals/dimension_stats/ | 人生维度统计（按维度聚合目标数与平均进度，供雷达图） |
+| POST | /goals/&lt;pk&gt;/abandon/ | 放弃目标（理由必填；写 `status=abandoned` + `GoalReview` 留痕；里程碑不动） |
 | DELETE | /goals/bulk_delete/ | 批量删除 |
-| GET/POST | /milestones/ | 里程碑列表（?goal= 筛选）/ 创建 |
+| GET/POST | /milestones/ | 里程碑列表（?goal= 筛选）/ 创建。日历用 `?target_date_year=&target_date_month=&exclude_abandoned_goals=1` —— **已放弃目标 + 还没完成（`status != completed`）的里程碑不算待办**；已完成的留着（历史日程要能翻回去看）。该开关必须显式传，默认不过滤（目标详情页要看得见自己的全部里程碑，否则放弃后子项「凭空消失」） |
 | GET/PUT/PATCH/DELETE | /milestones/&lt;pk&gt;/ | 详情/更新/删除 |
 | GET/POST | /actions/ | 行为列表（?goal_id=&milestone_id= 筛选）/ 创建 |
 | GET/PUT/DELETE | /actions/&lt;pk&gt;/ | 详情/更新/删除 |

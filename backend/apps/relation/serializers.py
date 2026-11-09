@@ -2,6 +2,8 @@ from rest_framework import serializers
 
 from django.db import models
 
+from apps.core.fields import AmountNumberField
+
 from .constants import ENERGY_LABELS, QUALITY_COLORS, QUALITY_ICONS
 from .models import ConflictEvent, Interaction, ReaderGroup, ReaderInteraction, ReaderMonthlySummary, Relationship
 
@@ -232,6 +234,15 @@ class ReaderInteractionSerializer(serializers.ModelSerializer):
 class ConflictEventSerializer(serializers.ModelSerializer):
     """成长记录序列化器"""
     contact_name = serializers.CharField(source='contact.name', read_only=True)
+
+    # 🔴 未显式声明时 `ModelSerializer` 给 DecimalField 生成 `coerce_to_string=True`
+    #    的字段 ⇒ 接口吐 `"150.00"`（字符串）。前端「成长记录」表格里
+    #    `formatAmount(row.loss_amount, 0)` 只认 number ⇒ 一笔 150 元的损失
+    #    会显示成 `¥—`（看着像没填金额）。同页「累计损失」卡是 `Sum` 聚合后
+    #    直接进 Response，JSON 层编码成 number，所以只有表格那一列坏。
+    loss_amount = AmountNumberField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True,
+    )
 
     class Meta:
         model = ConflictEvent

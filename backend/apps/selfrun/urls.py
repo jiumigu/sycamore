@@ -14,8 +14,15 @@ urlpatterns = [
     path('stages/<int:pk>/pause/', views.StagePauseView.as_view(), name='selfrun-stage-pause'),
     path('stages/<int:pk>/resume/', views.StageResumeView.as_view(), name='selfrun-stage-resume'),
     path('stages/<int:pk>/summary/', views.StageSummaryView.as_view(), name='selfrun-stage-summary'),
+    path('stages/<int:pk>/ledger/', views.StageLedgerView.as_view(), name='selfrun-stage-ledger'),
+    path('stages/<int:pk>/ledger-config/', views.StageLedgerConfigView.as_view(),
+         name='selfrun-stage-ledger-config'),
     path('stages/<int:pk>/close/', views.StageCloseView.as_view(), name='selfrun-stage-close'),
     path('stages/<int:pk>/', views.StageDetailView.as_view(), name='selfrun-stage-detail'),
+
+    # 池注入标记（v3.64.26）= 在账单明细页给某笔收入打「中途注入」
+    # ⚠️ 字面路径，排在 `<int:pk>/` 之前不影响，但读起来不依赖隐式规则
+    path('pool-injects/', views.PoolInjectView.as_view(), name='selfrun-pool-injects'),
 
     # ── T1b 按期修订（「修订下一周 / 下一月」）────────────────
     # ⚠️ `metrics/<pk>/plans/` 必须排在 `metrics/<pk>/` **之前**（虽然前缀不同、

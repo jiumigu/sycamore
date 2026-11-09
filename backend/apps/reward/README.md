@@ -1,5 +1,7 @@
 # Reward — 奖励池
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
@@ -23,10 +25,13 @@
 | goal_complete | 目标完成 |
 
 ## 核心逻辑（services.py）
-- 奖励池是单例模式：`_get_or_create_pool()` 自动创建
-- 所有奖励变动（add/adjust/deduct）自动调用 `_check_gift_availability()`
-- `_check_gift_availability()` 扫描全部 pending/waiting 礼物，余额≥预期价则切为 waiting
-- `exchange_gift()` 校验 waiting 状态 + 余额充足，扣池后记流水
+- 奖励池是单例模式，但**四个数字全部由流水聚合派生**（v3.63.16）：`income = Sum(amount>0)`、`expense = Sum(amount<0)`、`balance = income + expense`、`withdrawn = -expense`。池表的 `total_earned` / `total_withdrawn` **不再参与展示**；只读 `get_pool()` 不 `get_or_create`。
+- 删除流水按**方向**回退：正数只减 earned、负数只减 withdrawn。旧公式 `earned - tx.amount` 会把负数流水当成加，删一笔大额兑换就虚增一万。
+- `stats/sources` 只统计 `amount>0`，四源之和必须严格等于累计获得。
+- `add/adjust/deduct` 三入口统一走 `_to_decimal()`（`Decimal(str(v))`）。
+- 金额出参用 `core.fields.AmountNumberField`（出参 number / 入参 Decimal），礼物价格两个字段显式声明、`actual_reward` 允许 `null`。
+- 所有奖励变动自动调用 `_check_gift_availability()`；`exchange_gift()` 校验 waiting + 余额充足后扣池记流水。
+- `GiftListSerializer` 用 `_pool()` 实例缓存，避免每条礼物重复聚合（21→4 条 SQL）。
 
 ## 礼物状态流
 `pending(余额不足) ↔ waiting(可兑换) → redeemed/cancelled(终态)`

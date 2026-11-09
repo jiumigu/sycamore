@@ -1,25 +1,30 @@
+import json
 import os
 import re
-import uuid
 
 from datetime import date, datetime
 
 from django.utils import timezone
 from rest_framework import filters, status, viewsets
+from rest_framework.fields import DateTimeField
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from django.db.models import Count, DateField, Max, Min, Sum
+from django.db.models import Count, DateField, Max, Min, Q, Sum
 from django.db.models.functions import Cast
 
-from .constants import ATTRIBUTION_ORDER, CONTRIB_EXCLUDED_TASK_NAMES
+from rest_framework.exceptions import ValidationError
+
+from . import timer as timer_service
+from .constants import ATTRIBUTION_ORDER, DAILY_ROLE_VALUES, SOURCE_KIND_VALUES
 from .models import OneDayPage, TaskMeta, TemporalTask, WeeklyTimeCache
 from .serializers import (
     OneDayPageSerializer,
     TaskMetaSerializer,
     TemporalTaskSerializer,
+    TimerSessionSerializer,
 )
 from .services import (
     CSVImportService,
@@ -27,6 +32,12 @@ from .services import (
     OneDayPageService,
     TemporalStatsService,
     _ensure_task_meta,
+    batches_of_kind,
+    compute_daily_guards,
+    contrib_excluded_names,
+    find_overlaps,
+    list_record_sources,
+    make_batch_id,
     resolve_attribution,
     resolve_attribution_detail,
     resolve_task_meta,
@@ -134,6 +145,29 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         if task_name:
             qs = qs.filter(task_name=task_name)
 
+        # v3.64.33 来源筛选：表里没有 kind 列（外部表加不了列），
+        # 只能把 kind 翻回批次号再筛 —— 唯一实现是 `services.batches_of_kind`。
+        source = params.get('source')
+        if source:
+            if source not in SOURCE_KIND_VALUES:
+                # 🔴 认不出的来源值**必须报错**，不能返回空列表：
+                #    空列表会被读成「这个来源一条都没有」，而真相是「这个词拼错了」。
+                raise ValidationError({'source': f'未知来源：{source}'})
+            if source == 'unlabeled':
+                # `import_batch__in=[None]` 生成 `IN (NULL)`，**永远不匹配** ——
+                # 本库里「未标注」同时有 NULL 与空串两种存法，一并算进来。
+                qs = qs.filter(Q(import_batch__isnull=True) | Q(import_batch=''))
+            else:
+                batches = [b for b in batches_of_kind(source) if b]
+                # 该来源名下确实一条都没有时，`__in=[]` 是正确的空结果（不是拼写问题）
+                qs = qs.filter(import_batch__in=batches)
+
+        # 批次级钻取（来源批次弹窗里「看这 N 条」）：与 source 是**交集**，
+        # 同时传 = 「该来源下的这一批」。空串视为未选择（前端 clearable 时会传空）。
+        batch = params.get('import_batch')
+        if batch:
+            qs = qs.filter(import_batch=batch)
+
         date_from = params.get('date_from')
         if date_from:
             # datetime 区间直接比较（规避 __date 触发 CONVERT_TZ 时区转换返回 NULL）
@@ -160,6 +194,12 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         instance = serializer.save()
+        # v3.64.33：手工新增要**自报家门**。`import_batch` 是 read_only（防前端伪造来源），
+        # 所以只能在保存后补写。不写的话手工记录会和「早期来源不明」混成同一个空值桶，
+        # 以后再想分清「这条是我敲的、还是老数据」就只能靠猜。
+        if not instance.import_batch:
+            TemporalTask.objects.filter(id=instance.id).update(import_batch='manual')
+            instance.import_batch = 'manual'
         self._ensure_meta_for(instance.task_name)
 
     def perform_update(self, serializer):
@@ -169,12 +209,25 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         if instance.task_name and instance.task_name != old_name:
             self._ensure_meta_for(instance.task_name)
 
+    @action(detail=False, methods=['get'])
+    def sources(self, request):
+        """来源总览：全库按批次 + 按来源类型汇总（「来源可见」弹窗唯一取数口）。
+
+        读的是 `import_batch` 一列（外部表没有 kind 列），分类在
+        `services.classify_source`。**只读、不写库**。
+
+        为什么单独给一个接口而不是让前端从任务列表自己数：
+        列表是分页的，数出来的「41 条未标注」只是当前页 —— 而用户要的正是全库口径。
+        """
+        return Response(list_record_sources())
+
     @action(detail=False, methods=["get"])
     def daily_detail(self, request):
         """每日明细：按日期查当日的**全部**时间任务。
 
         `?scope=contrib`（v3.60.27）：改用**贡献图口径** —— 排除不计入贡献图的睡眠类
-        任务（名单见 `constants.CONTRIB_EXCLUDED_TASK_NAMES`）。贡献图点格子弹的明细走这个。
+        任务（`services.contrib_excluded_names()`，常量名单 ∪ 角色为睡眠类的任务）。
+        贡献图点格子弹的明细走这个。
 
         ⚠️ 默认不传 = 当天全部任务，行为与从前一致。这是**故意的**：本接口语义是
         「那天我记了什么」，将来别处（任务清单等）复用时不该莫名其妙少几行 ——
@@ -194,7 +247,7 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         we = timezone.make_aware(datetime.combine(d, datetime.max.time()))
         qs = TemporalTask.objects.filter(start_time__gte=ws, start_time__lte=we)
         if request.query_params.get('scope') == 'contrib':
-            qs = qs.exclude(task_name__in=CONTRIB_EXCLUDED_TASK_NAMES)
+            qs = qs.exclude(task_name__in=contrib_excluded_names())
         qs = qs.order_by('start_time')
         meta = resolve_task_meta([t.task_name for t in qs])
         attr = resolve_attribution([t.task_name for t in qs])
@@ -227,7 +280,7 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         取最多者作为当天「主导归因」（并列按 ATTRIBUTION_ORDER 的价值序取靠前者）；
         六者全为 0 的日子 attr 返回 null，前端显示为「未归类」灰格。
 
-        🔴 v3.60.27：睡眠类任务**不计入本图**（名单 `constants.CONTRIB_EXCLUDED_TASK_NAMES`）。
+        🔴 v3.60.27：睡眠类任务**不计入本图**（`services.contrib_excluded_names()`）。
         它们的 L2 = 主动休息 ⇒ 归因 = 维持，每天 8h 会让热力图几乎天天是「维持」色，
         把真正想看的结构压掉。**六个口径一律排除**（同一处 queryset，不会只改一半）。
         ⚠️ 只剔本图：时间统计页的总时长 / 完整度 / 旭日图 / 趋势 / 168h 结构仍含睡眠。
@@ -235,8 +288,8 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         metric = request.query_params.get('metric', 'hours')
         rows = list(
             TemporalTask.objects.exclude(start_time__isnull=True)
-            # 睡眠类不计入贡献图 —— 名单是单一真源，见 constants.py 的说明
-            .exclude(task_name__in=CONTRIB_EXCLUDED_TASK_NAMES)
+            # 睡眠类不计入贡献图 —— 单一真源在 services.contrib_excluded_names()
+            .exclude(task_name__in=contrib_excluded_names())
             .annotate(d=Cast('start_time', DateField()))
             .values('d', 'task_name', 'duration_hours')
             .order_by('d')
@@ -297,9 +350,134 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         names = TemporalTask.objects.values_list('task_name', flat=True).distinct().order_by('task_name')
         return Response(list(names))
 
+    @action(detail=False, methods=['get'])
+    def frequent_names(self, request):
+        """最近 N 个月最频繁的任务名 —— 手工新增弹窗的快捷单选候选
+
+        `?months=3&limit=10`（均可选）。排序与窗口口径在
+        `TemporalStatsService.get_frequent_names`，本视图只做参数校验。
+
+        ⚠️ 参数写错必须返 400、不能静默回退默认值：否则「写错了」看起来就是
+        「这段时间没有常用任务」，用户会以为候选功能坏了。
+        """
+        raw_months = request.query_params.get('months', '3')
+        raw_limit = request.query_params.get('limit', '10')
+        try:
+            months = int(raw_months)
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': 'months / limit 必须是整数'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= months <= 24 or not 1 <= limit <= 30:
+            return Response(
+                {'detail': 'months 取 1~24、limit 取 1~30'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(TemporalStatsService.get_frequent_names(months, limit))
+
+    @action(detail=False, methods=['get'])
+    def check_overlap(self, request):
+        """新增/编辑前查「这段时间有没有别的记录」—— **只读**，不写库、不阻断保存。
+
+        `?start_time=2026-10-21 09:50:00&end_time=2026-10-21 10:50:00
+          &exclude_id=12&task_name=看小说`（后两个可选）
+
+        响应：`{has_overlap, conflicts:[{id,task_name,start_time,end_time,
+        overlap_minutes,same_name}], same_name_count}`
+
+        🔴 为什么放在**写入之前查**、而不是在 create 里 409 硬拦：
+        本库真实数据里重叠是**合法形态**（「牛马工作 07:46-18:00」之内再细分
+        「代码编程」），且 CSV 导入 / 计时器入账 / 加班重构走的是同一张表 ——
+        在写入路径上设闸门，等于把用户补记细分记录的路一起堵死。
+        所以这里只回答「重叠了哪些」，由前端把选择权交回用户。
+        口径在 `services.find_overlaps`（单一真源），本视图只做参数校验。
+        """
+        params = request.query_params
+        raw_start = (params.get('start_time') or '').strip()
+        raw_end = (params.get('end_time') or '').strip()
+        if not raw_start or not raw_end:
+            return Response(
+                {'detail': 'start_time / end_time 必填'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        fmt = DateTimeField()
+        try:
+            start = fmt.run_validation(raw_start)
+            end = fmt.run_validation(raw_end)
+        except Exception:
+            return Response(
+                {'detail': '时间格式应为 YYYY-MM-DD HH:MM:SS'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if end <= start:
+            return Response(
+                {'detail': '结束时间必须晚于开始时间'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_exclude = params.get('exclude_id')
+        exclude_id = None
+        if raw_exclude:
+            try:
+                exclude_id = int(raw_exclude)
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': 'exclude_id 必须是整数'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        conflicts = find_overlaps(
+            start, end,
+            exclude_id=exclude_id,
+            task_name=(params.get('task_name') or '').strip() or None,
+        )
+        return Response({
+            'has_overlap': bool(conflicts),
+            'conflicts': conflicts,
+            'same_name_count': sum(1 for c in conflicts if c['same_name']),
+        })
+
+    @action(detail=False, methods=['post'])
+    def preview_import(self, request):
+        """CSV 导入**预演**（只读）：先看这份文件会撞上什么，再决定要不要落。
+
+        multipart：`file`（必填）。**不接受** `skip_rows` —— 这一层不写库。
+
+        响应分三个维度：
+        - `summary`：`total = already_exists + clean + contained + edge + review + likely_dup`
+        - `rows`：**只含需要人看/需要知道的行**（clean 与 already_exists 只有计数）
+        - `inner_duplicate`：同一份 CSV 内部重复的条数（落库时会丢弃）
+
+        🔴 为什么不在这一层「自动选好跳过哪些」：跳过等于**不要这份数据**，
+           是价值判断。预演只做分拣与排序，勾选留给人。
+        """
+        file = request._request.FILES.get('file')
+        if not file:
+            return Response(
+                {'error': '请上传文件'}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            result = CSVImportService().preview_from_csv(file)
+        except Exception as e:                      # noqa: BLE001 —— 兜住解析层的任何意外
+            print(f'[CSV 预演] 处理异常: {type(e).__name__}: {e}')
+            return Response(
+                {'error': f'预演失败：{str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        if result.get('error'):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
+
     @action(detail=False, methods=['post'])
     def import_csv(self, request):
-        """CSV 导入任务记录（使用 Django 原生 multipart 解析，绕过 DRF 限制）"""
+        """CSV 导入任务记录（使用 Django 原生 multipart 解析，绕过 DRF 限制）
+
+        multipart：`file`（必填）、`skip_rows`（可选，JSON 数组 / 逗号分隔的行号）。
+        `skip_rows` 里的行号必须属于本次解析结果，否则 400 —— 见 service 里的注释。
+        """
         file = request._request.FILES.get('file')
         if not file:
             print(f'[CSV 导入] request.FILES: {dict(request._request.FILES)}')
@@ -307,11 +485,23 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
 
         print(f'[CSV 导入] 文件: name={file.name}, size={file.size}, content_type={file.content_type}')
 
-        batch_id = f'import_{uuid.uuid4().hex[:12]}'
+        raw_skip = (request._request.POST.get('skip_rows') or '').strip()
+        skip_rows = []
+        if raw_skip:
+            try:
+                parsed = json.loads(raw_skip)
+                skip_rows = parsed if isinstance(parsed, list) else [parsed]
+            except json.JSONDecodeError:
+                # 退一步认逗号分隔（前端 / curl 手敲都可能走这条）
+                skip_rows = [s for s in raw_skip.split(',') if s.strip()]
+
+        # v3.64.33：批次号带日期（`import_20261107_1832_ab12`），批次清单里能按时间对上；
+        # 前缀仍是 `import_`，按前缀分类与按批次回滚都不受影响。
+        batch_id = make_batch_id()
 
         service = CSVImportService()
         try:
-            result = service.import_from_csv(file, batch_id)
+            result = service.import_from_csv(file, batch_id, skip_rows=skip_rows)
         except Exception as e:
             print(f'[CSV 导入] 处理异常: {type(e).__name__}: {e}')
             import traceback
@@ -322,6 +512,9 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
             return Response({'error': result['error']}, status=status.HTTP_400_BAD_REQUEST)
 
         print(f'[CSV 导入] 完成: 新增 {result["inserted"]}, 更新 {result["updated"]}')
+        # 把批次号回给前端：导入成功提示里直接写「本批 import_20261107_1832_ab12」，
+        # 事后在「来源批次」弹窗里能按号找到它（否则用户只能凭日期猜是哪一批）。
+        result['batch'] = batch_id
         return Response(result, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['get'])
@@ -428,13 +621,21 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
                 'default_attribution': m.default_attribution,
                 'effective_attribution': d.get('attribution'),
                 'attribution_source': d.get('source'),
-                # 命中规则时带上「是哪一条」：前端据此判断「撤销覆盖」能不能撤
-                # （只有 task_name 维度的规则可撤；activity_type 规则覆盖多个任务、不归单行管）
-                'rule_id': d.get('rule_id'),
-                'rule_field': d.get('rule_field'),
-                'rule_value': d.get('rule_value'),
+                # 🔴 「没配归因」必须是一个**独立可筛的状态**（v3.64.28）。
+                #    从前界面只下发 effective_attribution，于是兜底值和真配的值
+                #    长得一模一样：用户点「去归好」进来，看到 L1 那格明明白白写着
+                #    「成长」，以为早就配好了 —— 而库里是 NULL。同一屏上账本说
+                #    「没设默认归因」、编辑器说「已配」，两个都对不上。
+                'is_attr_unset': d.get('source') == 'fallback',
                 'is_unclassified': m.activity_type == '未归类',
                 'is_system': m.is_system,
+                # 🔴 「成长计时」= 每周状态里「成长小时数」的**唯一依据**（v3.64.11）。
+                #    以前这条口径是隐式的「L2 = 深度工作」，界面上看不见
+                #    ⇒ 想拉一个新分类进来，只能把它塞进「深度工作」桶。
+                'counts_growth': m.counts_growth,
+                # 🔴 「今天的三条线」的角色（v3.64.12）：空白 = 不参与护栏。
+                #    阈值不在这里、也不下发给前端 —— 角色只管「进哪条线」。
+                'daily_role': m.daily_role,
                 'total_hours': hours,
                 'record_count': cnt,
                 'avg_minutes': round(hours * 60 / cnt, 1) if cnt else 0.0,
@@ -447,6 +648,16 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
             'unclassified': sum(1 for r in rows if r['is_unclassified']),
             'total_hours': round(float(sum(r['total_hours'] for r in rows)), 2),
             'unclassified_hours': round(float(sum(r['total_hours'] for r in rows if r['is_unclassified'])), 2),
+            # 成长计时的口径小计：用户改开关时，能立刻看到「这一下动了多少量」
+            'growth_count': sum(1 for r in rows if r['counts_growth']),
+            'growth_hours': round(float(sum(r['total_hours'] for r in rows if r['counts_growth'])), 2),
+            # 没配 L1 归因的任务名：行数 + 小时。与「未归类」并列 —— 一个是 L2 没配、
+            # 一个是 L1 没配，都该在人能看见的地方计数，否则只能等账本报「兜底 Xh」。
+            'unset_attr_count': sum(1 for r in rows if r['is_attr_unset']),
+            'unset_attr_hours': round(float(sum(r['total_hours'] for r in rows if r['is_attr_unset'])), 2),
+            # 三条线的「标了几条」：都标了才发现某条一直显示未记录 = 真的没做，
+            # 而不是「忘了标」。没标的任务名不进任何一条线。
+            'role_count': sum(1 for r in rows if r['daily_role']),
             'by_attribution': {
                 a: round(float(sum(r['total_hours'] for r in rows if r['effective_attribution'] == a)), 2)
                 for a in ATTRIBUTION_ORDER
@@ -458,6 +669,11 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         activity_type = request.query_params.get('activity_type')
         attribution = request.query_params.get('attribution')
         unclassified_only = request.query_params.get('unclassified_only') in ('1', 'true', 'True')
+        growth_only = request.query_params.get('growth_only') in ('1', 'true', 'True')
+        # 只看「参与日常护栏」的任务名（三条线标错了在这找得到）
+        role_only = request.query_params.get('role_only') in ('1', 'true', 'True')
+        # 只看「没配 L1 归因」的任务名（按兜底计入的那些）
+        unset_attr_only = request.query_params.get('unset_attr_only') in ('1', 'true', 'True')
 
         items = rows
         if keyword:
@@ -468,9 +684,37 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
             items = [r for r in items if r['effective_attribution'] == attribution]
         if unclassified_only:
             items = [r for r in items if r['is_unclassified']]
+        if growth_only:
+            items = [r for r in items if r['counts_growth']]
+        if role_only:
+            items = [r for r in items if r['daily_role']]
+        if unset_attr_only:
+            items = [r for r in items if r['is_attr_unset']]
         items = sorted(items, key=lambda r: (-r['total_hours'], r['task_name']))
 
         return Response({'summary': summary, 'returned': len(items), 'items': items})
+
+    @action(detail=False, methods=['get'])
+    def daily_guards(self, request):
+        """今天的三条线：睡眠 / 午睡 / 流失（v3.64.13）
+
+        `?date=YYYY-MM-DD` 可回看某一天，不传 = 本地今天。
+
+        🔴 三条线的角色、阈值、状态词全在 `constants.DAILY_GUARD_LINES` /
+           `DAILY_GUARD_STATUS_TEXT`，本接口只做取数与判定。
+        🔴 「流失」不看角色：直接读 L1 归因（玩游戏 / 刷短视频 / 看小说 都归流失），
+           与贡献图、时间统计页同一把尺子。
+        🔴 `unrecorded` **永远不等于达标**：当天没记就照实说没记，
+           不拿 0 小时冒充「没流失」（`null` 与 `0` 是两件事）。
+        """
+        date_str = request.query_params.get('date')
+        target = timezone.localdate()
+        if date_str:
+            try:
+                target = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'error': 'date 格式 YYYY-MM-DD'}, status=400)
+        return Response(compute_daily_guards(target))
 
     @action(detail=False, methods=['get'])
     def unclassified(self, request):
@@ -488,59 +732,98 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def batch_set_meta(self, request):
-        """批量设 L3→L2(活动类型) + L1(归因)：写 temporal_task_meta；attribution 非空则额外写 redemption_attr_rule
+        """批量设 L3→L2(活动类型) + L1(归因)：只写 temporal_task_meta
 
         可选参数（台账单行编辑用，不传即保持旧行为）：
-        - keep_default=True：只改活动类型，保留 default_attribution 原值（不写 None、不碰规则）
-        - clear_rule=True（且未指定新 attribution）：软停用该 task_name 的赎回期归因规则
-          （is_active=False，可追溯、不物理删除），即「撤销覆盖 → 回到类型默认」
+        - keep_default=True：只改活动类型，保留 default_attribution 原值（不写 None）
+        - counts_growth=True/False：**只**改「成长计时」开关，可单独发（不带 activity_type）。
+          不传 = 不动 —— 批量改 L2 时不会顺手把成长计时清零（`None ≠ False`）。
+        - daily_role=''|'sleep_night'|'nap'：改「日常护栏角色」，同样可单独发、
+          不传 = 不动。空串表示退出护栏（是**有效值**，不是「没传」）。
 
-        ⚠️ 撤销**只对 `match_field='task_name'` 的规则有效**。若撤销后该任务名的归因仍来自
-        规则（命中 `activity_type`/`task_type` 维度 —— 这类规则同时覆盖同一类型下的其他任务名，
-        不该由单行编辑顺手停掉），则计入响应 `blocked`，前端据此如实提示，**不得再报「已撤销」**。
+        🔴 v3.64.16：不再顺带往 `redemption_attr_rule` 写一条 priority=100 的规则。
+           那套「外挂规则」已整体退役（见 `redemption/services.compute_time_attribution`
+           的说明）—— 它是本接口写下的影子副本，却只覆盖被改过的少数任务名，
+           让赎回期页面的六类小时静默漏数。归因现在只有 `default_attribution` 一处。
         """
         task_names = request.data.get('task_names') or []
         activity_type = request.data.get('activity_type')
         attribution = request.data.get('attribution')
         keep_default = request.data.get('keep_default') in (True, '1', 'true', 'True')
-        clear_rule = request.data.get('clear_rule') in (True, '1', 'true', 'True')
-        if not task_names or not activity_type:
-            return Response({'error': 'task_names 与 activity_type 必填'}, status=status.HTTP_400_BAD_REQUEST)
-
-        from apps.redemption.models import RedemptionAttrRule
+        # ── 成长计时开关（v3.64.11）──
+        # 🔴 用 `None` 表示「这次不动」、`False` 表示「关掉」：
+        #    又是 `null ≠ 0`。写成 `bool(data.get(...))` 会让「不传」变成「全部关掉」，
+        #    一次批量改 L2 就顺手把成长计时清零 —— 且不报错。
+        growth_raw = request.data.get('counts_growth', None)
+        has_growth = growth_raw is not None
+        growth_value = growth_raw in (True, '1', 'true', 'True', 1) if has_growth else None
+        # ── 日常护栏角色（v3.64.12）──
+        # 🔴 与上面同理用 `None` 表「不动」：`''` 是**合法值**（退出护栏），
+        #    写成 `if not role:` 会让「退出护栏」变成「什么都没发生」。
+        role_raw = request.data.get('daily_role', None)
+        has_role = role_raw is not None
+        role_value = (role_raw or '').strip() if has_role else None
+        if has_role and role_value and role_value not in DAILY_ROLE_VALUES:
+            return Response(
+                {'error': f'daily_role 只能是：{"、".join(sorted(DAILY_ROLE_VALUES))} 之一（空串表示不参与）'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not task_names:
+            return Response({'error': 'task_names 必填'}, status=status.HTTP_400_BAD_REQUEST)
+        if not activity_type and not has_growth and not has_role:
+            return Response(
+                {'error': '至少要给 activity_type / counts_growth / daily_role 之一'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # 🔴 归因只在「改 L2 的同一请求」里写：脱离 activity_type 单发会被下面
+        #    的「只改开关」分支吃掉，表现为接口 200、值没变 —— 宁可 400 说清。
+        if attribution and not activity_type:
+            return Response(
+                {'error': '改归因必须同时带 activity_type（该任务名当前的 L2 类型）'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         updated = 0
-        cleared = 0
-        blocked = []
+        missing = []
         for tn in task_names:
-            defaults = {'activity_type': activity_type}
-            if not keep_default:
-                defaults['default_attribution'] = attribution or None
-            TaskMeta.objects.update_or_create(task_name=tn, defaults=defaults)
+            if activity_type:
+                defaults = {'activity_type': activity_type}
+                if not keep_default:
+                    defaults['default_attribution'] = attribution or None
+                if has_growth:
+                    defaults['counts_growth'] = growth_value
+                if has_role:
+                    defaults['daily_role'] = role_value
+                TaskMeta.objects.update_or_create(task_name=tn, defaults=defaults)
+            else:
+                # 只改开关：台账里每一行都已存在，**不新建**（否则会凭空多出「未归类」行）
+                rows = list(TaskMeta.objects.filter(task_name=tn))
+                if not rows:
+                    missing.append(tn)
+                    continue
+                for row in rows:
+                    # 逐个字段比对：只把**真的变了**的列写进 update_fields，
+                    # 两个开关同时发也不会互相覆盖（早退会在第一处改动后跳过第二处）
+                    changed = []
+                    if has_growth and row.counts_growth != growth_value:
+                        row.counts_growth = growth_value
+                        changed.append('counts_growth')
+                    if has_role and row.daily_role != role_value:
+                        row.daily_role = role_value
+                        changed.append('daily_role')
+                    if changed:
+                        # auto_now 字段必须写进 update_fields，否则时间戳不落库
+                        row.save(update_fields=[*changed, 'updated_at'])
             updated += 1
-            if clear_rule and not attribution:
-                n = RedemptionAttrRule.objects.filter(
-                    match_field='task_name', match_value=tn, is_active=True,
-                ).update(is_active=False)
-                cleared += n
-                # 撤销「之后」重新解析真实状态：同名规则撤掉了，也可能被 L2/L3 维度规则接管
-                d = resolve_attribution_detail([tn]).get(tn) or {}
-                if d.get('source') == 'rule':
-                    blocked.append({
-                        'task_name': tn,
-                        'rule_field': d.get('rule_field'),
-                        'rule_value': d.get('rule_value'),
-                        'attribution': d.get('attribution'),
-                        'cleared': n,
-                    })
-            if attribution:
-                RedemptionAttrRule.objects.update_or_create(
-                    match_field='task_name', match_value=tn,
-                    defaults={'attribution': attribution, 'priority': 100, 'is_active': True,
-                              'note': '时间重构批量设置'},
-                )
-        return Response({'updated': updated, 'cleared': cleared, 'blocked': blocked,
-                         'activity_type': activity_type, 'attribution': attribution})
+        if missing and not updated:
+            # 一条都没改成 ⇒ 如实报错，不返回「已更新 0 个」让人以为生效了
+            return Response(
+                {'error': f'这些任务名不在映射表里：{"、".join(missing[:5])}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({'updated': updated, 'missing': missing,
+                         'activity_type': activity_type, 'attribution': attribution,
+                         'counts_growth': growth_value, 'daily_role': role_value})
 
     @action(detail=False, methods=['get'])
     def sunburst(self, request):
@@ -852,4 +1135,80 @@ class OpenLogseqView(APIView):
         return Response({
             'filename': os.path.basename(filepath),
             'content': content,
+        })
+
+
+class TimerViewSet(viewsets.ViewSet):
+    """实时计时：开始 / 停止 / 丢弃 / 查运行中。
+
+    🔴 所有写库动作都在 `apps.temporal.timer` 里，本层只做参数校验与错误码转换 ——
+       避免「视图里也能写一条记录」，那样迟早会出现第二条写入路径、口径分叉。
+    """
+
+    permission_classes = [AllowAny]
+
+    @action(detail=False, methods=['get'])
+    def running(self, request):
+        """当前运行中的会话（含后端算好的已流逝秒数）。"""
+        session = timer_service.get_running()
+        return Response({
+            'session': TimerSessionSerializer(session).data if session else None,
+            'elapsed_seconds': timer_service.elapsed_of(session),
+            'min_seconds': timer_service.MIN_SECONDS,
+            'long_seconds': timer_service.LONG_SECONDS,
+        })
+
+    @action(detail=False, methods=['post'])
+    def start(self, request):
+        try:
+            session, prev = timer_service.start(request.data.get('task_name', ''))
+        except timer_service.TimerError as e:
+            return Response({'code': e.code, 'error': e.message}, status=e.status_code)
+        return Response({
+            'session': TimerSessionSerializer(session).data,
+            'elapsed_seconds': timer_service.elapsed_of(session),
+            'prev': prev,
+            'min_seconds': timer_service.MIN_SECONDS,
+            'long_seconds': timer_service.LONG_SECONDS,
+        })
+
+    @action(detail=False, methods=['post'])
+    def stop(self, request):
+        session_id = request.data.get('session_id')
+        if not session_id:
+            return Response({'code': 'invalid', 'error': '缺少 session_id'}, status=400)
+        try:
+            session, result = timer_service.stop(
+                int(session_id),
+                notes=request.data.get('notes') or '',
+                allow_long=bool(request.data.get('allow_long')),
+            )
+        except timer_service.TimerError as e:
+            return Response(
+                {'code': e.code, 'error': e.message, **e.extra},
+                status=e.status_code,
+            )
+        except (TypeError, ValueError):
+            return Response({'code': 'invalid', 'error': 'session_id 非法'}, status=400)
+
+        return Response({
+            'session': TimerSessionSerializer(session).data,
+            'result': result,
+        })
+
+    @action(detail=False, methods=['post'])
+    def discard(self, request):
+        session_id = request.data.get('session_id')
+        if not session_id:
+            return Response({'code': 'invalid', 'error': '缺少 session_id'}, status=400)
+        try:
+            session, result = timer_service.discard(int(session_id))
+        except timer_service.TimerError as e:
+            return Response({'code': e.code, 'error': e.message}, status=e.status_code)
+        except (TypeError, ValueError):
+            return Response({'code': 'invalid', 'error': 'session_id 非法'}, status=400)
+
+        return Response({
+            'session': TimerSessionSerializer(session).data,
+            'result': result,
         })

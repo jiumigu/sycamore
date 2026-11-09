@@ -38,9 +38,17 @@ def _metric(stage, key):
     return stage.metrics.get(template_key=key)
 
 
-def _seed_temporal(name, l2, days_ago_list, hours=1.0):
+def _seed_temporal(name, l2, days_ago_list, hours=1.0, counts_growth=True):
+    """造一批时间记录 + 对应的映射行。
+
+    🔴 `counts_growth` 默认 True：v3.64.11 起「成长计时」只看 `temporal_task_meta.counts_growth`，
+       **不再**按 `activity_type == '深度工作'` 自动判定。造数若不打这个标记，
+       成长小时数会取到 0 —— 看起来像取数器坏了，其实是造数没给口径。
+    """
     TaskMeta.objects.get_or_create(
-        task_name=name, defaults={'activity_type': l2, 'default_attribution': '关系'},
+        task_name=name,
+        defaults={'activity_type': l2, 'default_attribution': '关系',
+                  'counts_growth': counts_growth},
     )
     today = timezone.localdate()
     for d in days_ago_list:
@@ -231,6 +239,11 @@ def test_late_backfill_is_flagged(client, stage):
 
 # ── 23. 月度三问：answer=null（未答）≠ answer=false（答否）──
 def test_monthly_three_questions_distinguish_null_from_false(client, stage):
+    """🔴 v3.64.6 起：**没答完不许归档** —— 月度档位只来自三问。
+
+    旧实现在 q3 未答时照样归档（2/3 = 67% 合格），「未答」被当成「答了否」之外
+    的第三种状态，却又能推进结论；现在它连归档都推不过去，两件事彻底分开。
+    """
     sheet = {
         'q1_income': {'answer': True},
         'q2_output': {'answer': True},
@@ -239,25 +252,26 @@ def test_monthly_three_questions_distinguish_null_from_false(client, stage):
     resp = client.post(f'{URL}/periods/close/', {
         'period_type': 'monthly', 'period_key': '2026-09', 'answer_sheet': sheet,
     }, format='json')
-    assert resp.status_code == 201, resp.data
-    period = SelfRunPeriod.objects.get(period_key='2026-09')
+    assert resp.status_code == 400, resp.data
+    assert '还有 1 个没答' in resp.data['detail']
+    assert not SelfRunPeriod.objects.filter(period_key='2026-09').exists(), '被拦就不该落行'
 
-    # 2 是 1 未答 ⇒ 及格（未答**不当作否**）
-    assert period.status == 'slipping'
-    assert period.answer_sheet['q3_runway']['answer'] is None
-
-    # 改成明确答「否」⇒ 仍是 2 是 ⇒ 判定不变，但语义变了
+    # 明确答「否」⇒ 2 是 1 否 = 67% ⇒ 合格（未答**既不当作否、也不当作是**，但不能不答）
     sheet2 = dict(sheet, q3_runway={'answer': False})
-    client.patch(f'{URL}/periods/{period.id}/', {'answer_sheet': sheet2}, format='json')
-    period.refresh_from_db()
-    assert period.answer_sheet['q3_runway']['answer'] is False
-    assert period.status == 'slipping'
+    ok = client.post(f'{URL}/periods/close/', {
+        'period_type': 'monthly', 'period_key': '2026-09', 'answer_sheet': sheet2,
+    }, format='json')
+    assert ok.status_code == 201, ok.data
+    period = SelfRunPeriod.objects.get(period_key='2026-09')
+    # ⚠️ v3.62.45 档位由四档统一：≥80 我超棒 / ≥60 合格 / ≥40 及格 / <40 活着
+    assert period.status == 'on_track'
 
-    # 3 个「是」⇒ 合格
+    # 归档后补答成 3 个「是」⇒ 记录改了，**档位不动**（要改档得重开这一期）
     sheet3 = {k: {'answer': True} for k in ('q1_income', 'q2_output', 'q3_runway')}
     client.patch(f'{URL}/periods/{period.id}/', {'answer_sheet': sheet3}, format='json')
     period.refresh_from_db()
-    assert period.status == 'on_track'
+    assert period.answer_sheet['q3_runway']['answer'] is True
+    assert period.status == 'on_track', '归档后补答不许改档'
 
 
 # ── 24. 往**已归档**的周期补记 ⇒ 409（不静默接受）────────────

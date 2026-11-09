@@ -30,6 +30,7 @@ from ..serializers import (
     MonthlyReviewSerializer, TrendDataSerializer, CategoryRankingSerializer,
     MonthlyListSerializer, CompareSerializer, BalanceInfoSerializer,
     CashFlowOverviewSerializer, AssetTrendItemSerializer,
+    NetworthBridgeSerializer,
     SnapshotListSerializer, CashFlowSnapshotSerializer,
     RegularListSerializer, RegularStatsSerializer, RegularFormSerializer,
     MatureProcessSerializer, ExpiringItemSerializer,
@@ -665,6 +666,29 @@ class AssetTrendView(APIView):
         return Response(serializer.data)
 
 
+class NetworthBridgeView(APIView):
+    """净值变动归因：把资产存量与账本流量勾稽起来（v3.62.42）
+
+    口径与恒等式见 `services/networth_bridge.py` 模块 docstring —— 本视图只取参数、套白名单。
+    """
+
+    def get(self, request):
+        from ..services.networth_bridge import build_networth_bridge
+
+        user_id = request.query_params.get('user_id', 1)
+        raw = request.query_params.get('limit', 12)
+        try:
+            limit = max(int(raw), 1)
+        except (TypeError, ValueError):
+            # 参数写错时不该静默给个默认值 —— 返回的问题要能被看见
+            return Response(
+                {'error': 'limit 必须是正整数', 'limit': raw},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        data = build_networth_bridge(limit=limit, user_id=int(user_id))
+        return Response(NetworthBridgeSerializer(data).data)
+
+
 class SnapshotListView(APIView):
     """盘点历史列表"""
 
@@ -883,8 +907,21 @@ class BillImportView(APIView):
         duplicated = 0
         errors = []
 
+        from collections import Counter
+        from datetime import timedelta
+        from decimal import Decimal, InvalidOperation
+
         from django.db import connection
 
+        def _amount_key(value) -> str:
+            """金额归一成两位小数的字符串 —— 浮点 `==` 比不出「30 还是 30.0」。"""
+            try:
+                return str(Decimal(str(value)).quantize(Decimal('0.01')))
+            except (InvalidOperation, TypeError, ValueError):
+                return str(value)
+
+        # ── 第一遍：解析（先把能出错的都出完，再动库）──────────────
+        records = []
         for i, row in enumerate(rows[2:], start=3):
             if len(row) < 8:
                 skipped += 1
@@ -906,19 +943,45 @@ class BillImportView(APIView):
 
                 dt = datetime.strptime(date_str[:19], '%Y-%m-%d %H:%M:%S')
                 amount = abs(float(amount_str))
+                records.append({
+                    'row': i, 'dt': dt, 'type': transaction_type,
+                    'category': category, 'subcategory': subcategory,
+                    'account': account, 'merchant': merchant, 'notes': notes,
+                    'amount': amount,
+                })
+            except Exception as e:
+                skipped += 1
+                errors.append(f'第{i}行: {str(e)}')
 
-                # 按交易日期+金额+类型判断是否已存在
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT COUNT(*) FROM wealth_bill_list WHERE date = %s AND amount = %s AND transaction_type = %s",
-                        [dt, amount, transaction_type],
-                    )
-                    exists = cursor.fetchone()[0] > 0
+        # ── 判重口径：**按天**（半开区间），不按秒 ──────────────────
+        # 🔴 旧写法 `WHERE date = %s` 是**秒级**比对：同一笔账只要导出时秒数
+        #    抖一下（10:00:00 vs 10:00:01，或 CSV 从别的时区导出），
+        #    就会重复入库 ⇒ 支出被记两遍，而且**不会报错**（DQ-1）。
+        #    现在按「这一整天」比对，并用 **Counter 计重数**：
+        #    所以「同一天两笔 15 元咖啡」仍然能各插一条，不会误判成重复。
+        remaining = Counter()
+        if records:
+            lo = min(r['dt'] for r in records).date()
+            hi = max(r['dt'] for r in records).date() + timedelta(days=1)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    'SELECT DATE(date), amount, transaction_type '
+                    'FROM wealth_bill_list WHERE date >= %s AND date < %s',
+                    [lo, hi],
+                )
+                for day, amt, ttype in cursor.fetchall():
+                    remaining[(day, _amount_key(amt), ttype)] += 1
 
-                if exists:
-                    duplicated += 1
-                    continue
+        # ── 第二遍：按序插入，重数用完即视为重复 ────────────────────
+        for rec in records:
+            dt = rec['dt']
+            key = (dt.date(), _amount_key(rec['amount']), rec['type'])
+            if remaining[key] > 0:
+                remaining[key] -= 1
+                duplicated += 1
+                continue
 
+            try:
                 with connection.cursor() as cursor:
                     cursor.execute("""
                         INSERT INTO wealth_bill_list
@@ -927,14 +990,14 @@ class BillImportView(APIView):
                              year, month, day, created_at, updated_at)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                     """, [
-                        transaction_type,
-                        category,
-                        subcategory,
+                        rec['type'],
+                        rec['category'],
+                        rec['subcategory'],
                         '',
-                        account,
-                        merchant,
-                        notes,
-                        amount,
+                        rec['account'],
+                        rec['merchant'],
+                        rec['notes'],
+                        rec['amount'],
                         dt,
                         user_id,
                         dt.year, dt.month, dt.day,
@@ -942,7 +1005,7 @@ class BillImportView(APIView):
                 created += 1
             except Exception as e:
                 skipped += 1
-                errors.append(f'第{i}行: {str(e)}')
+                errors.append(f"第{rec['row']}行: {str(e)}")
 
         return Response({
             'created': created,

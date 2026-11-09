@@ -13,9 +13,13 @@
 from django.utils import timezone
 from rest_framework import status as http
 from rest_framework import viewsets
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+# 🔴 媒体白名单 / 大小上限 / 保存逻辑唯一实现（works / showroom 共用）
+from apps.core.media import MediaUploadError, save_upload_file
 
 # ⚠️ 复用自我运转的周期实现 —— 期标识全项目只有一把尺子。
 from apps.selfrun.readers import period_range
@@ -201,6 +205,29 @@ class ComposeView(APIView):
             },
             status=http.HTTP_201_CREATED,
         )
+
+
+# ══════════════════════════════════════════════════════════════
+# 媒体上传
+# ══════════════════════════════════════════════════════════════
+
+class WorkMediaUploadView(APIView):
+    """作品媒体上传（图片 / 视频）。
+
+    multipart 字段 `file`；存 `MEDIA_ROOT/works/YYYYMM/<uuid><ext>`，
+    返回 `{url, type}` —— type 由扩展名白名单判定，前端只存不用再判。
+    """
+
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        file = request.FILES.get('file')
+        try:
+            url, media_type = save_upload_file(file, 'works')
+        except MediaUploadError as exc:
+            return Response({'error': exc.message}, status=exc.status)
+        return Response({'url': url, 'type': media_type})
 
 
 # ══════════════════════════════════════════════════════════════

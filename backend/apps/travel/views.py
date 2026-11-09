@@ -375,7 +375,20 @@ class TravelPlanViewSet(ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='toggle-item')
     def toggle_item(self, request, pk=None):
-        """勾选/取消子项完成"""
+        """勾选 / 取消勾选一个计划子项。
+
+        请求体：`{'item_id': <int>, 'is_completed': <bool | 省略>}`
+
+        - **省略** `is_completed` ⇒ 切换（保持前端既有行为，前端不传这个键）
+        - **显式传** ⇒ 幂等设为该值。重试 / 双击不会把状态翻回去 ——
+          旧实现是「永远取反」，同一个请求发两次等于什么都没做，
+          而且用户网络抖动后重试会把刚勾上的又取消掉。
+
+        🔴 口径订正（2026-10-18 第八轮审计 DQ-2）：**这条入口一直存在**，
+           前端 `toggleTravelPlanItem()` 与后端这个 action 都在。
+           「106 个子项 0 个完成」不是入口缺失，`is_completed` 字段也早就有了。
+           ⇒ 审计报告里 DQ-2 的结论已作废，见报告 §2.7。
+        """
         item_id = request.data.get('item_id')
         if not item_id:
             return Response({'error': '缺少 item_id'}, status=status.HTTP_400_BAD_REQUEST)
@@ -384,9 +397,14 @@ class TravelPlanViewSet(ModelViewSet):
             item = plan.items.get(id=item_id)
         except TravelPlanItem.DoesNotExist:
             return Response({'error': '子项不存在'}, status=status.HTTP_404_NOT_FOUND)
-        item.is_completed = not item.is_completed
-        item.completed_at = timezone.now() if item.is_completed else None
-        item.save()
+
+        raw = request.data.get('is_completed', None)
+        target = (not item.is_completed) if raw is None else bool(raw)
+        if target != item.is_completed:
+            item.is_completed = target
+            item.completed_at = timezone.now() if target else None
+            item.save(update_fields=['is_completed', 'completed_at'])
+
         # 打卡联动心愿状态
         if item.wish_id:
             if item.is_completed:

@@ -39,14 +39,28 @@ PERIOD_TYPE_CHOICES = [
 ]
 
 # ③ 周期状态（四档 + 休耕）
-# 🔴 `fallow` 不是失败（V4）；`no_record` 是「这周没有记录」，与 `slid` 不同。
+# 🔴 `fallow` 不是失败（V4）；`no_record` 是「这期没有记录」，与 `slid` 不同。
+#
+# 🔴 v3.62.45：标签**只放档位本名，不带「本周 / 本月」前缀**。
+#    前缀由页面按 `period_type` 拼（`periodStatusLabel(v, periodType)`）——
+#    之前写死「本周合格」，于是「本月状态」页也在说「本周」，读起来像走错了页。
 PERIOD_STATUS_CHOICES = [
-    ('on_track', '本周合格'),
-    ('slipping', '本周及格'),
-    ('slid', '本周活着'),
-    ('no_record', '这周没有记录'),
+    ('great', '我超棒'),
+    ('on_track', '合格'),
+    ('slipping', '及格'),
+    ('slid', '活着'),
+    ('no_record', '这期没有记录'),
     ('fallow', '休耕中'),
 ]
+
+# 档位本名（🔴 唯一一份；`choices` 与接口下发都用它，别在别处再写一遍）
+PERIOD_STATUS_LABEL = dict(PERIOD_STATUS_CHOICES)
+
+# 页面按周期类型拼前缀：`PERIOD_PREFIX['weekly'] + '合格'` ⇒ 本周合格
+PERIOD_TYPE_PREFIX = {
+    'weekly': '本周',
+    'monthly': '本月',
+}
 
 # ④ KPI 状态 —— 刻意只有两个值（见模块 docstring 第 3 条）
 METRIC_STATUS_CHOICES = [
@@ -137,19 +151,31 @@ TARGET_SOURCE_LABELS = {
 # 二、判定阈值（🔴 全项目只此一份）
 # ══════════════════════════════════════════════════════════════
 
-# 周判定：达标条数 / 生效条数 ≥ 下限即命中该档（从高到低匹配）
+# 周判定：达标条数 / 生效条数 ≥ 下限即命中该档（**从高到低**匹配，先中先得）
+#
+# v3.62.45 由两档扩到三档（另有 `<0.4` 兜底档 `slid`）：
+#   ≥80% 我超棒 · ≥60% 合格 · ≥40% 及格 · <40% 活着
+# 🔴 加档只改这张表：`compute_period_status` 与前端文案都是遍历它，
+#    前端 0 个阈值数字（写死 = 哪天调线界面还在说旧线）。
 PERIOD_VERDICT_BANDS = [
-    ('on_track', 0.8),
+    ('great', 0.8),
+    ('on_track', 0.6),
     ('slipping', 0.4),
 ]
 
-# 月判定：按「月度三问里答『是』的个数」
-MONTHLY_QUESTION_BANDS = {
-    3: 'on_track',
-    2: 'slipping',
-    1: 'slid',
-    0: 'no_record',
-}
+# 月判定：三问里答「是」的个数 ÷ **3**（三问总数）。
+# 🔴 分母恒为 3，不按「已答数」——「未答」不当作否、也不当作是（V1 同源），
+#    但这不代表可以拿它去放大比例：答了 1 个「是」就是 1/3，不是 1/1。
+#
+# 🔴 v3.64.6 起：月度**只有这一把尺子**。全部未答（一个都没点）⇒ 空串，
+#    界面显示「待答三问」，**不再落回月度 KPI 档位** —— 旧行为会让同一期
+#    在归档前一秒判「我超棒」(4/4=100%)、答完三问立刻掉成「合格」(2/3=67%)：
+#    数字没变、尺子换了，用户看到的就是「归档把我降档了」。
+#    KPI 达标率仍下发（`ok` / `counted`），但只作参考，不参与判定。
+MONTHLY_QUESTION_COUNT = 3
+
+# 三问的键（🔴 顺序 = 页面顺序 = 判定顺序；`monthly_answer_stats` 唯一遍历它）
+MONTHLY_QUESTION_KEYS = ('q1_income', 'q2_output', 'q3_runway')
 
 # 补归档阈值：周期结束超过这么多天再归档 ⇒ 必须显式标注「此数事后补算」
 BACKFILL_WARN_DAYS = 7
@@ -165,7 +191,8 @@ HEARTBEAT_MIN_INTERVAL_DAYS = 1
 # 🔴 **不做任意查询构建器**的理由：任意查询 = 口径可以静默配错，且没有测试能钉住它。
 # 这里只列**允许**的 reader key；`source_config.kind` 必须命中其一。
 READER_KEYS = (
-    'temporal_hours',      # 按 L1/L2/L3 过滤 → 时长求和（成长）
+    'temporal_hours',      # 按 L1/L2/L3 过滤 → 时长求和
+    'growth_hours',        # 映射编辑器勾了「成长计时」的任务名 → 时长求和（口径固定，无 where）
     'temporal_days',       # 有记录的天数（社交连接）
     'diary_migu_count',    # 日记流 otype='MIGU' 的条数 / 字数（输出）
     'step_days',           # health 步数 → 有步数的天数（出门）
@@ -193,17 +220,42 @@ MODULE_VALUE_WHITELIST = (
 #     · `manual_sum`     手工登记，本就没有配置。
 READER_WHERE_KEYS = {
     'temporal_hours': 'l2',
+    # 🔴 成长计时**没有**可配条件：唯一依据是映射编辑器里那个开关，
+    #    再给一个 l2 过滤器就等于同一个量有两处定义（v3.64.11 收口）
+    'growth_hours': None,
     'temporal_days': 'l2',
     'diary_migu_count': None,
     'step_days': None,
     'bill_income': None,
     'module_value': 'key',
     'manual_sum': None,
-    # 作品库：口径就是「这一期成形了几件」，没有可配的过滤条件
-    'works_count': None,
+    # 作品库：v3.64.30 起可按**类型**过滤（「这月画了几张」= works_count + work_kind=drawing）。
+    # 🔴 留空 = 数全部类型（「留下件数」那条就是这么用的）；**不是**「默认只数文章」——
+    #    默认值一变，所有既有阶段的历史读数会跟着变。
+    'works_count': 'work_kind',
+}
+
+# 每个取数器**默认**的聚合方式（换取数器 ⇒ 聚合方式跟着走，不让人再填一遍）。
+#
+# 🔴 `agg` 不参与取数，只出现在「口径」那一栏（`自动 + 手工补记 · manual_sum`）
+#    与配置指纹里。正因为**不影响数**，漏改它不会有任何报错 —— 只会让界面
+#    理直气壮地说错话（「从作品库取数、按手工求和」）。所以不让它单独可填，
+#    由 `source_config.kind` 推导：一个事实一把尺子。
+READER_AGG = {
+    'temporal_hours': 'sum_hours',
+    'growth_hours': 'sum_hours',
+    'temporal_days': 'distinct_days',
+    'diary_migu_count': 'count',
+    'step_days': 'distinct_days',
+    'bill_income': 'sum_value',
+    'module_value': 'boolean',
+    'manual_sum': 'manual_sum',
+    'works_count': 'count',
 }
 
 # 漏一个就早点炸，别等线上（与 `readers.py` 的注册表断言同一个精神）
+assert set(READER_AGG) == set(READER_KEYS), \
+    'READER_AGG 与 READER_KEYS 不一致'
 assert set(READER_WHERE_KEYS) == set(READER_KEYS), \
     'READER_WHERE_KEYS 与 READER_KEYS 不一致'
 
@@ -222,6 +274,7 @@ assert set(READER_WHERE_KEYS) == set(READER_KEYS), \
 # ⚠️ `manual_sum` 没有新鲜度概念（手工登记本来就是你想记才记）⇒ None。
 STALE_RULES = {
     'temporal_hours': {'days': 3, 'field': 'MAX(start_time)', 'hint': '时间统计'},
+    'growth_hours': {'days': 3, 'field': 'MAX(start_time)', 'hint': '时间统计'},
     'temporal_days': {'days': 3, 'field': 'MAX(start_time)', 'hint': '时间统计'},
     'diary_migu_count': {'days': 7, 'field': 'MAX(begin_date)', 'hint': '日记流'},
     'step_days': {'days': 7, 'field': 'MAX(time)', 'hint': '健康管理'},
@@ -253,6 +306,7 @@ VERDICT_COLORS = {
 }
 
 PERIOD_STATUS_COLORS = {
+    'great': '#059669',     # 深绿 —— 比「合格」更实，不用新色相（绿=好，红=差的口径不动）
     'on_track': '#10B981',
     'slipping': '#F59E0B',
     'slid': '#94A3B8',

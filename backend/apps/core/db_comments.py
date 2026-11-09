@@ -69,7 +69,7 @@ DOCUMENTED_APPS = frozenset({
     # ── 批 2 ──
     'selfrun',      # 自我运转
     'toolkit',      # 工具箱
-    'redemption',   # 赎回期
+    'redemption',   # 赎回期（2026-11-02 起**无表**：只剩计算函数，表都迁走或退役了）
     'lifesample',   # 人生样本
     'temporal',     # 时间统计
     'relation',     # 关系
@@ -217,6 +217,14 @@ COLUMN_COMMENT_OVERRIDES = {
     'selfrun_stage.pause_reason': '暂停原因；取值见 constants.PAUSE_REASON_CHOICES',
     'selfrun_stage.last_seen_at': '最近一次回访 —— 用来判断这个阶段还活不活',
     'selfrun_stage.summary_snapshot': '写总结那一刻的读数（JSON）—— 事后重算不出来',
+    'selfrun_stage.parent_id': '上级阶段 —— 空 = 顶级；只有两层，长阶段下才挂小阶段',
+    'selfrun_stage.ledger_config': '账本参数（JSON）—— 目前只有 pool_principal 一项',
+
+    # ── 自我运转 · 池注入标记（v3.64.26 起只存 bill_id，不再自记金额）─────
+    #    `stage_id` / `amount` / `inject_date` / `source` / `note` 五列已删：
+    #    注入金额与日期一律从账单读，再留一份就是「同一笔钱两个数」。
+    #    旧键留在这里不会报错，但会让人以为那几列还在（本轮就是这么被守卫测试逮到的）。
+    'selfrun_pool_inject.bill_id': '被标为「中途注入」的账单 id —— 金额从账单读，本表不存钱',
 
     # ── 自我运转 · KPI 定义 ─────────────────────────────
     'selfrun_metric.template_key': '来源模板的标识 —— 是字符标记、不是外键；删模板不会动这条 KPI',
@@ -278,15 +286,9 @@ COLUMN_COMMENT_OVERRIDES = {
     'toolkit_ask_topic.scene_id': '所属业务场景 —— 空 = 未归类',
 
     # ── 赎回期 ──────────────────────────────────────────
-    'redemption_period.pool_principal': '启动现金池本金（元）',
-    'redemption_period.baseline_toward_ratio': '阶段一基线·成长占比 —— 锁定后不再变',
-    'redemption_pool_inject.amount': '注入金额（元）—— 正数为注入池',
-    'redemption_attr_rule.match_field': '匹配字段 —— 与「匹配值」合起来算一条规则',
-    'redemption_attr_rule.match_value': '匹配值 —— 与「匹配字段」合起来算一条规则',
-    'redemption_attr_rule.attribution': '归因类别 —— 真源是 temporal/constants.py 的 ATTRIBUTION_CHOICES',
-    'redemption_attr_rule.priority': '优先级 —— 多条同时命中时取高者',
-    'redemption_week_snapshot.coverage_rate': '覆盖率 = 已记录小时 ÷ 理论小时',
-    'redemption_week_snapshot.unit_cost': '单位赎回成本 —— 空 = 算不出（不是 0）',
+    # ⚠️ 2026-11-02 起本 app **已无表**（period / week_snapshot 退役，
+    #    pool_inject 迁到 `selfrun_pool_inject`），所以这一组注释整组删除。
+    #    留着「表不存在」的键不会报错，但会让人以为还有那几张表。
 
     # ── 人生样本 ────────────────────────────────────────
     'life_sample.obsidian_path': '相对于 Obsidian 仓库根目录 —— 唯一，一行对一个笔记',

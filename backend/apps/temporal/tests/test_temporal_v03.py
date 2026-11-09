@@ -7,7 +7,6 @@ from datetime import datetime
 from apps.temporal.constants import ACTIVITY_TYPE_PRESETS, ATTRIBUTION_ORDER, TASK_TO_L2
 from apps.temporal.models import TaskMeta, TemporalTask
 from apps.temporal.services import resolve_attribution, resolve_task_meta
-from apps.redemption.models import RedemptionAttrRule
 
 
 @pytest.mark.django_db
@@ -17,22 +16,15 @@ class TestResolveAttribution:
         out = resolve_attribution(['某未知任务'])
         assert out['某未知任务'] == '成长'
 
-    def test_rule_override_beats_default(self):
-        """redemption_attr_rule 优先级高于 default_attribution"""
-        TaskMeta.objects.create(task_name='写作', activity_type='深度工作', default_attribution='成长')
-        # 默认成长，但规则覆盖为谋生
-        RedemptionAttrRule.objects.create(
-            match_field='task_name', match_value='写作', attribution='谋生', priority=50, is_active=True,
-        )
+    def test_meta_default_beats_fallback(self):
+        """有 TaskMeta.default_attribution 就用它（归因只有这一处来源）"""
+        TaskMeta.objects.create(task_name='写作', activity_type='深度工作', default_attribution='谋生')
         assert resolve_attribution(['写作'])['写作'] == '谋生'
 
-    def test_activity_type_match_field(self):
-        """match_field=activity_type 也能匹配"""
-        TaskMeta.objects.create(task_name='X', activity_type='浅层工作', default_attribution='谋生')
-        RedemptionAttrRule.objects.create(
-            match_field='activity_type', match_value='浅层工作', attribution='流失', priority=10, is_active=True,
-        )
-        assert resolve_attribution(['X'])['X'] == '流失'
+    def test_empty_default_falls_back(self):
+        """任务名在册但没设默认归因 ⇒ 兜底成长，而不是「跟着 L2 类型走」"""
+        TaskMeta.objects.create(task_name='数独时间', activity_type='兴趣记录', default_attribution='')
+        assert resolve_attribution(['数独时间'])['数独时间'] == '成长'
 
     def test_resolve_task_meta_shape(self):
         TaskMeta.objects.create(task_name='T', activity_type='深度工作', default_attribution='成长')
@@ -115,7 +107,8 @@ class TestUnclassifiedAndBatch:
         assert r.data['items'][0]['task_name'] == 'ZZ'
         assert r.data['items'][0]['total_hours'] == 3.0
 
-    def test_batch_set_meta_writes_attr_rule(self):
+    def test_batch_set_meta_writes_only_meta(self):
+        """改 L1 只写映射表那一列，不再产生一份影子规则（v3.64.16）"""
         from rest_framework.test import APIClient
         r = APIClient().post('/api/temporal/tasks/batch_set_meta/', {
             'task_names': ['写作'], 'activity_type': '深度工作', 'attribution': '成长',
@@ -123,8 +116,17 @@ class TestUnclassifiedAndBatch:
         assert r.status_code == 200 and r.data['updated'] == 1
         meta = TaskMeta.objects.get(task_name='写作')
         assert meta.activity_type == '深度工作' and meta.default_attribution == '成长'
-        rule = RedemptionAttrRule.objects.filter(match_field='task_name', match_value='写作').first()
-        assert rule is not None and rule.attribution == '成长'
+        assert resolve_attribution(['写作'])['写作'] == '成长'
+
+    def test_attribution_without_activity_type_rejected(self):
+        """归因脱离 activity_type 单发会被「只改开关」分支吃掉 ⇒ 直接 400 说清"""
+        from rest_framework.test import APIClient
+        TaskMeta.objects.create(task_name='写作', activity_type='深度工作', default_attribution='成长')
+        r = APIClient().post('/api/temporal/tasks/batch_set_meta/', {
+            'task_names': ['写作'], 'attribution': '谋生',
+        }, format='json')
+        assert r.status_code == 400
+        assert TaskMeta.objects.get(task_name='写作').default_attribution == '成长'
 
     def test_overview_drops_production_percentage(self):
         from apps.temporal.services import TemporalStatsService
@@ -441,16 +443,20 @@ class TestMetaLedger:
         assert w['last_used'] == '2026-08-03', w  # 最近一次使用
         assert len(self._get()['items']) == 3     # 而不是被拆成 5 行
 
-    def test_attribution_source_three_ways(self):
-        """有效归因来源：rule(赎回期规则) > default(类型默认) > fallback(兜底)"""
+    def test_attribution_source_two_ways(self):
+        """有效归因来源只剩两档：default（映射表那列）> fallback（兜底）
+
+        `rule`（赎回期外挂规则）那一档已随规则表退役：它只是 default 的影子副本，
+        却只覆盖少数任务名，让赎回期页面的六类小时静默漏数。
+        """
         self._seed()
-        RedemptionAttrRule.objects.create(
-            match_field='task_name', match_value='刷手机', attribution='谋生', priority=50, is_active=True)
         items = {i['task_name']: i for i in self._get()['items']}
         assert (items['写作']['effective_attribution'], items['写作']['attribution_source']) == ('成长', 'default')
-        assert (items['刷手机']['effective_attribution'], items['刷手机']['attribution_source']) == ('谋生', 'rule')
-        # 无默认归因且无规则 → 兜底成长
+        assert (items['刷手机']['effective_attribution'], items['刷手机']['attribution_source']) == ('流失', 'default')
+        # 无默认归因 → 兜底成长
         assert (items['待定']['effective_attribution'], items['待定']['attribution_source']) == ('成长', 'fallback')
+        # 规则相关的键已从响应中移除（不是置 None —— 留着恒为 None 的键等于第二套契约）
+        assert 'rule_id' not in items['写作'] and 'rule_field' not in items['写作']
 
     def test_summary_is_global_and_counts_fallback(self):
         self._seed()
@@ -465,13 +471,36 @@ class TestMetaLedger:
         # 未归类时长另外单列，供页面在 >0 时显式提示
         assert sm['unclassified_hours'] == 5.0, sm
 
+    def test_unset_attribution_is_its_own_state(self):
+        """「没配 L1 归因」必须与「配好了」区分得开，并且能单独筛出来。
+
+        回归 v3.64.28：从前只下发 `effective_attribution`，兜底行在映射编辑器里
+        显示成选中的「成长」—— 与真配了「成长」的行长得一模一样。用户照着账本的
+        「其中 X h 没设默认归因，去归好」点进来，看到那格已经填好，只能得出
+        「明明都已经配置好了归因」的结论，然后无处可改。
+        🔴 下拉要绑 `default_attribution`（表里真存的值），兜底值另立 `is_attr_unset`。
+        """
+        self._seed()
+        items = {i['task_name']: i for i in self._get()['items']}
+        assert items['写作']['is_attr_unset'] is False
+        assert items['待定']['is_attr_unset'] is True
+        # 兜底行的「原始配置」仍然是空 —— 这正是下拉该显示的样子
+        assert items['待定']['default_attribution'] is None
+        assert items['待定']['effective_attribution'] == '成长'
+
+        sm = self._get()['summary']
+        assert (sm['unset_attr_count'], sm['unset_attr_hours']) == (1, 5.0), sm
+        # 与「未归类」是两个维度：这行恰好两边都占，但计数不能互相顶替
+        assert (sm['unclassified'], sm['unclassified_hours']) == (1, 5.0), sm
+
+        only = self._get('?unset_attr_only=1')['items']
+        assert [i['task_name'] for i in only] == ['待定']
+
     def test_filters(self):
         self._seed()
-        RedemptionAttrRule.objects.create(
-            match_field='task_name', match_value='刷手机', attribution='谋生', priority=50, is_active=True)
         assert self._get('?unclassified_only=1')['returned'] == 1
         assert {i['task_name'] for i in self._get('?activity_type=深度工作')['items']} == {'写作'}
-        assert {i['task_name'] for i in self._get('?attribution=谋生')['items']} == {'刷手机'}
+        assert {i['task_name'] for i in self._get('?attribution=流失')['items']} == {'刷手机'}
         assert {i['task_name'] for i in self._get('?search=手')['items']} == {'刷手机'}
         # 组合筛选：L2=未归类 且 搜索命中
         assert self._get('?unclassified_only=1&search=待定')['returned'] == 1
@@ -489,9 +518,17 @@ class TestMetaLedger:
         """
         d = self._get()
         assert set(d['summary']['by_attribution']) == set(ATTRIBUTION_ORDER)
-        assert d['summary'] == {'total': 0, 'classified': 0, 'unclassified': 0,
-                                'total_hours': 0.0, 'unclassified_hours': 0.0,
-                                'by_attribution': {a: 0.0 for a in ATTRIBUTION_ORDER}}
+        # 🔴 逐键断言，不再整字典比对：每加一个口径小计都会让整字典比对变红，
+        #    那种红不说明口径错、只说明「多了个键」，几次之后就会有人顺手改成
+        #    `>=` 放水 —— 那时真的缺键也发现不了。
+        s = d['summary']
+        zero_keys = {
+            'total', 'classified', 'unclassified', 'total_hours', 'unclassified_hours',
+            'growth_count', 'growth_hours', 'role_count',
+        }
+        assert zero_keys <= set(s), f'空库概要在这些键上缺失：{zero_keys - set(s)}'
+        for k in zero_keys:
+            assert s[k] == 0, f'空库 {k} 应为 0，实际 {s[k]!r}'
         assert d['returned'] == 0 and d['items'] == []
 
 
@@ -508,123 +545,46 @@ class TestBatchSetMetaLedgerModes:
         assert r.status_code == 200, r.data
         return r.data
 
-    def test_keep_default_preserves_attribution_and_writes_no_rule(self):
-        """改 L2 类型时保留原默认归因，且不应凭空产生归因规则"""
+    def test_keep_default_preserves_attribution(self):
+        """改 L2 类型时保留原默认归因"""
         TaskMeta.objects.create(task_name='写作', activity_type='深度工作', default_attribution='成长')
         self._post({'task_names': ['写作'], 'activity_type': '兴趣记录', 'keep_default': True})
         m = TaskMeta.objects.get(task_name='写作')
         assert m.activity_type == '兴趣记录'
         assert m.default_attribution == '成长'          # 未被清空
-        assert RedemptionAttrRule.objects.count() == 0  # 未产生副作用规则
 
     def test_legacy_behavior_unchanged_without_keep_default(self):
         """不传 keep_default → 旧语义：default_attribution 跟随 attribution（含置空）"""
         TaskMeta.objects.create(task_name='写作', activity_type='深度工作', default_attribution='成长')
         self._post({'task_names': ['写作'], 'activity_type': '深度工作', 'attribution': '谋生'})
-        m = TaskMeta.objects.get(task_name='写作')
-        assert m.default_attribution == '谋生'
-        assert RedemptionAttrRule.objects.filter(match_value='写作', is_active=True).count() == 1
+        assert TaskMeta.objects.get(task_name='写作').default_attribution == '谋生'
         self._post({'task_names': ['写作'], 'activity_type': '深度工作'})
         assert TaskMeta.objects.get(task_name='写作').default_attribution is None
-
-    def test_clear_rule_soft_deactivates_without_physical_delete(self):
-        """清除覆盖：规则置 is_active=False（软停用，不物理删除），默认归因不动"""
-        TaskMeta.objects.create(task_name='刷手机', activity_type='被动消耗', default_attribution='流失')
-        rule = RedemptionAttrRule.objects.create(
-            match_field='task_name', match_value='刷手机', attribution='谋生', priority=100, is_active=True)
-        res = self._post({'task_names': ['刷手机'], 'activity_type': '被动消耗',
-                          'keep_default': True, 'clear_rule': True})
-        assert res['cleared'] == 1, res
-        rule.refresh_from_db()
-        assert rule.is_active is False                       # 软停用
-        assert RedemptionAttrRule.objects.filter(pk=rule.pk).exists()  # 未物理删除
-        assert TaskMeta.objects.get(task_name='刷手机').default_attribution == '流失'
-        assert resolve_attribution(['刷手机'])['刷手机'] == '流失'        # 已回到类型默认
 
     def test_missing_required_fields_rejected(self):
         from rest_framework.test import APIClient
         r = APIClient().post(self.URL, {'task_names': ['写作']}, format='json')
         assert r.status_code == 400
 
-    # ── 撤销覆盖 vs 非 task_name 维度规则（2026-09-18 修隐患）──
-    # 台账的「撤销覆盖」只停用 `match_field='task_name'` 的规则。若该任务名的归因
-    # 来自 L2/L3 维度规则（这类规则同时覆盖同维度下的**其他**任务名），撤销既无效、
-    # 也不该由单行编辑顺手停掉 → 必须走响应 `blocked` 如实回报，不能报假成功。
+    def test_attribution_requires_activity_type(self):
+        """归因脱离 activity_type 单发 → 400
 
-    def test_clear_reports_blocked_when_l2_rule_still_covers(self):
-        """只有 L2 规则时：cleared=0，且 blocked 说明是哪条规则还在生效"""
-        TaskMeta.objects.create(task_name='刷手机', activity_type='被动消耗', default_attribution='成长')
-        rule = RedemptionAttrRule.objects.create(
-            match_field='activity_type', match_value='被动消耗', attribution='流失',
-            priority=5, is_active=True)
-        res = self._post({'task_names': ['刷手机'], 'activity_type': '被动消耗',
-                          'keep_default': True, 'clear_rule': True})
-        assert res['cleared'] == 0, res
-        assert res['updated'] == 1, res
-        b = res['blocked']
-        assert len(b) == 1, res
-        assert b[0]['task_name'] == '刷手机'
-        assert b[0]['rule_field'] == 'activity_type' and b[0]['rule_value'] == '被动消耗'
-        assert b[0]['attribution'] == '流失'
-        rule.refresh_from_db()
-        assert rule.is_active is True          # L2 规则不得被单行编辑波及（它覆盖多个任务名）
-
-    def test_clear_task_name_rule_then_l2_takes_over(self):
-        """同名规则撤掉后由 L2 规则接管 → cleared=1 且 blocked 非空（不能只报「已撤销」）"""
-        TaskMeta.objects.create(task_name='刷手机', activity_type='被动消耗', default_attribution='成长')
-        own = RedemptionAttrRule.objects.create(
-            match_field='task_name', match_value='刷手机', attribution='维持',
-            priority=100, is_active=True)
-        RedemptionAttrRule.objects.create(
-            match_field='activity_type', match_value='被动消耗', attribution='流失',
-            priority=5, is_active=True)
-        res = self._post({'task_names': ['刷手机'], 'activity_type': '被动消耗',
-                          'keep_default': True, 'clear_rule': True})
-        assert res['cleared'] == 1, res
-        assert len(res['blocked']) == 1, res
-        own.refresh_from_db()
-        assert own.is_active is False                                  # 同名规则软停用
-        assert res['blocked'][0]['rule_field'] == 'activity_type'      # 接手的是 L2 规则
-        assert resolve_attribution(['刷手机'])['刷手机'] == '流失'
-
-    def test_clear_returns_empty_blocked_when_truly_reverted(self):
-        """只有同名规则时：撤销后确实回到类型默认 → blocked 为空"""
-        TaskMeta.objects.create(task_name='休闲娱乐', activity_type='被动消耗', default_attribution='流失')
-        RedemptionAttrRule.objects.create(
-            match_field='task_name', match_value='休闲娱乐', attribution='成长',
-            priority=100, is_active=True)
-        res = self._post({'task_names': ['休闲娱乐'], 'activity_type': '被动消耗',
-                          'keep_default': True, 'clear_rule': True})
-        assert res['cleared'] == 1, res
-        assert res['blocked'] == [], res
-        assert resolve_attribution(['休闲娱乐'])['休闲娱乐'] == '流失'   # 回到 TaskMeta 默认
-
-
-@pytest.mark.django_db
-class TestLedgerCarriesRuleField:
-    """台账每行须带 `rule_field`/`rule_value` —— 前端据此判断「撤销覆盖」能不能撤"""
-
-    URL = '/api/temporal/tasks/meta_ledger/'
-
-    def test_row_reports_rule_field_for_l2_rule(self):
-        from rest_framework.test import APIClient
-        TaskMeta.objects.create(task_name='刷手机', activity_type='被动消耗', default_attribution='成长')
-        RedemptionAttrRule.objects.create(
-            match_field='activity_type', match_value='被动消耗', attribution='流失',
-            priority=5, is_active=True)
-        items = APIClient().get(self.URL).data['items']
-        row = {i['task_name']: i for i in items}['刷手机']
-        assert row['attribution_source'] == 'rule'
-        assert row['rule_field'] == 'activity_type' and row['rule_value'] == '被动消耗'
-        assert row['rule_id'] is not None
-
-    def test_row_rule_field_is_null_for_default_source(self):
+        旧实现会走进「只改开关」分支、把 attribution 丢掉：接口 200、值没变。
+        """
         from rest_framework.test import APIClient
         TaskMeta.objects.create(task_name='写作', activity_type='深度工作', default_attribution='成长')
-        items = APIClient().get(self.URL).data['items']
-        row = {i['task_name']: i for i in items}['写作']
-        assert row['attribution_source'] == 'default'
-        assert row['rule_field'] is None and row['rule_value'] is None and row['rule_id'] is None
+        r = APIClient().post(self.URL, {'task_names': ['写作'], 'attribution': '谋生'}, format='json')
+        assert r.status_code == 400
+        assert TaskMeta.objects.get(task_name='写作').default_attribution == '成长'
+
+    def test_counts_growth_toggle_does_not_touch_attribution(self):
+        """只发成长计时开关：归因不动（`None ≠ False` 的反面同样要命）"""
+        TaskMeta.objects.create(task_name='写作', activity_type='深度工作',
+                                default_attribution='成长', counts_growth=False)
+        self._post({'task_names': ['写作'], 'counts_growth': True})
+        m = TaskMeta.objects.get(task_name='写作')
+        assert m.counts_growth is True
+        assert m.default_attribution == '成长' and m.activity_type == '深度工作'
 
 
 @pytest.mark.django_db

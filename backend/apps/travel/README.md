@@ -1,5 +1,7 @@
 # Travel — 旅行记录 + 旅行计划
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 ## Models
 
 | Model | Table | 用途 |
@@ -17,6 +19,7 @@
 | `MapDataService` | 地图展示数据聚合（**地级市热力** + 城市气泡）：`heatmap` 项为 `{name, count, level, sources}`（level 取 偶尔/多次/频繁/深度游；`sources` 为计数来源明细，如宁德市含「福鼎市×1、寿宁县×1」），另返回 `heat_max`；气泡按坐标表**规范名归并**（「温州」+「温州市」= 一个气泡），同 `tname` 的多次到访聚合为一次气泡并累加次数/花费/年份 |
 | `resolve_prefecture(city, parent)` | 把「城市 + 上级」归到地级市（tname 本身是地级市 / tname 是县级市或区县则取其 parentnode / 直辖市保留区名）；索引来自 `toolkit_city_coordinate` 的地级市·自治州·地区·盟，进程内缓存，`reset_prefecture_index()` 可失效 |
 | `heat_level(count)` | 到访次数 → 热力档位（1=偶尔 / 2=多次 / 3-4=频繁 / ≥5=深度游） |
+| `bubble_size(total_cost, count)` | 城市气泡直径唯一实现（v3.64.2）：花费与次数**开方压缩**后才进 `BUBBLE_SIZE_MIN=8 / MAX=20` 区间；旧公式 1250 元就撞 50px 上限，几乎每座城同样大。改上限不是解法，先验「真实数据多久饱和」 |
 | `TravelStatsService` | 旅行统计总览（年度趋势、省份分布） |
 | `TravelPlanService` | 旅行计划业务：`recalculate_total` 重算子项合计、`get_stats` 计划统计 |
 | `TripLogService` | 行程日志：把已打卡心愿按「日期 + 地点」聚合为一天一张卡（含已沉淀足迹回填） |

@@ -101,11 +101,13 @@ class GoalReviewSerializer(serializers.ModelSerializer):
     """目标回顾序列化器"""
 
     review_type_display = serializers.SerializerMethodField()
+    # 复盘列表要显示「放弃的是哪条」，只给 goal id 等于让前端去猜
+    goal_title = serializers.CharField(source='goal.title', read_only=True, default='')
 
     class Meta:
         model = GoalReview
         fields = [
-            'id', 'goal', 'review_type', 'review_type_display',
+            'id', 'goal', 'goal_title', 'review_type', 'review_type_display',
             'review_date', 'score', 'what_worked', 'what_blocked',
             'next_adjustment', 'content', 'progress_note', 'created_at',
         ]
@@ -126,6 +128,9 @@ class GoalListSerializer(serializers.ModelSerializer):
     milestone_count = serializers.SerializerMethodField()
     is_tracking_mode = serializers.SerializerMethodField()
     sub_goals_count = serializers.SerializerMethodField()
+    # 🔴 进度有两个数，必须一起下发（§114.3）：手填的、和账本算的
+    progress_source = serializers.SerializerMethodField()
+    progress_ledger = serializers.SerializerMethodField()
     parent_goal_name = serializers.CharField(source='parent_goal.title', read_only=True, default='')
 
     class Meta:
@@ -134,7 +139,8 @@ class GoalListSerializer(serializers.ModelSerializer):
             'id', 'title', 'description', 'category', 'category_display',
             'tags', 'priority', 'priority_display', 'status', 'status_display',
             'days_remaining',
-            'progress_percentage', 'start_date', 'deadline', 'year',
+            'progress_percentage', 'progress_source', 'progress_ledger',
+            'start_date', 'deadline', 'year',
             'notes', 'reward_value', 'user_id',
             'enable_reward', 'default_reward_amount', 'goal_completion_bonus', 'total_reward_issued',
             'action_count', 'milestone_count', 'is_tracking_mode',
@@ -170,6 +176,26 @@ class GoalListSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'milestone_count'):
             return obj.milestone_count
         return obj.milestones.count()
+
+    def get_progress_source(self, obj):
+        """进度来源。当前只有一种：`manual`（手填）。
+
+        🔴 存在的意义是**别让人误以为它是算出来的**：
+           `progress_percentage` 是输入字段，接口可写、界面能改；
+           系统里另外还有一个可复算的「账本进度」，见 `progress_ledger`。
+           两个数并存时人一定会相信更乐观的那个 —— 所以把来源写进数据，
+           而不是靠文档记着。
+        """
+        return 'manual'
+
+    def get_progress_ledger(self, obj):
+        """账本口径进度（只读）：有子目标取平均，否则里程碑完成率。
+
+        ⚠️ 返回 `None` 不是 0 —— 「这个目标没有账本」与「账本说 0%」
+           是两件事，前端要分开展示（`—` vs `0%`）。
+        """
+        from .services import GoalProgressService
+        return GoalProgressService.ledger_progress(obj)
 
     def get_is_tracking_mode(self, obj):
         """行为追踪模式：只有1个行为时切换"""
@@ -400,6 +426,10 @@ class OutputRecordSerializer(serializers.ModelSerializer):
     category_display = serializers.SerializerMethodField()
     difficulty_display = serializers.SerializerMethodField()
     fail_type_display = serializers.SerializerMethodField()
+    # 🔴 发生日期改为**必填**：统计与列表都按它过滤，留空 ⇒ 这条记录
+    #    既进不了「近 30 天」，也进不了「今年」，等于人间蒸发（v3.62.39 之前
+    #    确实有 1 条这么丢了）。宁可在录入时 400，也不要事后静默少一条。
+    occurred_at = serializers.DateField(required=True)
 
     class Meta:
         model = OutputRecord
@@ -428,15 +458,68 @@ class OutputRecordSerializer(serializers.ModelSerializer):
 
 
 class OutputStatsSerializer(serializers.Serializer):
-    """良品率统计序列化器"""
+    """产出统计序列化器
 
+    🔴 这里是一张**显式白名单**：少声明一个字段 = 前端静默丢键（§109）。
+       新增统计项必须同时加在这里，否则接口看着 200、前端拿到的就是 undefined。
+    """
+
+    window = serializers.CharField()
     total_records = serializers.IntegerField()
     good_count = serializers.IntegerField()
     defective_count = serializers.IntegerField()
     waste_count = serializers.IntegerField()
+    redo_count = serializers.IntegerField()
     yield_rate = serializers.FloatField()
     defect_rate = serializers.FloatField()
     waste_rate = serializers.FloatField()
+    # 样本门槛：低于 min_sample 时 sample_enough=False，前端不显示比例
+    min_sample = serializers.IntegerField()
+    sample_enough = serializers.BooleanField()
     by_category = serializers.DictField()
-    by_difficulty = serializers.DictField()
+    # `by_difficulty` 于 v3.62.39 停用（默认值占 16/22，且原页面结论是写死的文案）
+    by_fail_type = serializers.ListField()
+    top_fail_type = serializers.JSONField(allow_null=True)
+    fail_type_missing = serializers.IntegerField()
+    undated_count = serializers.IntegerField()
     monthly_trend = serializers.ListField()
+
+
+class GoalCheckupRowSerializer(serializers.Serializer):
+    """过程检查单行
+
+    显式白名单：与 `OutputStatsSerializer` 同一条理由 —— 少声明一个键，
+    前端就恒显 `--`，而且不会报错（§109 同族问题）。新增字段必须同时改这里。
+    """
+
+    id = serializers.IntegerField()
+    title = serializers.CharField()
+    status = serializers.CharField()
+    category = serializers.CharField()
+    priority = serializers.CharField()
+    life_dimension = serializers.CharField()
+    progress = serializers.IntegerField()
+    # 时间进度可能是 None（无截止日 / 无开始日 / 跨度太长），null 不是 0
+    time_progress = serializers.FloatField(allow_null=True)
+    progress_gap = serializers.FloatField(allow_null=True)
+    time_progress_reason = serializers.CharField()
+    start_date = serializers.DateField(allow_null=True)
+    deadline = serializers.DateField(allow_null=True)
+    days_left = serializers.IntegerField(allow_null=True)
+    last_activity_at = serializers.DateField(allow_null=True)
+    days_since_activity = serializers.IntegerField(allow_null=True)
+    milestones_total = serializers.IntegerField()
+    milestones_done = serializers.IntegerField()
+    verdict = serializers.CharField()
+    verdict_label = serializers.CharField()
+
+
+class GoalCheckupSerializer(serializers.Serializer):
+    """过程检查结果 —— 阈值随结果一起下发，前端不硬编码"""
+
+    as_of = serializers.DateField()
+    stall_days = serializers.IntegerField()
+    behind_gap = serializers.IntegerField()
+    horizon_years = serializers.IntegerField()
+    summary = serializers.DictField()
+    rows = GoalCheckupRowSerializer(many=True)

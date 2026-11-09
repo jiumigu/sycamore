@@ -830,7 +830,8 @@ class TestBottleneck:
 
 class TestCoverage:
 
-    def test_coverage_uses_redemption_window(self):
+    def test_coverage_uses_stage_window(self):
+        """覆盖率的分母是**阶段窗口**剩余天数（2026-11-02 前读的是赎回期单例）。"""
         row = calc.coverage_pct(41.0, date(2026, 10, 1), date(2029, 9, 30), TODAY)
         assert row['pct'] is not None
         # 今天(2026-09-21)还没进窗口 → 按整段窗口算，含首尾共 1096 天（2028 闰年）
@@ -840,7 +841,7 @@ class TestCoverage:
     def test_missing_window_returns_reason(self):
         row = calc.coverage_pct(41.0, None, None, TODAY)
         assert row['pct'] is None
-        assert row['reason'] == '赎回期窗口未配置'
+        assert row['reason'] == '阶段窗口未配置'
 
     def test_finished_window_returns_reason(self):
         row = calc.coverage_pct(41.0, date(2020, 1, 1), date(2021, 1, 1), TODAY)
@@ -952,7 +953,7 @@ class TestServiceGuards:
         # 还没有资产快照 → 钱这条腿算不出来，原因要写清楚
         assert data['cash']['days'] is None
         assert data['cash']['basis']
-        assert data['coverage']['reason'] == '赎回期窗口未配置'
+        assert data['coverage']['reason'] == '阶段窗口未配置'
 
     def test_analysis_lists_issues_with_category(self):
         category = _category()

@@ -46,12 +46,17 @@ class QuarterlyWorkbenchService:
     # ── 单模块季度聚合 ────────────────────────────────
 
     @classmethod
-    def _module_quarter_raw(cls, module: str, year: int, quarter: int) -> float:
+    def _module_quarter_raw(cls, module: str, year: int, quarter: int) -> float | None:
+        """季度三个月 raw 相加；三个月都没有原始记录 ⇒ None（不能当 0）。
+
+        注意 `+= None` 会直接 TypeError，所以先收齐再过滤（§120.3）。
+        """
         months = cls._quarter_months(quarter)
-        total = 0.0
-        for m in months:
-            total += ProgressAggregator._get_raw_value(module, year, m)
-        return total
+        values = [ProgressAggregator._get_raw_value(module, year, m) for m in months]
+        present = [v for v in values if v is not None]
+        if not present:
+            return None
+        return sum(present)
 
     @classmethod
     def _module_quarter_points(cls, module: str, year: int, quarter: int) -> float:
@@ -83,8 +88,10 @@ class QuarterlyWorkbenchService:
                 'label': meta['label'],
                 'color': meta['color'],
                 'points': round(cur, 2),
-                'raw_value': round(raw, 2),
+                'raw_value': round(raw, 2) if raw is not None else None,
+                'display_value': ProgressAggregator._display_value(mod, raw),
                 'unit': rule['unit'],
+                'zero_reason': ProgressAggregator._zero_reason(mod, raw),
                 'prev_quarter_points': round(prev, 2),
                 'qoq_change': round(qoq_change, 1),
                 'last_year_points': round(last_year, 2),

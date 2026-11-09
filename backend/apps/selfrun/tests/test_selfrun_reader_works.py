@@ -5,7 +5,11 @@
 ① **口径换源**：`output_count` / `content_output` 两条模板从
    「数日记流 MIGU 条数」改成「数作品库件数」；
 ② **`0` 是 `0`，不是 `None`** —— 「这周一件都没留」是事实，
-   与「系统取不到」（`module_value` 的 `redemption.runway`）是两件相反的事。
+   与「系统取不到」（比如某个取数器算不出来）是两件相反的事。
+
+⚠️ 2026-11-02 起 `module_value` 的 `redemption.runway` **不再**是「取不到」的例子：
+   它已经能真算（余额 ÷ 日均净支出 ÷ 30）。本文件原先拿它当反例，只是举例，
+   性质上与本文件测的 `works_count` 无关，故改为泛指。
 """
 import datetime as dt
 
@@ -21,15 +25,22 @@ pytestmark = pytest.mark.django_db
 
 
 class _FakeMetric:
-    """`works_count` 只看区间，不看 metric 的任何字段 —— 传个壳即可。"""
+    """`works_count` 只看区间与 `source_config.where`，其余字段一个都不读。
 
-    source_config = {'kind': 'works_count'}
-    pk = None
+    ⚠️ `where` 用 `None` 区分「没给」与「给了空字典」：两者都等于不过滤，
+       但测试要能明确表达「这条 KPI 就是没配类型」。
+    """
+
+    def __init__(self, where=None):
+        self.source_config = {'kind': 'works_count'}
+        if where is not None:
+            self.source_config['where'] = where
+        self.pk = None
 
 
-def _mk(name, when):
+def _mk(name, when, kind='other'):
     """建一件作品并把 `created_at` 挪到指定时刻（`auto_now_add` 挡不住 update）。"""
-    work = Work.objects.create(name=name)
+    work = Work.objects.create(name=name, kind=kind)
     Work.objects.filter(id=work.id).update(
         created_at=timezone.make_aware(dt.datetime.combine(when, dt.time(12, 0))),
     )
@@ -75,7 +86,44 @@ class TestWorksCountReader:
 
     def test_registry_matches_constants(self):
         assert set(READERS) == set(READER_KEYS)
-        assert READER_WHERE_KEYS['works_count'] is None
+        # v3.64.30 起可按作品类型过滤（「这月画了几张」）
+        assert READER_WHERE_KEYS['works_count'] == 'work_kind'
+
+    def test_filter_by_work_kind(self):
+        """🔴 按类型过滤 —— 月度「画 ≥2 张」自动溯源就走这条路。"""
+        start, end, _ = _week(timezone.localdate())
+        day = start + dt.timedelta(days=1)
+        _mk('一张画', day, kind='drawing')
+        _mk('一件绣', day, kind='embroidery')
+        _mk('一篇文章', day, kind='article')
+
+        out = works_count(_FakeMetric(where={'work_kind': 'drawing'}), start, end)
+        assert out['value'] == 1.0
+        assert [r['label'] for r in out['breakdown']] == ['一张画']
+
+    def test_no_work_kind_means_all_kinds(self):
+        """留空 = 不限类型。
+
+        🔴 别默认成「只数某一种」—— 默认值一变，所有既有「留下件数」的读数
+           会跟着变，而且是静默变（数字仍落在合理区间）。
+        """
+        start, end, _ = _week(timezone.localdate())
+        day = start + dt.timedelta(days=1)
+        _mk('一张画', day, kind='drawing')
+        _mk('一篇文章', day, kind='article')
+
+        assert works_count(_FakeMetric(), start, end)['value'] == 2.0
+        assert works_count(_FakeMetric(where={}), start, end)['value'] == 2.0
+
+    def test_unknown_work_kind_raises(self):
+        """🔴 类型名配错**必须报错**，绝不能返 0。
+
+        返 0 的话，「真的没画」和「类型名拼错了」在页面上是同一个 `0`，
+        而 `0` 是一条**结论**（这月一张都没画）—— 不能由一个笔误冒充。
+        """
+        start, end, _ = _week(timezone.localdate())
+        with pytest.raises(ValueError, match='未知的作品类型'):
+            works_count(_FakeMetric(where={'work_kind': 'drwaing'}), start, end)
 
     def test_no_stale_rule(self):
         """🔴 「这周一件都没留」不是数据源过期 —— 给它 stale 会与 `empty` 打架。"""

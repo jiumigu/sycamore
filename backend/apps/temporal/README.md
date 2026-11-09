@@ -1,5 +1,7 @@
 # Temporal — 时间感知
 
+> 文档对齐 v3.64.34 ｜ 最后核对 2026-11-07
+
 ## Management Commands
 
 | 命令 | 用途 |
@@ -12,6 +14,7 @@
 | `**import_worklog**` | **工作日志 Excel → 「牛马工作」时间记录（v3.58.7）** |
 | `**reconstruct_worktime**` | **月度加班台账 → 逐日时间记录（反推，v3.60.8）** |
 | `**check_meta_consistency**` | **只读报告「常量表种子 vs 库真源」的三类差异（v3.60.37）** |
+| `label_manual_source` | 把「来源为空」的历史记录按核实结论补记为 `manual`（默认预演，`--apply` 落库；v3.64.34） |
 
 ### `check_meta_consistency`（v3.60.37）——「种子 vs 真源」漂移报告
 
@@ -117,15 +120,23 @@ python manage.py reconstruct_worktime <xlsx 路径> --apply    # 落库
 | TemporalTask | temporal_time_atracker_tasks_list | 活动追踪任务（**managed=False 外部表，绝不加列**） |
 | OneDayPage | temporal_oneday_page_list | 日记记录（managed=False） |
 | WeeklyTimeCache | temporal_weekly_time_cache | 周度固化表，由 `refresh_weekly_cache` 重建。⚠️ **当前无消费方** —— 168h 周结构走 `get_168h_structure()` **实时聚合源表**、不读它；消费它的 `weekly-tracking` 接口与前端页面**均已退役**（见「周度追踪」节） |
-| TaskMeta | temporal_task_meta | 任务元数据（`activity_type` = v0.3 的 **L2 类型**，9 类预设 + 未归类） |
+| TaskMeta | temporal_task_meta | 任务元数据（`activity_type` = v0.3 的 **L2 类型**，9 类预设 + 未归类；`counts_growth` = **成长计时的唯一依据**） |
+| TimerSession | temporal_timer_session | 实时计时会话（`task_id` 是**裸整数、不加 FK**：目标是 `managed=False` 外部表，只记写进了哪条，不参与聚合） |
 | ActivityGroup | temporal_activity_group | ⚠️ **已废弃** —— v0.3 起取消该层，表与 `TaskMeta.group` 列**保留不删**，代码不再读写 |
 
 ## Services
 - TemporalStatsService：分类统计 / 平衡轮 / 排名
-- CSVImportService：CSV 导入
+- CSVImportService：CSV 导入。**两步走**：`preview_from_csv()` 只读预演 → `import_from_csv(skip_rows=…)` 落库
 - OneDayPageService：日记统计服务
 - DailyLogAutoService：每日自动生成默认日记（当天无任何日记时创建"幸福未被发现，就叫做普通的一天"），兜底入口在 OneDayPageViewSet.list()，管理命令为 `generate_daily_log`
 - **`find_duplicate_task()`：导入判重的单一真源**（CSV 导入与 `migrate_atracker` 共用）
+- **`find_overlaps()`：时段重叠检查**（只读；任意任务名、交集 ≥ `OVERLAP_MIN_SECONDS=60`；只提示不阻断；每条命中带 `relation` 四类）
+- **`classify_overlap()`：重叠语义的唯一实现**（`contained` / `edge` / `review` / `likely_dup`），导入预演按它分拣
+- **`TemporalStatsService.get_frequent_names()`**：近 N 个自然月最常用任务名（次数 ↓ → 累计时长 ↓ → 最近使用 ↓ → 名称 ↑）
+- **`timer.py`：实时计时写库的唯一入口**（`start` / `stop` / `discard` / `get_running` / `elapsed_of`）
+- **`classify_source()`：批次号 → 来源词的唯一实现**（纯字符串判断、**不查库** —— 序列化器每行都调）
+- **`list_record_sources()`：来源总览**（批次明细 + 按 kind 汇总，给「来源批次」弹窗）
+- **`make_batch_id()`：新导入批次号**（`import_YYYYmmdd_HHMM_xxxx`，前缀仍是 `import_`）
 
 ### 导入判重（v3.60.29，改判重前必读）
 
@@ -143,6 +154,80 @@ python manage.py reconstruct_worktime <xlsx 路径> --apply    # 落库
   且**故意允许**与 ATracker 记录并存（见 `test_overtime_recon.py`）。
 - 用例：`apps/temporal/tests/test_dedup.py`（11 条）。推导：`TECH-NOTES §64`。
 
+### 导入预演与「重叠的四类」（v3.64.32，改分类前必读）
+
+导入是**两条录入路径**（电脑手工/计时、手机记录后导入）唯一的交汇点，也是唯一
+「批量、离线、事后」的入口 —— 冲突只可能在这一刻集中暴露。所以落库前先预演：
+`POST /tasks/preview_import/` 只读，`POST /tasks/import_csv/` 收 `skip_rows` 才写。
+
+**两个维度正交，别混**（混了就说不清「这条为什么没进来」）：
+
+| 维度 | 取值 | 谁负责 |
+|---|---|---|
+| **出路** | `already_exists`（库里已有同一条 ⇒ 落库时跳过或更新） | `find_duplicate_task` |
+| **关系** | `contained` / `edge` / `review` / `likely_dup` | `classify_overlap` |
+
+🔴 **判据顺序不能换：先判包含，再看比值。** `_overlap_ratio` 的分母是「较短一方」，
+所以包含关系的比值恒为 1.0 —— 先看比值会把本库 **214 对合法细分（占全部重叠的 82%）**
+全判成「疑似重复」。
+
+| 类 | 判据 | 本库实测 | 预演如何处置 |
+|---|---|---|---|
+| `contained` | 短的完全落在长的里面，且长度比 < 0.8 | 214 对 | 只计数，不列、不勾 |
+| `edge` | 非包含，交集 ≤ 10 分钟且 < 30% | 36 对 | 只计数，不列、不勾 |
+| `review` | 其余交叉 | 7 对 | 列出，**不预勾** |
+| `likely_dup` | 长度接近（≥0.8）且重合 ≥ `DUP_OVERLAP_RATIO` | 5 对 | 列出，**默认勾「不导入」** |
+
+不变式（`test_import_preview.py` 钉住）：`total = inner_duplicate + already_exists + clean + Σ四类`。
+
+- 🔴 **含 `skip_rows` 的行号是 CSV 物理行号，不是数组下标**：解析失败的行会占掉一个行号。
+  传成 0-based 或换了文件 ⇒ 后端 **400 且一条都不写**（静默忽略等于「跳了不该跳的行、还报成功」）。
+- 🔴 **预演不判「新增还是更新」**：那要按字段差异定，是落库时的事。前端因此不说「将新增 N 条」——
+  编一个数出来就是假精确。
+- `reconstruct_worktime` 生成的推定加班**不进预演范围**（它按 `import_batch` 隔离，见上）。
+- 用例：`apps/temporal/tests/test_import_preview.py`（16 条）。推导：`TECH-NOTES §157`。
+
+### 记录来源（v3.64.33，加写入方前必读）
+
+「这条记录是谁写进来的」唯一依据是 `TemporalTask.import_batch` 一列（外部表加不了 kind 列），
+分类在 `services.classify_source`，值域在 `constants.SOURCE_KINDS`：
+
+| kind | 认到的批次 | 谁写 |
+|---|---|---|
+| `manual` | `manual` | 任务清单「手工新增」（`perform_create` 保存后补写，serializer 里是 read_only） |
+| `timer` | `timer` | 实时计时 |
+| `csv` | `import_*` | CSV 导入 |
+| `worklog` | `worklog` | `import_worklog` |
+| `overtime_recon` | `overtime_recon*` | `reconstruct_worktime` |
+| `atracker` | `atracker` | `migrate_atracker`（v3.64.34 才补上，此前**完全不写**） |
+| `unlabeled` | NULL / 空串 | 早期记录 |
+| `other` | 其余 | **有批次号但代码没认出来** |
+
+🔴 **`unlabeled` 与 `other` 必须分开**：前者是「不知道从哪来」（事实缺失），
+后者是「知道有来源、只是没认出来」（批次号要原样亮出来）。合成一个兜底桶 = 线索被抹掉，
+且将来新写入方落进桶里时完全静默。
+
+🔴 **新增写入方 ⇒ 必须登记 kind**（`SOURCE_KINDS` + `SOURCE_BATCH_EXACT`/`PREFIXES`），
+否则它会以 `other` 的形式出现 —— 看得见、说不清。
+
+- 序列化器每行下发 `source_kind` / `source_label`；**中文词只在后端一份**，前端不写映射。
+- 筛选 `?source=<kind>` 时，`unlabeled` 必须用 `Q(import_batch__isnull=True) | Q(import_batch='')`：
+  `filter(import_batch__in=[None])` 生成 `IN (NULL)`，**永远不匹配**；库里两种空都真实存在。
+- 非法 `source` 值 ⇒ **400**，不返回空列表（空列表会被读成「这个来源一条都没有」）。
+- 批次清单里的「最后改动」是 `updated_at`（`auto_now`，改备注也会刷新）——**不是导入时间**，别这么叫。
+- 用例：`apps/temporal/tests/test_source_visibility.py`（24 条）。推导：`TECH-NOTES §158`。
+
+#### 历史空来源的补记（v3.64.34）
+
+`label_unlabeled_source(target, *, ids=None, dry_run=True)` + 命令 `label_manual_source`（默认预演，
+`--apply` 落库，`--exclude <id,id>` 逐行否决）。v3.64.34 用它把 41 条历史记录按用户核实的结论
+补成 `manual`，那之后 `unlabeled` **应恒为 0**。
+
+🔴 这是**数据修复**，不是分类：分类是纯函数（批次号 → 词），补记写的是人的断言，落库后无法反推。
+所以它只动 `import_batch` 为空的行、必须 dry-run、必须逐行打印；不按时间/任务名猜来源
+（`updated_at` 被后续改写刷过，`task_description` 也可能被 `import_worklog` 规则 A 回填过）。
+`unlabeled` / `other` 不接受作为写入目标（直接 `ValueError`）。推导：`TECH-NOTES §159`。
+
 ## 三层分类模型（v0.3，勿改回颠倒层级）
 
 ```
@@ -151,7 +236,8 @@ L2 类型  TaskMeta.activity_type，10 类预设 + 未归类
 L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
 ```
 
-- ⚠️ **ActivityGroup 层已取消**，不要再引入中间层。叠加归因覆盖靠 `attr_rule`，不靠 group。
+- ⚠️ **ActivityGroup 层已取消**，不要再引入中间层。归因只由 `TaskMeta.default_attribution`
+  一列决定（v3.64.16 起）；别再引入 `attr_rule` 之类的外挂层 —— 它曾让赎回期的六类小时静默漏数。
 - 🔴 `TASK_TO_L2` 是**初始种子、不是真源**（v3.60.37 拍板）：真源 = `temporal_task_meta`，
   运行时所有统计（贡献图 / 时间统计 / 台账）都读库里的值。种子表**只在「库里还没有该 task_name」
   时生效**（`_ensure_task_meta` 建档 / `migrate_temporal_categories` 回填），建完即永久退出运算
@@ -163,6 +249,76 @@ L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
   - **新增 L1 词或改某个 task_name 的挂靠时，常量与迁移必须成对做** —— 只改常量是静默的部分修复。
   - 漂移凭据：`manage.py check_meta_consistency`（只读，报 A/B/C 三类，见上）。
 - ⚠️ `ATTRIBUTION_ORDER`（价值序）**只许纯增量插入，不许挪动已有词次序**：并列时靠前者胜，挪位会让历史数据「并列取谁」的结果静默改变。钉在 `test_temporal_v03.py::test_relation_slot_and_order_invariance`。
+
+### 「没配 L1 归因」是一种独立状态（v3.64.28）
+
+`default_attribution` 为空 ⇒ 生效值兜底「成长」，但**这不等于配好了**。
+`meta_ledger` 因此同时下发三个键，各自管一件事：
+
+| 键 | 含义 | 用途 |
+|---|---|---|
+| `default_attribution` | 表里**真存**的值（可能为 `None`） | 🔴 下拉框绑这个 |
+| `effective_attribution` | 算出来的生效值（含兜底） | 占比条、L1 小计、筛选 |
+| `is_attr_unset` | 是否靠兜底 | 空态样式、`?unset_attr_only=1` 筛选 |
+
+`summary.unset_attr_count / unset_attr_hours` 与「未归类」并列上报。
+
+🔴 曾经只下发 `effective_attribution`：映射编辑器把兜底值当成已选项填进下拉，
+于是「阶段账本说 8.99h 没设默认归因」与「编辑器显示已配『成长』」两屏互相打架。
+用户点「去归好」进来，看到那格明明白白写着「成长」，只能得出「明明都已经配置好了」
+——而且无处可改。**同一个事实两个说法，比不说更坏。**
+钉在 `test_temporal_v03.py::test_unset_attribution_is_its_own_state`。
+
+⚠️ 「未归类」（L2 没配）与「未配归因」（L1 没配）是**两个维度**：前者答「这是什么活动」，
+后者答「它对你意味着什么」。不要合并成一个「未配」——填一次不会两样都好。
+
+### `counts_growth` —— 成长计时（v3.64.11）
+
+- **每周状态的「成长小时数」只认这个开关**（`temporal_task_meta.counts_growth`），
+  对应前端「映射编辑器」表格里那一列。取数器是 `selfrun.readers.growth_hours`。
+- 此前是隐式的「L2 = 深度工作」：界面上看不见，想把一个**新分类**算进成长
+  只能把它塞进「深度工作」桶；把某项任务挪出深度工作又会顺手改掉成长口径。
+- 🔴 **改 L2 不再自动改变成长计时**。要让某项任务算进成长，去映射编辑器勾上它。
+- 迁移 `0017` 已把当时 `L2 = 深度工作` 的任务名回填为 True ⇒ 改口径前后算的是**同一批任务**。
+- ⚠️ `batch_set_meta` 的 `counts_growth` **不传 = 不动**（`None ≠ False`）：
+  写成 `bool(data.get(...))` 会让「批量改 L2」把整批的成长计时清零，且不报错。
+  钉在 `test_task_meta_growth.py::test_absent_key_means_do_not_touch`。
+
+### `daily_role` —— 今天的三条线（v3.64.13：睡眠 / 午睡 / 流失）
+
+仪表盘首屏那张卡的唯一依据。**两条线看 `daily_role`**（`temporal_task_meta.daily_role`，
+对应映射编辑器里「护栏角色」那一列下拉：不参与 / 夜间睡眠 / 午睡）；
+**「流失」不看角色**，直接读 L1 归因。
+
+- **角色由标记决定，不看任务名**。按名字判角色的话，改个名护栏就静默变成
+  「未记录」，而且看不出是改名引起的 —— 与 `counts_growth` 当年那条隐式口径同病。
+- 🔴 **流失为什么按归因、不按角色**：`玩游戏` / `刷短视频` / `看小说` 在台账里本来
+  就归「流失」，再标一遍角色是同一件事量两次，而且标漏一个（比如装了个新的短视频
+  App）这条线就会静默低估。归因取数用 `resolve_attribution`（映射表那列 + 兜底），
+  **与贡献图、时间统计页同一把尺子**。用例 `TestLostIsAttributionDriven` 钉住了这一点。
+- 🔴 **两支归属尺子，不能混**：
+  - 夜间睡眠按**醒来那一刻**归属（`start_time + duration` 落在哪天算哪天）。
+    23:40 睡 8h 算次日。若按 `start_time` 归属，**上午打开页面会永远显示
+    「今天还没有睡眠记录」** —— 不报错、数字看着也合理。
+  - 午睡 / 流失按开始时刻归属（都不跨日；跨零点的一整段归开始那天）。
+- 🔴 **阈值只在本 app 的 `constants.DAILY_GUARD_LINES`**（8h / 1.5h / 4h），
+  前端 0 个数字，只按 `status` 上色。⚠️ 别在文案里再抄一遍数字 ——
+  曾经那句「≤2h」在阈值改成 4h 后就成了假话。
+- 🔴 **三档状态，没有兜底桶**：`ok` / `off` / `unrecorded`。
+  `unrecorded` **永远不等于达标** —— 当天没记就照实说没记，不拿 0 小时冒充
+  「没流失」（`null` 与 `0` 是两件事）。
+- 🔴 **「还没配」与「配了但今天没记」是两种不同的没有**，文案分开
+  （`configured` 字段区分），否则用户会去翻记录找不存在的缺失。
+  归因线的 `configured` = 台账里有没有任务名的默认归因是「流失」。
+- ⚠️ `batch_set_meta` 的 `daily_role`：**不传 = 不动**，**空串 = 退出护栏（有效值）**。
+  写成 `if role:` 会让「改回不参与」变成一个不发请求的假操作。
+  钉在 `test_daily_guards.py::TestBatchSetRole::test_empty_string_clears_role`。
+- 副作用一处：标成睡眠类的任务名会并入贡献图排除名单
+  （`services.contrib_excluded_names()` = 常量名单 ∪ 角色名单，取并集防「还没标」时口径变宽）。
+- 📌 历史：v3.64.12 的第三条线是「游戏 ≤ 2h」，v3.64.13 换成「流失 ≤ 4h」。
+  理由有二：① 游戏是流失的子集，两根线量同一件事；② 那条线**永远不会亮**
+  （实测历史最高 1.37h）。换后近 14 天有两天真的越线（4.43h / 4.78h）。
+  迁移 `0019_taskmeta_drop_game_role` 把 `daily_role='game'` 的行清空。
 
 ## Constants
 - 旧四分类（`CATEGORY_COLORS` / `TASK_CATEGORY_MAPPING` 的值域）：**工作 / 学习 / 生活 / 兴趣记录**（含颜色与图标）。
@@ -178,7 +334,7 @@ L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
 ### Tasks
 | 方法 | 端点 | 用途 |
 |------|------|------|
-| GET/POST | /tasks/ | 任务列表 / 手工新增（v3.58.6） |
+| GET/POST | /tasks/ | 任务列表 / 手工新增（v3.58.6）。筛选参数：`?year=` `?month=` `?attribution=` `?activity_type=` `?unclassified=1` `?task_name=` `?date_from=&date_to=` `?search=`，以及 **`?source=<kind>`（来源，v3.64.33，非法值 400）** 与 **`?import_batch=<批次号>`（批次级钻取，与 source 取交集）** |
 | GET/PATCH/DELETE | /tasks/&lt;id&gt;/ | 详情 / 编辑 / 删除 |
 | GET | /tasks/task_names/ | 所有任务名称 |
 | GET | /tasks/stats/ | 统计总览 |
@@ -191,11 +347,15 @@ L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
 | GET | /tasks/daily_detail/ | 单日任务明细（`?date=`；`&scope=contrib` = 按**贡献图口径**取，即排除不计入贡献图的任务） |
 | GET | /tasks/distribution/ | 时长分布 |
 | GET | /tasks/meta/ | 任务元数据（**分类台账**主体，非「未归类池」） |
-| GET | /tasks/meta_ledger/ | 分类台账（编辑 / 撤销覆盖的入口） |
+| GET | /tasks/meta_ledger/ | 分类台账（**改归因的唯一入口**）；`?growth_only=1` 只看计入成长计时的任务名、`?role_only=1` 只看标了护栏角色的；每行带 `counts_growth` / `daily_role`，概要带 `growth_count` / `growth_hours` / `role_count` |
+| GET | /tasks/daily_guards/ | **今天的三条线**（睡眠 / 午睡 / 流失；`?date=YYYY-MM-DD`，不传 = 今天）：三条线各给实测值 / 阈值 / 状态（`ok` / `off` / `unrecorded`），口径见上「`daily_role`」 |
 | GET | /tasks/unclassified/ | 未归类任务（**只是 meta 的筛选态**） |
-| POST | /tasks/batch_set_meta/ | 批量设置 L2 类型 |
+| POST | /tasks/batch_set_meta/ | 批量设置 L2 类型 / L1 归因 / **成长计时** / **护栏角色**（`counts_growth`、`daily_role` 均可单独发；不传 = 不动，`daily_role` 传空串 = 退出护栏） |
 | GET | /tasks/sunburst/ | 结构图（三层同心 pie 数据） |
 | GET | /tasks/completeness/ | 记录完整度（分母默认 16h/天） |
+| GET | /tasks/frequent_names/ | 近 N 个自然月常用任务名（`?months=3&limit=10`；非整数 / 越界 **400**，不静默回退） |
+| GET | /tasks/check_overlap/ | **只读**时段重叠检查（`start_time`/`end_time` 必填，`exclude_id`/`task_name` 可选；交集 ≥ 60s，按交集时长倒序） |
+| GET | /tasks/sources/ | **来源总览**（v3.64.33，只读）：全库按批次 + 按 kind 汇总；含 `total_records` / `total_batches` / `unlabeled_count` / `items[]` / `kinds[]` |
 
 **写入口径（v3.58.6，手工新增 / 编辑）**：**不要传 `duration_hours`** —— 起止时间都给时，
 后端按「结束 − 开始」算出时长，并派生 `year/mon/day/week/quarter`（这几列是 `read_only`，
@@ -203,6 +363,31 @@ L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
 `end <= start` 返回 **400** 且错误挂在 `end_time` 上。派生统一走 `services.build_time_fields()`——
 CSV 导入复用同一函数但**不传 `end`**（保留 ATracker 自带时长，含计时器暂停）。新出现的
 `task_name` 会自动进 `TaskMeta`（未命中映射表则进「未归类」桶），改名的旧名字**不自动删**。
+
+### 实时计时（Timer）
+
+前缀 `/api/temporal/timer/`
+
+| 方法 | 端点 | 用途 |
+|------|------|------|
+| GET | /running/ | 当前会话 + **后端算好的** `elapsed_seconds`（前端只当锚点） |
+| POST | /start/ | 开始计时（`task_name`）；若已有运行中会话，先自动收掉旧的 |
+| POST | /stop/ | 停止并入账（`session_id`；>4h 返回 **409 too_long**，带 `allow_long` 才写） |
+| POST | /discard/ | 丢弃会话，不入账 |
+
+- 🔴 **写库只有 `apps/temporal/timer.py` 一处**，视图只做参数校验与错误码转换 —— 避免长出第二条写入路径。
+- 入账必须经 `TemporalTaskSerializer` 派生时长/日历字段；保存后再补 `import_batch='timer'`（serializer 里它是 `read_only`，放 payload 会被静默忽略），最后 `_ensure_task_meta`。
+- `MIN_SECONDS=30`：更短的会话不写；`LONG_SECONDS=4h`：忘记停止时自动收掉的旧会话**超长不入账**（`too_long_dropped`），宁可少一条也不写 24 小时脏数据。
+
+### 时段重叠提醒（v3.63.6）
+
+- `GET /tasks/check_overlap/` 是**只读**判据，唯一实现在 `services.find_overlaps()`；**不在 `create` 上设 409**。
+- 为什么：真库里「牛马工作 07:46–18:00」内套「代码编程」是常态；且 CSV 导入 / 计时器入账 / 加班重构共用一张表，一道闸门会同时打回四条路径 ⇒ **重叠只能提示，由用户决定**（§129）。
+- 阈值是 `60s` 不是 `0`：首尾相接是 ATracker 正常形态，秒级抖动须放过。
+- 前端保存前先查；命中弹确认（同名 = 很可能重复新增 / 异名 = 可能是大段+细分），查接口失败**不阻断保存**但要 warning。
+- 每条命中带 `relation`（四类，见上文「导入预演」）：单条录入**不用**它，导入预演用它分拣。
+- **单条录入有提示、批量导入也要有** —— v3.64.32 之前导入只按「同名」判重，
+  异名重叠一律静默（本库 262 对重叠里，同名只有 1 对）。这就是导入要分两步的原因。
 
 `contrib` 的两种响应形态：
 - **量值模式**（`mode: "value"`，默认 `hours`）：`data: [{date, value}]`，value 是该 metric 的当日聚合值。

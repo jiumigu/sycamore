@@ -1,5 +1,7 @@
 # Health — 健康管理
 
+> 文档对齐 v3.64.7 ｜ 最后核对 2026-10-30
+
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
@@ -74,6 +76,13 @@ HealthStatsService 提供 7 方法：summary / milestones / daily_trend / calend
 - `duration_days` 可自动算（结束 − 开始），也可**手动覆盖**（提前结束时以实际为准）
 - `cycle_days` 是**本次记录的周期跨度**，与上一条的间隔不是一回事
 - `stats`（平均周期 / 平均偏移 / 下次预测）**统一按最近 12 个月**取窗口 —— 更早的周期会让预测被历史漂移带偏
+- **可空日期不能传空字符串**（v3.64.7 起）：`end_date` 模型是 `null=True`，但 DRF 的 `DateField`
+  收到 `''` 会判「格式错」，于是「这次还没结束、先不填结束日期」变成必然失败。
+  请求体请传 `null` 或省略；前端负责把 `''` 归一成 `null`
+- **报错文案是中文、由序列化器自己提供**：`start_date` / `end_date` 走 `error_messages`；
+  同一天重复由 `validate()` 出中文（`Meta.validators = []` 收掉了 DRF 自动生成的
+  `The fields user_id, start_date must make a unique set.`）。自定义 `validate()` 会排除
+  `self.instance.pk`，否则编辑自己不换日期也会被自己拦住 —— 库层约束仍在，只换文案不撤校验
 
 ### API Endpoints
 

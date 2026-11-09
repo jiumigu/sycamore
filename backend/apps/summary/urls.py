@@ -10,5 +10,4 @@ router.register(r'', views.SummaryViewSet, basename='summary')
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('profile/', views.PersonalProfileView.as_view(), name='personal-profile'),
 ]

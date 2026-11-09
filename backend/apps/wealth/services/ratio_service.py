@@ -19,6 +19,10 @@
        （完全靠主动收入），而「负债明细没录」根本不构成结论。
        用 0 冒充会让「没录入数据」显示出满分健康度 —— 正是报告点名
        要避免的「阈值与结论脱钩」。
+       ⚠️ 但这条只管「不可知」，**不**管「结论本来就是 0」：台账里录过、
+       且全部「已结清」是**确定的没有债**，DTI 必须给 0%，不许判「数据不足」。
+       否则用户还清最后一笔的那天，界面从「有个数」变成「不可用」——
+       正好把最健康的一刻藏起来（用户 2026-10-29 报的就是这个）。
     ④ **提示文案里不许嵌入金额**。金额要经前端 `formatAmount` 走脱敏，
        后端拼进字符串就等于绕过掩码（见 MEMORY 隐私口径 v3.58.18）。
        故 `hint` 只写定性话术，数字一律放在 `numerator` / `denominator` / `extra`。
@@ -626,10 +630,14 @@ def _build_ratios(anchor_key: int, buckets: dict, asset_series: dict,
             if income_months else None
         )
         if debt_monthly is None:
+            # 走到这里只剩一种可能：负债台账**一行都没有**（录过且全部结清的
+            # 已经在 `_liability_state` 里给出 0.0，不会落到这个分支）
             ratios.append(_missing(
-                'dti', '没有「在还」状态的负债明细，「每月应还」无从取得',
-                hint='在「负债明细台账」录一笔在还债务（含每月应还），DTI 才有分子；'
-                     '账单里没有还款类流水，无法从流水反推',
+                'dti', '还没录入任何负债明细，「每月应还」无从取得',
+                hint='在「负债明细台账」录一笔债务（含每月应还与状态），DTI 才有分子；'
+                     '账单里没有还款类流水，无法从流水反推。'
+                     '确实已经不再欠债的，把台账里录过的那些状态改为「已结清」'
+                     '—— 那是 0%，不是「不知道」',
             ))
         elif not income_avg:
             ratios.append(_missing(
@@ -747,31 +755,42 @@ def _build_ratios(anchor_key: int, buckets: dict, asset_series: dict,
 # ══════════════════════════════════════════════════════════════
 
 
-def _debt_monthly_payment(user_id: int = 1):
-    """在还债务的每月应还合计。
-
-    ⚠️ **没有任何在还债务行时返回 None，而不是 0**：
-       0 是「没有债」（DTI = 0，健康），None 是「没录负债明细」（不可知）。
-       用 0 冒充会让一个没录入数据的系统显示出满分健康度。
-       台账有行但都不在「在还」时同样返回 None，但原因不同 ——
-       由 `get_ratio_overview` 用 `_liability_state` 分辨后写进 reason。
-    """
-    rows = _active_liabilities(user_id).values_list('monthly_payment', flat=True)
-    values = [float(v or 0) for v in rows]
-    if not values:
-        return None
-    return sum(values)
-
-
 def _liability_state(user_id: int = 1) -> dict:
-    """负债台账的可用状态 —— 用于把 DTI 的「为什么不可用」说准。"""
+    """负债台账的**唯一取数点** —— 状态与「在还」月供合计一起给出。
+
+    三种状态对应三件不同的事，绝不能合并：
+
+        empty        台账一行都没录 ⇒ 分子不可知，DTI 判「数据不足」
+        none_active  录过、但全部「已结清」⇒ **真的没有债了**，DTI = 0%
+        ok           有「在还」的行 ⇒ 分子 = 各笔每月应还合计
+
+    🔴 `none_active` 曾经也判「数据不足」，等于把「还清了」和「没录过」
+       混成一件事：用户把最后一笔债标成「已结清」之后，界面上反而变成
+       「数据不可用」—— 与事实正好相反。**已结清是一个结论，不是缺数据。**
+       同理，只防「拿 0 冒充没录」而不能反过来把「确实是 0」说成不知道，
+       否则用户永远看不到自己最健康的那一刻。
+
+    `monthly_payment` 只供计算用、**不下发**：出参形状由
+    `LiabilityStateSerializer` 固定为 total / active / state 三键。
+    """
+    rows = list(
+        _active_liabilities(user_id).values_list('monthly_payment', flat=True)
+    )
     total = WealthLiabilityDetail.objects.filter(user_id=user_id).count()
-    active = _active_liabilities(user_id).count()
+    active = len(rows)
     if not total:
-        return {'total': 0, 'active': 0, 'state': 'empty'}
-    if not active:
-        return {'total': total, 'active': 0, 'state': 'none_active'}
-    return {'total': total, 'active': active, 'state': 'ok'}
+        state = 'empty'
+    elif not active:
+        state = 'none_active'
+    else:
+        state = 'ok'
+    return {
+        'total': total,
+        'active': active,
+        'state': state,
+        # 台账空 ⇒ None（不知道有没有债），而不是 0（确定没有债）
+        'monthly_payment': sum(float(v or 0) for v in rows) if total else None,
+    }
 
 
 def get_ratio_overview(anchor_yearmon: str | None = None, user_id: int = 1) -> dict:
@@ -797,22 +816,16 @@ def get_ratio_overview(anchor_yearmon: str | None = None, user_id: int = 1) -> d
         cf_svc.recent_ym_keys(RATIO_PASSIVE_MONTHS, anchor_yearmon), user_id
     )
 
+    # 负债台账只取一次：DTI 的分子与「为什么不可用」出自同一份状态，
+    # 既省一次往返，也不会出现「分子说没有债、提示说没录」这种自相矛盾。
+    # 台账为空 ⇒ monthly_payment = None（不可知）；全部已结清 ⇒ 0.0（真的没有债）。
+    liability = _liability_state(user_id)
+
     ratios = _build_ratios(
         anchor_key, buckets, asset_series, position,
-        debt_monthly=_debt_monthly_payment(user_id), include_dti=True,
+        debt_monthly=liability['monthly_payment'], include_dti=True,
         user_id=user_id,
     )
-
-    # DTI 的不可用原因按台账状态说准 —— 「完全没录」与「录了但都不在还」
-    # 需要用户做不同的事，一句「数据不足」等于没说。
-    liability_state = _liability_state(user_id)
-    if liability_state['state'] == 'none_active':
-        for ratio in ratios:
-            if ratio['key'] == 'dti' and not ratio['available']:
-                ratio['reason'] = (
-                    f'负债台账有 {liability_state["total"]} 笔，但没有一笔是「在还」状态'
-                )
-                ratio['hint'] = '把仍在偿还的债务状态改为「在还」，或补录在还债务'
 
     gaps = [
         {'key': r['key'], 'label': r['label'], 'reason': r['reason'], 'hint': r['hint']}
@@ -826,7 +839,13 @@ def get_ratio_overview(anchor_yearmon: str | None = None, user_id: int = 1) -> d
         # 无论可取与否都给出同一形状 —— 不可取时 available=False + reason，
         # 前端不必为「有/无资产数据」写两套取值分支。
         'asset_position': position,
-        'liability_state': liability_state,
+        # 只下发三键 —— `monthly_payment` 是计算中间量，出去了就是第二套「月供」
+        # 口径（前端一读就会有人开始自己算 DTI）。
+        'liability_state': {
+            'total': liability['total'],
+            'active': liability['active'],
+            'state': liability['state'],
+        },
         'windows': {
             'expense': {
                 'months': RATIO_EXPENSE_MONTHS,

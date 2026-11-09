@@ -1137,18 +1137,19 @@ def classify_bottleneck(
 
 
 def coverage_pct(days: float | None, start: date | None, end: date | None, today: date) -> dict:
-    """三年赎回期覆盖率 = 综合生存天数 ÷ 窗口剩余天数
+    """阶段覆盖率 = 综合生存天数 ÷ 窗口剩余天数
 
-    ⚠️ 窗口取自赎回期模块自己的起止日期，本模块不另存一份 ——
+    ⚠️ 窗口取自**当前长阶段的起止**（自我运转 `selfrun_stage`），本模块不另存一份 ——
        两处窗口迟早会改到不一致，而且没人会发现。
+       （2026-11-02 前这里读的是赎回期单例；赎回期退役后改成读阶段，语义不变。）
     """
     if start is None or end is None:
-        return {'pct': None, 'remaining_days': None, 'reason': '赎回期窗口未配置'}
+        return {'pct': None, 'remaining_days': None, 'reason': '阶段窗口未配置'}
     if today > end:
-        return {'pct': None, 'remaining_days': 0, 'reason': '赎回期已结束'}
+        return {'pct': None, 'remaining_days': 0, 'reason': '阶段已结束'}
     if today < start:
         remaining = (end - start).days + 1
-        anchor_reason = '赎回期尚未开始，按整段窗口计算'
+        anchor_reason = '阶段尚未开始，按整段窗口计算'
     else:
         remaining = (end - today).days + 1
         anchor_reason = None

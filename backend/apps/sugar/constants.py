@@ -33,6 +33,24 @@ SUGAR_HAPPINESS_LABELS = {b['max_level']: b['label'] for b in SUGAR_HAPPINESS_BA
 SUGAR_HAPPINESS_COLORS = {b['max_level']: b['color'] for b in SUGAR_HAPPINESS_BANDS}
 
 
+# ─── 快乐类型筛选 ───
+#
+# 🔴「未标注」必须用一个**非空**的值来表达，不能直接传空串。
+#    `?joy_type=` 与「压根没传 joy_type」在 query string 里长得一样，
+#    `params.get('joy_type')` 两种情况都返回 `''` ⇒ 清空筛选和「只看未标注」
+#    会变成同一件事，而失效的那一边**不会报错**（只是少了个筛选条件）。
+#    同理前端 `el-select` 的 `clearable` 清空也回 `''` / `undefined`。
+JOY_TYPE_UNLABELED_PARAM = '__unlabeled__'
+
+# 「未标注」下拉项的显示词。它**不是**一种快乐类型，是这个字段还没填 ——
+# 所以不放进 model 的 choices 里（那会让「未标注」变成一个可选类型）。
+JOY_TYPE_UNLABELED_LABEL = '未标注'
+
+# 库里出现、但不在 choices 里的值（早期词表残留）。它们必须能被筛出来，
+# 否则下拉里没有、列表里却有 ⇒ 用户永远看不到也清不掉。
+JOY_TYPE_LEGACY_SUFFIX = '（旧词表）'
+
+
 def resolve_happiness_band(level):
     """返回该分数所在的档位 dict（含 max_level / label / color）。
 

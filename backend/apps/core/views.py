@@ -114,8 +114,28 @@ class QuickRecordView(APIView):
         return Response({'success': True, 'message': '记录成功'})
 
 
+class NotificationSerializer(serializers.ModelSerializer):
+    """通知列表项。
+
+    🔴 字段集合与前端 `notificationApi.ts` 的 `NotificationItem` **逐字对应** ——
+       少声明一个 = 静默丢键（§109），前端画出来就是空值。
+    """
+
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'source_module', 'source_object_id', 'category',
+            'title', 'body', 'action_url', 'is_read', 'created_at',
+        ]
+
+
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
+    # 🔴 `serializer_class` 不能省：`ReadOnlyModelViewSet.list` 会在
+    #    `get_serializer_class()` 里断言它非空 —— 漏了就是 **list 直接 500**
+    #    （v3.62.37 修：上一版只加了 `generate`/`read` 三个 action，
+    #     没人调过 list，于是通知中心一直「列表 500、看起来像没有通知」）。
+    serializer_class = NotificationSerializer
     queryset = Notification.objects.all()
     ordering = ['-created_at']
 
@@ -123,6 +143,34 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     def unread_count(self, request):
         count = Notification.objects.filter(is_read=False).count()
         return Response({'count': count})
+
+    @action(detail=False, methods=['post'])
+    def generate(self, request):
+        """按节流窗口生成通知（默认 30 分钟内只跑一次）。
+
+        🔴 用 **POST** 而不是让 `list` 顺手生成：`GET` 不写库是项目铁律
+           （§自我运转 services 铁律 2）。前端在打开通知中心时显式调一次。
+        `?force=1` 可跳过节流（调试 / 手动补跑）。
+        """
+        from .notification_service import NotificationService
+
+        force = request.query_params.get('force') in ('1', 'true', 'True')
+        return Response(NotificationService.generate_if_due(force=force))
+
+    @action(detail=True, methods=['post'])
+    def read(self, request, pk):
+        """标记单条已读（幂等）。"""
+        obj = self.get_object()
+        if not obj.is_read:
+            obj.is_read = True
+            obj.save(update_fields=['is_read'])
+        return Response({'id': obj.id, 'is_read': True})
+
+    @action(detail=False, methods=['post'])
+    def read_all(self, request):
+        """全部标为已读；返回真正被改动的条数。"""
+        updated = Notification.objects.filter(is_read=False).update(is_read=True)
+        return Response({'updated': updated})
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -224,6 +272,8 @@ DEFAULT_MENU_GROUPS = [
     {'key': 'connection', 'name': '连接与足迹', 'sort': 8},
     {'key': 'tools', 'name': '工具箱', 'sort': 9},
     {'key': 'system', 'name': '系统运维', 'sort': 10},
+    # 展厅（v3.64.0）：独立顶级分组 —— 对外输出端口，与所有「对内记录」分组不同质。
+    {'key': 'showroom', 'name': '展厅', 'sort': 11},
 ]
 
 
@@ -305,6 +355,9 @@ class MenuGroupViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     queryset = MenuGroup.objects.all()
     serializer_class = MenuGroupSerializer
+    # 🔴 分组是「全量配置清单」，量恒少，禁分页 —— 一旦分组数突破 page_size（10），
+    #    排最末的新分组会被截到第 2 页，前端只读第一页 results ⇒ 侧边栏静默少一组。
+    pagination_class = None
 
     def list(self, request, *args, **kwargs):
         ensure_default_menu_groups()

@@ -1,5 +1,7 @@
 from collections import Counter
 
+import datetime as dt
+
 from django.db import models, transaction
 from django.db.models import Avg, Case, Count, F, IntegerField, Prefetch, Q, When
 from django.utils import timezone
@@ -10,11 +12,13 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from .constants import ACTIVE_STATUSES
 from .models import Action, Goal, GoalReview, Milestone, OutputRecord
 from .serializers import (
     ActionSerializer,
     BatchActionSerializer,
     CloneGoalSerializer,
+    GoalCheckupSerializer,
     GoalCreateUpdateSerializer,
     GoalDetailSerializer,
     GoalListSerializer,
@@ -31,6 +35,7 @@ from .services import (
     GoalProgressService,
     MilestoneRewardService,
     QuickGoalService,
+    build_checkup,
     calculate_streak,
 )
 
@@ -136,7 +141,9 @@ class GoalViewSet(viewsets.ModelViewSet):
     def stats(self, request):
         goals = Goal.objects.all()
         now = timezone.now().date()
-        overdue = goals.filter(deadline__lt=now).exclude(status='completed').count()
+        # 逾期只看「还会被推进的」目标：已放弃 / 已归档的截止日过了不是逾期，
+        # 它们已经有过决策了（v3.62.42 前把这两类也算进去，虚报 2 条）
+        overdue = goals.filter(deadline__lt=now, status__in=ACTIVE_STATUSES).count()
 
         by_category = {}
         for code, _ in Goal.CATEGORY_CHOICES:
@@ -190,6 +197,17 @@ class GoalViewSet(viewsets.ModelViewSet):
             'popular_tags': popular_tags,
         }
         return Response(GoalStatsSerializer(data).data)
+
+    @action(detail=False, methods=['get'])
+    def checkup(self, request):
+        """PDCA 的「C」—— 过程检查（只读，不改任何数据）
+
+        回答「哪些目标名义上还在进行、实际上已经不动了」。
+        判据与阈值全在 `constants.py` + `services/goal_checkup.py`，
+        本视图只负责把结果套上白名单序列化器。
+        """
+        data = build_checkup()
+        return Response(GoalCheckupSerializer(data).data)
 
     @action(detail=False, methods=['get'])
     def status_stats(self, request):
@@ -281,6 +299,60 @@ class GoalViewSet(viewsets.ModelViewSet):
             'goal_progress': goal.progress_percentage,
             'goal_status': goal.status,
             'reward': reward_result,
+        })
+
+    @action(detail=True, methods=['post'])
+    def abandon(self, request, pk=None):
+        """放弃一条目标 —— PDCA 的 A：**放弃也是决策**。
+
+        一个动作同时做两件事，不新造语义：
+        - 真源：`Goal.status = 'abandoned'`
+        - 留痕：`GoalReview(review_type='monthly', what_blocked=理由)`
+
+        🔴 理由必填：放弃可以，但要能对自己解释。
+        🔴 里程碑**不动**：目标级决策不级联删子项（项目铁律：禁级联删除）。
+        """
+        goal = self.get_object()
+
+        if goal.status == 'abandoned':
+            return Response({'detail': '这条已经是「已放弃」了'}, status=status.HTTP_409_CONFLICT)
+        if goal.status == 'completed':
+            return Response(
+                {'detail': '已完成的目标不能放弃 —— 它已经走完了'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response(
+                {'reason': ['写一句为什么 —— 放弃可以，但要能对自己解释']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(reason) > 200:
+            return Response(
+                {'reason': ['一句话就够（≤200 字）']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            review = GoalReview.objects.create(
+                goal=goal,
+                review_type='monthly',
+                review_date=timezone.localdate(),
+                what_blocked=reason,
+                next_adjustment='放弃',
+                content=f'放弃「{goal.title}」',
+            )
+            goal.status = 'abandoned'
+            # `updated_at` 是 auto_now，必须写进 update_fields 才会刷新
+            goal.save(update_fields=['status', 'updated_at'])
+
+        return Response({
+            'id': goal.id,
+            'status': goal.status,
+            'review_id': review.id,
+            'review_date': review.review_date,
+            'milestone_count': goal.milestones.count(),
         })
 
     @action(detail=True, methods=['post'])
@@ -551,6 +623,15 @@ class MilestoneViewSet(viewsets.ModelViewSet):
             qs = qs.filter(target_date__year=target_year)
         if target_month:
             qs = qs.filter(target_date__month=target_month)
+        # 🔴 日程视图用：**已放弃目标 + 还没完成的里程碑**不算待办（2026-10-26）
+        #    `abandon` 明确「里程碑不动，目标级决策不级联删子项」⇒ 放弃后
+        #    那些 pending 里程碑会一直留在日历里，十月看起来像还有 24 件事要做。
+        # 🔴 但**已完成的要留**：它是历史日程，翻回去看「那天我做了什么」还得在。
+        #    ⇒ 保留条件 = 目标没放弃 **或** 里程碑已完成，不能直接排除整个目标。
+        # ⚠️ 必须是**显式开关**，不能默认过滤：目标详情页要看得到自己的全部里程碑，
+        #    否则「放弃一条目标」会让它的子项在页面上凭空消失（静默丢数据）。
+        if params.get('exclude_abandoned_goals') in ('1', 'true', 'True'):
+            qs = qs.filter(~Q(goal__status='abandoned') | Q(status='completed'))
         # 排序：未完成在前 → 有截止日期在前 → 截止日期最近在前 → 手排/ID 兜底
         return qs.annotate(
             _sort_active=Case(
@@ -660,9 +741,25 @@ class GoalReviewViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        goal_id = self.request.query_params.get('goal')
+        params = self.request.query_params
+
+        goal_id = params.get('goal')
         if goal_id:
             qs = qs.filter(goal_id=goal_id)
+
+        review_type = params.get('review_type')
+        if review_type:
+            qs = qs.filter(review_type=review_type)
+
+        # `review_date` 是 DateField（不是 DateTimeField），按年/月过滤不撞 CONVERT_TZ
+        month = params.get('month')  # '2026-10'
+        if month:
+            try:
+                y, m = str(month).split('-')
+                y, m = int(y), int(m)
+            except (ValueError, AttributeError):
+                raise ValidationError({'month': '格式应为 YYYY-MM'})
+            qs = qs.filter(review_date__year=y, review_date__month=m)
         return qs
 
 
@@ -675,7 +772,16 @@ class OutputRecordViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'fail_reason', 'lesson_learned']
     ordering_fields = ['created_at', 'occurred_at', 'difficulty']
-    ordering = ['-created_at']
+    # 🔴 按**发生日期**排，不按创建时间：列表里显示的是发生日期，
+    #    用 `-created_at` 会让补录的旧事插到最前面，看起来像日期错乱。
+    #    MySQL 的 DESC 把 NULL 排在最后 ⇒ 未填日期的老记录沉底，不会顶在最上面。
+    ordering = ['-occurred_at', '-created_at']
+
+    #: 样本下限：低于这个数不给比例（5 件里 3 件成不了，说「60%」是自欺）
+    MIN_SAMPLE = 5
+
+    #: 窗口键 → 口径。**只在这里定义一次**，前端只传 key、不自己算边界。
+    WINDOW_DAYS = {'30d': 30, '90d': 90}
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -693,10 +799,27 @@ class OutputRecordViewSet(viewsets.ModelViewSet):
         if difficulty:
             qs = qs.filter(difficulty=difficulty)
 
-        year = params.get('year')
-        if year:
-            qs = qs.filter(occurred_at__year=int(year))
+        # `window` 优先；老的 `year` 参数保留（外部脚本 / 旧书签可能还在用）
+        window = params.get('window')
+        if window:
+            qs = self._apply_window(qs, window)
+        else:
+            year = params.get('year')
+            if year:
+                qs = qs.filter(occurred_at__year=int(year))
 
+        return qs
+
+    def _apply_window(self, qs, window: str):
+        """把窗口键翻译成 occurred_at 的过滤条件（唯一实现）。"""
+        today = timezone.localdate()
+        days = self.WINDOW_DAYS.get(window)
+        if days:
+            # 含今天在内共 N 天：[today-(N-1), +∞)
+            return qs.filter(occurred_at__gte=today - dt.timedelta(days=days - 1))
+        if window == 'year':
+            return qs.filter(occurred_at__year=today.year)
+        # 'all' 或未知值都按「全量」处理：宁可多给，不可静默少给
         return qs
 
     def perform_create(self, serializer):
@@ -704,13 +827,21 @@ class OutputRecordViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
-        """良品率统计"""
-        qs = OutputRecord.objects.all()
-        params = self.request.query_params
+        """产出统计。
 
-        year = params.get('year')
-        if year:
-            qs = qs.filter(occurred_at__year=int(year))
+        口径（v3.62.39 起）：
+        * `window` 必须是显式参数，**默认近 30 天** —— 以前恒按「今年」过滤但界面上
+          没有年份选择器，用户看不到自己正在看的是一个被悄悄缩小的样本。
+        * 样本 < `MIN_SAMPLE` 时 `sample_enough=False`，前端只显示件数、不显示比例。
+        * `by_fail_type` / `top_fail_type` 是这一页**唯一能指导下一步**的东西，
+          以前完全没有统计。
+        """
+        params = request.query_params
+        window = params.get('window') or '30d'
+        if window not in ('30d', '90d', 'year', 'all'):
+            window = '30d'
+
+        qs = self._apply_window(OutputRecord.objects.all(), window)
 
         total = qs.count()
         good = qs.filter(quality='good').count()
@@ -734,18 +865,21 @@ class OutputRecordViewSet(viewsets.ModelViewSet):
                     'yield_rate': round(sub_good / sub_total * 100, 1),
                 }
 
-        # 按难度统计
-        by_difficulty = {}
-        for d in range(1, 6):
-            subset = qs.filter(difficulty=d)
-            sub_total = subset.count()
-            if sub_total:
-                sub_good = subset.filter(quality='good').count()
-                by_difficulty[str(d)] = {
-                    'total': sub_total,
-                    'good': sub_good,
-                    'yield_rate': round(sub_good / sub_total * 100, 1),
-                }
+        # 按难度统计：**已停用**（v3.62.39）
+        # 22 条记录里 16 条躺在默认值 3 上 —— 这个维度没有信息量，
+        # 而页面上那句「难度越高，良品率越低」是写死的，不是算出来的。
+        # 删掉统计与展示，`difficulty` 列暂时保留（删列要迁移，等确认后再做）。
+
+        # 失败类型分布（只统计没做成的）—— 这才是「下次改什么」的依据
+        redo_qs = qs.exclude(quality='good')
+        by_fail_type = []
+        for code, label in OutputRecord.FAIL_TYPE_CHOICES:
+            n = redo_qs.filter(fail_type=code).count()
+            if n:
+                by_fail_type.append({'value': code, 'label': label, 'count': n})
+        by_fail_type.sort(key=lambda x: (-x['count'], x['label']))
+        # 没填类型的单独计数：不补这一项，`sum(by_fail_type) < redo_count` 就成了静默缺口
+        fail_type_missing = redo_qs.filter(fail_type='').count()
 
         # 月度趋势
         from django.db.models.functions import TruncMonth
@@ -770,15 +904,24 @@ class OutputRecordViewSet(viewsets.ModelViewSet):
         ]
 
         data = {
+            'window': window,
             'total_records': total,
             'good_count': good,
             'defective_count': defective,
             'waste_count': waste,
+            'redo_count': defective + waste,
             'yield_rate': rate(good),
             'defect_rate': rate(defective),
             'waste_rate': rate(waste),
+            'min_sample': self.MIN_SAMPLE,
+            'sample_enough': total >= self.MIN_SAMPLE,
             'by_category': by_category,
-            'by_difficulty': by_difficulty,
+            'by_fail_type': by_fail_type,
+            'top_fail_type': by_fail_type[0] if by_fail_type else None,
+            'fail_type_missing': fail_type_missing,
+            # 全库范围内未填日期的条数（不受窗口影响）：
+            # 它们进不了任何按日期过滤的口径，界面必须说明「另有 N 条没算进来」
+            'undated_count': OutputRecord.objects.filter(occurred_at__isnull=True).count(),
             'monthly_trend': monthly_trend,
         }
         return Response(OutputStatsSerializer(data).data)

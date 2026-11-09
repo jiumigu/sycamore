@@ -1,74 +1,126 @@
-# Redemption — 三年赎回期
+# Redemption — 赎回期（**已无页面、无接口、无表**）
 
-「用 10 万买回 3 年自由」的判定层。窗口 **2026-10-01 → 2029-09-30**，回答两件事：
-这笔钱够撑多久、以及这段时间里时间到底花到哪去了（成长 / 关系 / 维持 / 谋生 / 流失）。
+> 文档对齐 v3.64.20 ｜ 最后核对 2026-11-02
 
-完整设计见 `docs/三年赎回期-功能设计-v0.4-落地命令清单.md`（v0.1–v0.3 为历次迭代稿）。
+这个 app 现在只剩一层：`services.py` 里那几个**按区间算数的纯函数**。
+「三年赎回期」不再是一个模块，而是**自我运转下的一个长阶段**
+（`selfrun_stage` 顶级那一行，`ledger_config.pool_principal` 记本金）——
+界面在「阶段账本」（`/selfrun/stage`），读数由
+`GET /api/selfrun/stages/<pk>/ledger/` 提供。
 
 ## Models
 
-四张 **managed 表**，不污染财富 / 时间模块：
+**一张都没有。**
 
-| Model | Table | 用途 |
-|-------|-------|------|
-| RedemptionPeriod | redemption_period | **单例（pk=1）**：窗口起止、现金池本金、暂停状态、阶段一基线 |
-| RedemptionPoolInject | redemption_pool_inject | 现金池中途注入流水（赔偿 / 借款 / 额外收入 / 其他） |
-| RedemptionAttrRule | redemption_attr_rule | **时间归因外挂规则**：ATracker 任务属性 → L1 归因六词 |
-| RedemptionWeekSnapshot | redemption_week_snapshot | 周归因快照（六类小时 + 覆盖率 + 成长占比 + 单位赎回成本）。⚠️ **当前无写入/读取方**（阶段二预留），v3.60.36 加「体验」时未加列 —— 启用前须补 `experience_hours`，`unique_together(year, week)` |
+| 表 | 结局 |
+|---|---|
+| `redemption_period` | 退役（v3.64.20，迁移 `0010`）。窗口→`selfrun_stage.start_date/end_date`；本金→`ledger_config.pool_principal`；暂停→`selfrun_stage.status` |
+| `redemption_week_snapshot` | 退役（同批）。从建表起 **0 写入 0 读取**，且加 L1「体验」时没补列 —— 真启用必漏数 |
+| `redemption_pool_inject` | **迁走**：→ `selfrun_pool_inject`（v3.64.20，selfrun 迁移 `0009`）。留在原处会让两个 app 双向依赖（selfrun 用它的函数、它用 selfrun 的阶段外键） |
 
-⚠️ **绝不向 ATracker 的 `managed=False` 外部表加列** —— 归因只能靠 `RedemptionAttrRule` 外挂映射。
+🔴 `0010` 是 `RunPython(搬数据) + DeleteModel × 3`，**只写不跑**。删表不可逆，
+执行前必须先备份数据库到 `db_backups/`。反向迁移只重建空表，**数据不回流**。
 
 ## Services
 
-`services.py` 是全部口径的唯一实现：
+`services.py` 是全部口径的唯一实现，**不 import 任何模型**：
 
 | 函数 | 职责 |
 |------|------|
-| `get_or_create_period` / `_window_bounds` / `_today_clamped` | 单例读写与窗口边界（日期一律夹在窗口内） |
-| `compute_pool_balance` | 现金池余额 |
-| `compute_avg_daily_self_net` | 近 30 日日均净支出 |
-| `compute_support_until` | 按当前支出速度能撑到哪天 |
-| `match_attribution_rule` | **归因匹配唯一实现**（全项目共用，见下） |
-| `compute_time_attribution` | 六类归因小时（键集由 `ATTRIBUTION_CHOICES_LIST` 派生，加词自动跟随） |
-| `compute_unit_cost` | 单位赎回成本 |
-| `compute_redemption_stats` | 汇总（`include_time=False` 时不查时间侧） |
-| `sync_to_scenario` | 把结果同步进 wealth 的推演场景（`mode='preview'` 为试算） |
+| `_window_bounds(start, end)` | 区间 `[start 00:00, end+1天 00:00)` 的 datetime 边界（**半开**） |
+| `compute_pool_balance(principal, start, end, injected=0)` | 现金池余额 = 本金 + 注入 − 为自己净消耗 |
+| `compute_avg_daily_self_net_detail(start, end)` | 日均的**完整读数** → 均值 + 窗口实际覆盖天数 + 窗口内真实日均（`thin` 判样本够不够） |
+| `compute_avg_daily_self_net(start, end)` | 近 30 日日均净支出（锚点 `min(今天, 终点)`）；只是上一个的均值那一项，**别在这上面再除一次** |
+| `compute_support_until(balance, avg_daily, anchor)` | 能撑到哪天 → `(日期\|None, zero_reason\|None)` |
+| `compute_tier_stats(start, end)` | 各档笔数（`Count`，**不是** `Sum('id')`）与发生额 |
+| `compute_time_attribution(start, end)` | 六类归因小时（**除睡眠外的全部记录**；睡眠单列 `excluded_sleep_hours`，键集由 `ATTRIBUTION_CHOICES_LIST` 派生） |
+| `compute_unit_cost(start, end, net_self)` | 单位赎回成本（净消耗 ÷ 赎回小时）。⚠️ 2026-11-05 起**阶段账本不再展示**：它除「已过小时」、`unit_cost_floor` 除「全期小时」，并排看必然读出假结论（见 `CHANGELOG` v3.64.24）。函数保留给 `ledger_crosscheck.py` 对账 |
 
-### 归因匹配是单一真源
+🔴 **两个「由调用方给」的参数，别改回查表**：
+`principal` 与 `injected`。阶段账本按 `ledger_config` 与 `selfrun_pool_inject.stage`
+算好传进来 —— 一旦函数自己查表，它就只能服务某一个 app，而「同一件事两份实现」
+迟早分叉。
 
-`match_attribution_rule(...)` 是**全项目唯一**的维度匹配实现。
-`match_field` 目前只认三项：`task_name` / `activity_type` / `task_type`。
+🔴 **计算函数一律吃显式区间 `(start, end)`，不吃对象**（v3.64.17 起）。
+留一个「还能吃 period」的兼容分支 = 同一个量两个入口，半年后没人知道该用哪个。
 
-⚠️ **加维度必须同时改三处**：`MATCH_FIELD_CHOICES` + `match_attribution_rule` 分支 + 前端 `AttrField` / `AttrRuleEditor.vue`。
-**漏前端 = 选不到，漏后端 = 静默不生效。**
+⚠️ `avg_daily` 的分母固定 30 天，**不是**区间实际天数 —— 阶段刚开 3 天也除 30。
+这是既有口径、刻意没动（改它会让「撑到哪天」整体放大 10 倍以上）。
+已知局限：短窗口的日均偏低 ⇒ `support_until` 偏乐观。
 
-⚠️ 判新维度前先问「它在不在 ATracker 外部表」：`activity_type` 住在 `temporal_task_meta`，须按 `task_name` 反查后传入，**别在循环里 N+1**。
+🔴 **短样本必须自曝，不能靠读者猜**（v3.64.24）：`compute_avg_daily_self_net_detail()`
+把 `sample_days` 与 `net_per_day`（该窗口内的真实日均）一起交出去。
+实测：阶段第 5 天 ¥1,142.52，`avg_daily` = 38.08（÷30）、`net_per_day` = 228.50（÷5），**差 6 倍**。
+不给样本天数时，读者只会看到「每天花 38」这个被稀释的数，而 `support_until` 因此偏乐观
+（38 撑到 2033-12-14，228.5 撑到 2028-01，阶段终点是 2029-09-30）。
 
-⚠️ `RedemptionAttrRule` **绝不能删** —— 它是归因覆盖的真身，也是唯一的管理入口（台账改 L1 会同步 `update_or_create` 一条 `priority=100` 的 `task_name` 规则）。
+🔴 **`covered_hours` = `hours` 六格（已四舍五入到两位）之和**，不是原始和的取整（v3.64.19）。
+屏幕上那六个格子是会被加起来的；总数若按原始值取整，两者会差 0.0x
+（实测：六格 12.39+4.20+0+15.76+0+1.61 = 34.00，而原始和报 33.96）——
+读起来像「有一类没算进去」，而「有一类没算进去」正是本函数上一版真正的病。
+`toward_ratio` / `fallback_hours` 仍按原始值算（比值与分项不该被显示精度污染）。
 
-⚠️ 归因词表的单一真源是 `apps.temporal.constants.ATTRIBUTION_CHOICES`，**本模块不再自存副本**（v3.58.10 前存过一份，改词必漂移）。
+### 归因只有一把尺子（v3.64.16 归并）
 
-## 暂停追踪
+`compute_time_attribution` 调 `temporal.services.resolve_attribution_detail`，
+与时间统计页 / 贡献图 / 仪表盘护栏卡 / 周复盘读**同一列**。
+`source` 只有两档：`default`（映射表那列写着的值）/ `fallback`（没设 ⇒ 兜底「成长」）。
 
-`tracking_status = paused` 时**只停止计算与展示指标，不停止记录、不发提醒**；
-`paused_since` / `resume_at` 记录区间。
+🔴 **为什么删掉自管的那套规则**：它是 `default_attribution` 的影子副本
+（映射表改 L1 时顺带写一条 `priority=100` 的 `task_name` 规则），
+却只覆盖被改过的那几个任务名；而本页当时拿「命中规则」当统计口径 ⇒
+未覆盖的记录**静默不计**。实测 2 天窗口 33.96h 只算了 20h：
+「成长」1.99h（真实 12.39h）、「谋生」恒为 0、覆盖率还显示 83%。
+
+⚠️ 回归红线：`hours` 之和必须等于 `covered_hours`（该窗口**除睡眠外**的记录时长）。
+`fallback_hours` 单独报出来，让页面能说清「其中多少是按兜底归的」——
+但**不能**把它排除在六类之外（那就回到了「命中才算」的老毛病）。
+
+### 睡眠两边都不计（v3.64.22）
+
+覆盖率的分母是「天数 × 每天可支配小时」（`THEORETICAL_DAILY_HOURS`，2026-11-05 由 12h 调到 14h），
+睡眠本来就不在这段时间内。旧版分子却把睡眠算进去 ⇒ 记录越全、覆盖率越高：两天就冲到 **141.5%**。
+那不是「记得比可支配的多」，是同一屏上下两个数用了两把尺子；旧版只好在界面上
+写一句「记录含睡眠，可能超过 100%」—— 那是给口径错配写的说明书。
+
+🔴 这个常量**只在这里定义一次**，页面文案的「按每天 Nh」由 `theoretical_daily_hours` 下发；
+   前端写死 12 / 14 就等于复制了一份阈值（v3.64.25 之前账本页就是这么硬写的）。
+
+现在睡眠在**摊进六类之前**就被跳过（名单取 `temporal.services.contrib_excluded_names()`
+= 常量名单 ∪ 角色为睡眠类，与贡献图同一份）：
+
+- `covered_hours` / `coverage_rate` / `toward_ratio` 的分子分母都不含睡眠
+- 剔除量单列 `excluded_sleep_hours`，且 `covered_hours + excluded_sleep_hours`
+  == 区间内全部记录时长（两个数在屏幕上是相邻的，用户真的会加）
+- 🔴 **必须可见**：页面印「睡眠 12.2h 已剔除（夜间 + 午睡）」。删掉这一句，
+  「维持」会凭空少 12h 而屏幕上没有任何线索
+
+⚠️ 名单含**午睡**，而午睡其实落在醒来那 16h 内 —— 严格说可支配，剔掉略保守。
+选择与贡献图同一份名单，而不是在账本里另立一套「只剔夜间」的判据：
+同一件事两把尺子，迟早出现「账本维持 15.8h、贡献图维持 3.6h」两页都看着合理的局面。
+
+### 归因词表
+
+单一真源是 `apps.temporal.constants.ATTRIBUTION_CHOICES`，**本模块不自存副本**
+（v3.58.10 前存过一份，改词必漂移）。「任务名 → 归因」的匹配只有 temporal 一处实现
+（`resolve_attribution_detail`）。
 
 ## API Endpoints
 
-前缀 `/api/redemption/`
+**一条都没有。** `urls.py` 里是空 `urlpatterns`（六条旧端点自然 404）。
 
-| 方法 | 端点 | 用途 |
-|------|------|------|
-| GET/PUT | / | 窗口配置读取 / 更新（单例） |
-| POST | /pause/ | 暂停追踪 |
-| POST | /resume/ | 恢复追踪 |
-| GET/POST | /injects/ | 现金池注入流水 |
-| GET/POST | /attr-rules/ | 归因规则列表 / 新增 |
-| PUT/DELETE | /attr-rules/&lt;pk&gt;/ | 规则更新 / 删除 |
-| GET | /stats/ | 赎回期汇总指标 |
-| POST | /sync-scenario/ | 同步到 wealth 推演场景 |
+| 旧端点 | 现在怎么办 |
+|---|---|
+| `GET/PUT /api/redemption/` | 窗口改阶段起止；本金走 `PATCH /api/selfrun/stages/<pk>/ledger-config/` |
+| `POST pause/` `resume/` | `POST /api/selfrun/stages/<pk>/pause/`（阶段暂停，语义更完整） |
+| `GET/POST injects/` | 表已搬到 `selfrun_pool_inject`，随阶段走（本期未开界面） |
+| `GET stats/` | `GET /api/selfrun/stages/<pk>/ledger/` |
+| `POST sync-scenario/` | 删除。它把赎回池实算值写进 `WealthCurrentScenario` 单例 —— 一个动作改了另一个模块的单例，且没有回滚路径 |
+| `GET attr-rules/` | v3.64.16 已下线 |
 
 ## 边界
 
 - 窗口**之前**的 `period_tag` 全为 `NULL` 是**正确结果、不是 bug**。
-- 撤销归因覆盖时：只有 `task_name` 能单行撤销，`activity_type` / `task_type` 会**连坐**。
+- 本模块**只读**归因；改归因的唯一入口是 temporal 的映射表。
+- 生存资源页的覆盖率分母借的是「当前长阶段」的窗口
+  （`wealth.services.survival_service._stage_window`），本模块不参与。

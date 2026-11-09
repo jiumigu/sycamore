@@ -680,7 +680,7 @@ def get_analysis(reference_date: date | None = None) -> dict:
         shortest_days, cash_days, SURVIVAL_BOTTLENECK_TOLERANCE,
     )
 
-    coverage = calc.coverage_pct(shortest_days, *_redemption_window(), today)
+    coverage = calc.coverage_pct(shortest_days, *_stage_window(), today)
 
     # 问题分两级收集：配方级的问题要带上「哪个配方」，
     # 否则用户看到「配置不全」却不知道该去修哪个 —— 提示必须能照做。
@@ -760,17 +760,24 @@ def _cash_months() -> tuple[float | None, str]:
     return float(months), '应急金月数（现金类资产 ÷ 近 12 月支出的三点估算）× 30 天'
 
 
-def _redemption_window() -> tuple[date | None, date | None]:
-    """三年赎回期窗口 —— 只读复用，本模块不另存一份"""
-    from apps.redemption.models import RedemptionPeriod
+def _stage_window() -> tuple[date | None, date | None]:
+    """当前**长阶段**的窗口 —— 只读复用自我运转，本模块不另存一份
+
+    ⚠️ 2026-11-02 起「三年赎回期」不再是一个独立模块，而是 `selfrun` 下的一个
+       **长阶段**（赎回期窗口 = 阶段起止）。本函数因此改读阶段，名字也从
+       `_redemption_window` 改过来 —— 留着旧名会让人以为还有一张赎回期表。
+    ⚠️ 取不到就返回 `(None, None)`，由 `coverage_pct` 输出「窗口未配置」，
+       **不要**在这里兜一个默认窗口：那会让覆盖率凭空有个看起来合理的分母。
+    """
+    from apps.selfrun.services import get_open_long_stage
 
     try:
-        period = RedemptionPeriod.objects.first()
+        stage = get_open_long_stage()
     except OperationalError:
         return None, None
-    if not period:
+    if stage is None or not stage.end_date:
         return None, None
-    return period.start_date, period.end_date
+    return stage.start_date, stage.end_date
 
 
 # ──────────────────────────────────────────────────────────────

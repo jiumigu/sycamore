@@ -6,6 +6,7 @@ from . import views
 router = DefaultRouter()
 router.register(r'oneday', views.OneDayPageViewSet, basename='oneday')
 router.register(r'tasks', views.TemporalTaskViewSet, basename='tasks')
+router.register(r'timer', views.TimerViewSet, basename='timer')
 
 urlpatterns = [
     path('', include(router.urls)),

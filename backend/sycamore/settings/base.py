@@ -49,6 +49,9 @@ INSTALLED_APPS = [
     #    必须在 selfrun **之后**注册 —— 前者只依赖后者的 models，顺序无硬要求，
     #    这里排在后面只是为了「读起来是后加的」。
     'apps.works',
+    # 展厅：对外输出端口——可被潜在客户走进去看的策展空间。
+    # ⚠️ 依赖 works（作品馆引用 works.Work），故排在 works 之后。
+    'apps.showroom',
 ]
 
 MIDDLEWARE = [

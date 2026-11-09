@@ -46,6 +46,34 @@ class GoalProgressService:
         return int((completed / total) * 100)
 
     @staticmethod
+    def ledger_progress(goal):
+        """**账本口径**进度（只读，绝不落库）—— 用来对照手填的 `progress_percentage`。
+
+        🔴 为什么需要第二个数：
+           `Goal.progress_percentage` 是**手填输入**（`editable=False` 只是不进表单，
+           接口仍可写）。它回答「我觉得我做到几成了」。
+           而「里程碑完成率」是**有记录的账本**：完成几个 / 一共几个，可复算。
+           两者并存时人一定会相信更乐观的那个（§114.3），所以必须**同时摆出来**。
+
+        口径：
+        - 有子目标 → 子目标 `progress_percentage` 的平均（子目标各自的手填值）
+        - 否则 → 已完成里程碑 / 总里程碑
+        - **两者都没有 → 返回 `None`**（「没有账本」≠「进度 0%」，§null/0 是三件事）
+
+        与 `recalculate()` 的区别：这里**不写库、不改状态**，
+        所以可以在 GET / 序列化器里安全调用。
+        """
+        subs = goal.sub_goals.exclude(status='archived').exclude(status='abandoned')
+        if subs.exists():
+            values = [s.progress_percentage for s in subs]
+            return round(sum(values) / len(values)) if values else None
+        total = goal.milestones.count()
+        if not total:
+            return None
+        done = goal.milestones.filter(status='completed').count()
+        return int(done / total * 100)
+
+    @staticmethod
     def _auto_transition_status(goal):
         """进度 100% 时自动流转状态为已完成"""
         if goal.progress_percentage >= 100 and goal.status == 'in-progress':

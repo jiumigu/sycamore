@@ -1,4 +1,4 @@
-"""自我运转 · T4 事后分析 —— 4 条（设计稿 §12 之 24–27）
+"""自我运转 · T4 事后分析 —— 5 条（设计稿 §12 之 24–27，另加 28「最好的一期」带日期区间）
 
 ⚠️ 首轮 T4 **只做骨架**（阶段总结 + 指纹写入 + 复制），趋势/断点/对比留 P1。
    所以 24 / 25 两条用「历史列表不重算」与「指纹分组」来钉住同样的判据 ——
@@ -39,9 +39,16 @@ def stage(client):
     return SelfRunStage.objects.get()
 
 
-def _seed_temporal(name, l2, days_ago_list, hours=1.0):
+def _seed_temporal(name, l2, days_ago_list, hours=1.0, counts_growth=True):
+    """造一批时间记录 + 对应的映射行。
+
+    🔴 `counts_growth` 默认 True：v3.64.11 起「成长计时」只看 `temporal_task_meta.counts_growth`，
+       **不再**按 `activity_type == '深度工作'` 自动判定（造数不打标记 ⇒ 取到 0）。
+    """
     TaskMeta.objects.get_or_create(
-        task_name=name, defaults={'activity_type': l2, 'default_attribution': '关系'},
+        task_name=name,
+        defaults={'activity_type': l2, 'default_attribution': '关系',
+                  'counts_growth': counts_growth},
     )
     today = timezone.localdate()
     for d in days_ago_list:
@@ -203,3 +210,28 @@ def test_stage_summary_freezes_snapshot(client, stage):
     live_grow = next(m for m in live['metrics'] if m['name'] == '成长小时数')
     live_snap_grow = next(m for m in snap['metrics'] if m['name'] == '成长小时数')
     assert live_grow['floor_value'] != live_snap_grow['floor_value']
+
+
+# ── 28. 「最好的一期」要带日期区间，不能只有周号（2026-11-03 用户提出）
+def test_best_period_carries_date_range(client, stage):
+    """`2026-W42` 读不出「这周从几号到几号」，跨年时心算必错（12-29 可能属次年 W01）。
+
+    所以后端把「周号 + 日期区间」拼好给前端，前端只印 `period_label`。
+    🔴 区间是**半开**的（`[start, end)`）⇒ 显示必须减一天，
+       否则每周都会印成 8 天，用户会以为自己记错了。
+    """
+    days = 0            # 本周内，且够新鲜（否则 verdict=unknown ⇒ 不进 avg/best）
+    _seed_temporal('代码编程', '深度工作', [days], hours=6.0)
+    key = _week_key(days)
+    assert _close(client, key).status_code == 201
+
+    body = client.get(f'{URL}/stages/{stage.id}/summary/').json()
+    best = next(m for m in body['summary']['metrics'] if m['name'] == '成长小时数')['best']
+
+    period = SelfRunPeriod.objects.get(period_key=key)
+    assert best['period_key'] == key
+    # 严格相等即证明「减了一天」：`period_end` 是下周一（半开），印出来会多一天
+    assert best['period_label'] == (
+        f'{key}（{period.period_start:%m-%d} ~ '
+        f'{period.period_end - dt.timedelta(days=1):%m-%d}）'
+    )

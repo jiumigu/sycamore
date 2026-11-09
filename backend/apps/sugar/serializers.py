@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.core.fields import AmountNumberField
+
 from .constants import (
     SUGAR_HAPPINESS_MAX,
     SUGAR_HAPPINESS_MIN,
@@ -15,6 +17,19 @@ class SugarRecordSerializer(serializers.ModelSerializer):
     reward_color = serializers.SerializerMethodField()
     category_display = serializers.SerializerMethodField()
     time = serializers.DateField(input_formats=['%Y-%m-%d', '%Y-%m-%d %H:%M:%S'], required=False)
+    # 🔴 必须显式声明：ModelSerializer 会给 DecimalField 生成 `coerce_to_string=True`
+    #    的字段 ⇒ 接口吐出 `"9.00"`（字符串），而前端 `formatAmount` 只认 number
+    #    （它有一句 `typeof value !== 'number' → 返回空值占位`），于是**有值也画成 `--`**。
+    #
+    # 🔴 但**不能直接用 `FloatField`**（v3.63.15 修）：它把**入参**也解析成 float，
+    #    而 `RewardPool.balance` 是 DecimalField ⇒ `Decimal += float` 抛 TypeError。
+    #    `perform_create` 里 `serializer.save()` 在 autocommit 下已提交、`add_reward()`
+    #    随后才炸 ⇒ 小确幸记录写进去了、奖励池没加、前端只看到「操作失败」
+    #    （2026-10-23 实案：s_id 77/78 落库，当日流水 0 条）。
+    #    也不能改成 `DecimalField(coerce_to_string=False)` 了事：那样 `response.data`
+    #    里是 Decimal，`test_api_returns_reward_amount_as_number_not_string` 会红。
+    #    ⇒ 用 `AmountNumberField`：出参 number、入参 Decimal，两个方向各给一种类型。
+    reward_amount = AmountNumberField(required=False)
 
     class Meta:
         model = SugarRecord

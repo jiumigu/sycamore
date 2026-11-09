@@ -44,10 +44,16 @@ class SelfRunMetricPlanSerializer(serializers.ModelSerializer):
         read_only_fields = ('metric', 'created_at', 'updated_at')
 
 class SelfRunStageSerializer(serializers.ModelSerializer):
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    status_display = serializers.SerializerMethodField()
     pause_reason_display = serializers.CharField(source='get_pause_reason_display', read_only=True)
     metric_count = serializers.SerializerMethodField()
     elapsed_days = serializers.SerializerMethodField()
+    days_label = serializers.SerializerMethodField()
+    range_label = serializers.SerializerMethodField()
+    # 阶段分两层后的三个派生字段（**都不落库**）
+    parent_name = serializers.SerializerMethodField()
+    children_count = serializers.SerializerMethodField()
+    is_long_stage = serializers.SerializerMethodField()
 
     class Meta:
         model = SelfRunStage
@@ -58,11 +64,52 @@ class SelfRunStageSerializer(serializers.ModelSerializer):
     def get_metric_count(self, obj):
         return obj.metrics.filter(status='active').count()
 
+    def get_parent_name(self, obj):
+        """上级阶段名（顶级阶段为 `None`）。页头面包屑用。"""
+        return obj.parent.name if obj.parent_id else None
+
+    def get_children_count(self, obj):
+        return obj.children.count()
+
+    def get_is_long_stage(self, obj):
+        """长阶段 = 顶级 + **一条 KPI 都没有**（与 `get_open_long_stage()` 同一判据）。
+
+        ⚠️ 不用「有没有孩子」判：长阶段可以先建、后挂小阶段，那段空窗期它同样是长阶段。
+        ⚠️ 用「任何状态的 metric」而不是「active 的」：一个 KPI 全部退役的叶子阶段
+           曾经有过 KPI，不该因为退役就变成「长阶段」。
+        """
+        return obj.parent_id is None and not obj.metrics.exists()
+
+    def get_status_display(self, obj):
+        """委托 `services.stage_status_display` —— 显示词只在那份代码里定一次。
+
+        ⚠️ 舞台账本（`services.stage_ledger`）的子阶段行也印它，
+           两处各写一份三元表达式，迟早在一个边界上分叉。
+        """
+        from .services import stage_status_display
+
+        return stage_status_display(obj)
+
     def get_elapsed_days(self, obj):
-        """现算不落库（判据：以后重算得出同样结果吗 —— 得得出，所以不落）。"""
-        from django.utils import timezone
-        end = obj.end_date or timezone.localdate()
-        return max((end - obj.start_date).days + 1, 0)
+        """「今天第几天」委托 `services.stage_elapsed_days`（账本 `range` 同一个数）。
+
+        🔴 取 `min(今天, 终点)`、clamp 到 0 —— 具体理由见 service 里的注释。
+        """
+        from .services import stage_elapsed_days
+
+        return stage_elapsed_days(obj)
+
+    def get_range_label(self, obj):
+        """委托 `services.stage_range_label`（账本子阶段行也印同一句）。"""
+        from .services import stage_range_label
+
+        return stage_range_label(obj)
+
+    def get_days_label(self, obj):
+        """委托 `services.stage_days_label`（三种态用三种词，理由见那里）。"""
+        from .services import stage_days_label
+
+        return stage_days_label(obj)
 
 
 class SelfRunMetricSerializer(serializers.ModelSerializer):
@@ -149,7 +196,14 @@ class StageCreateSerializer(serializers.Serializer):
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False, allow_null=True)
     note = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    metrics = MetricInputSerializer(many=True)
+    metrics = MetricInputSerializer(many=True, required=False)
+    # 🔴 形态必须**显式声明**：`metrics` 空 + 没声明 ⇒ 400，不靠「有没有 KPI」猜意图
+    #    （猜错了会得到一个「看着正常、其实永不判定」的阶段）。
+    is_long_stage = serializers.BooleanField(required=False, default=False)
+    # 挂在哪个长阶段下（两层封顶）；不传 = 顶级阶段
+    parent = serializers.IntegerField(required=False, allow_null=True)
+    # 只长阶段用：目前只有 `pool_principal`
+    ledger_config = serializers.JSONField(required=False)
 
 
 class MetricPreviewSerializer(serializers.Serializer):
@@ -173,7 +227,11 @@ class MetricPreviewSerializer(serializers.Serializer):
 
 
 class MetricPatchSerializer(serializers.Serializer):
-    """改 KPI 配置。`reason` 是**必问**的（校准 or 状态）—— 系统不判断，只记录。"""
+    """改 KPI 配置。`reason` 是**必问**的（校准 or 状态）—— 系统不判断，只记录。
+
+    🔴 `source_kind` 也在这里（v3.64.31）：建完 KPI 才发现「这条该自动取数」
+       时，以前只能退役重建 —— 而退役会把手工登记一起带走。
+    """
 
     goal_value = serializers.DecimalField(
         max_digits=12, decimal_places=2, required=False, allow_null=True,
@@ -183,6 +241,7 @@ class MetricPatchSerializer(serializers.Serializer):
     )
     goal_why = serializers.CharField(max_length=200, required=False, allow_blank=True)
     floor_why = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    source_kind = serializers.ChoiceField(choices=SOURCE_KIND_CHOICES, required=False)
     source_config = serializers.JSONField(required=False)
     agg = serializers.ChoiceField(choices=AGG_CHOICES, required=False)
     direction = serializers.ChoiceField(choices=DIRECTION_CHOICES, required=False)

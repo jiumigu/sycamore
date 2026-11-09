@@ -1,5 +1,7 @@
 # Core — 系统基础设施
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 ## 职责
 Django 项目通用基础设施，不归属任何业务模块。
 
@@ -11,6 +13,8 @@ Django 项目通用基础设施，不归属任何业务模块。
 | `models.py` | 全局共享模型 + UserProfile |
 | `admin.py` | 系统管理后台配置 |
 | `views.py` | 通用视图 + ProfileView |
+| `media.py` | **媒体上传与结构校验的唯一实现**（showroom / works 共用）：扩展名白名单 + 大小上限 + 落盘；类型只判一次 |
+| `management/commands/generate_notifications.py` | 生成系统通知（关系静默 / 目标落后 / 文件堆积）；默认 30 分钟节流，`--force` 忽略，`--cleanup` 才删 30 天前已读 |
 | `db_comments.py` | **数据库注释（表 / 列）的唯一实现** —— 判据、例外文案、接管范围 |
 | `management/commands/audit_comments.py` | **只读**注释体检：缺口清单（表 / 列 / 英文残留 / 外部表 / 未接管 app） |
 | `management/commands/sync_field_comments.py` | ⚠️ **已被 `db_comments.py` 取代**，保留仅作应急手工入口 |

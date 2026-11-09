@@ -6,7 +6,20 @@ from apps.reward.services import RewardPoolService
 
 
 def _calculate_reward_amount(level_of_happiness) -> Decimal:
-    """根据快乐程度计算奖励金额（5-20分制）"""
+    """根据快乐程度计算奖励金额（5-20分制）
+
+    🚫 **死代码 · 禁用于新逻辑**（2026-10-26 核查）
+    --------------------------------------------------
+    这是**第三套**换算（1/3/5/8/10 五档），与现行口径「**金额 = 分数**」
+    （5–20 分直接当元数，见 `views.py::perform_create`）冲突。
+    全仓唯一的实际写库路径是 `SugarRecordViewSet.perform_create`，
+    本文件的 `create()` / `update()` **没有任何调用方**（`views.py` 只用 `delete()`），
+    前端那个同为 1–10 分刻度的 `HappinessSlider.vue` 也同属零引用遗物。
+
+    ⚠️ 留着不删是因为「删文件/删方法」需用户确认，但**别再复活它**：
+    一旦有人改回调这里，同一个分数会算出另一个金额，
+    而又一次变成「文案一个数、右侧另一个数」。
+    """
     v = float(level_of_happiness)
     if v <= 7:
         return Decimal('1')
@@ -20,7 +33,13 @@ def _calculate_reward_amount(level_of_happiness) -> Decimal:
 
 
 class SugarRecordService:
-    """小确幸业务逻辑 — 自动同步奖励池"""
+    """小确幸业务逻辑 — 自动同步奖励池
+
+    ⚠️ **只有 `delete()` 在用**（`SugarRecordViewSet.perform_destroy`）。
+    `create()` / `update()` 零调用方，且用的是上面那套 1/3/5/8/10 旧换算 ——
+    现行创建/更新走 `views.py::perform_create` / `perform_update`（金额 = 分数）。
+    要动这个类之前先 grep 调用方，别把死路径改活。
+    """
 
     def __init__(self):
         self.reward_service = RewardPoolService()

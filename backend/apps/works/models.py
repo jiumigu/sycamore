@@ -67,6 +67,10 @@ class Work(models.Model):
     note = models.CharField(
         max_length=200, blank=True, default='', verbose_name='备注',
     )
+    # 展示媒体：[{type: 'image'|'video', url}] —— 作品的本体证据（图片 / 视频）。
+    # 🔴 这是作品媒体的**真源**：展厅馆藏若要展示，引用这里，绝不重复上传
+    #    （「同一事实只许一份真源」，媒体是作品的属性，不属于策展层）。
+    media = models.JSONField(default=list, verbose_name='展示媒体')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='成形于')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='改于')
 

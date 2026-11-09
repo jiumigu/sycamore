@@ -178,6 +178,34 @@ class MenstrualRecordSerializer(serializers.ModelSerializer):
         model = MenstrualRecord
         fields = '__all__'
         read_only_fields = ['id', 'created_at']
+        # DRF 默认文案是英文（`Date has wrong format`），前端会把 4xx 原样
+        # 透到提示条上，所以这里必须给中文 —— 报错要能直接看懂才知道改哪一格。
+        extra_kwargs = {
+            'start_date': {'error_messages': {'invalid': '开始日期格式应为 YYYY-MM-DD（如 2026-10-30）'}},
+            'end_date': {'error_messages': {'invalid': '结束日期格式应为 YYYY-MM-DD；本次还没结束请留空'}},
+        }
+        # 唯一约束的报错也自己接管：DRF 自动生成的那条是
+        # 「The fields user_id, start_date must make a unique set.」——
+        # 英文，且说的是两个列名，用户看不出「这一天已经记过了」。
+        validators = []
+
+    def validate(self, attrs: dict) -> dict:
+        """同一天只能记一次（`uk_menstrual_user_date` 的中文出口）。
+
+        ⚠️ 这里替代的是 DRF 自动生成的 `UniqueTogetherValidator`（见 Meta.validators）。
+        库层约束仍在，改不到这里时还有 DB 兜底。
+        """
+        start = attrs.get('start_date') or getattr(self.instance, 'start_date', None)
+        user_id = attrs.get('user_id') or getattr(self.instance, 'user_id', 1)
+        if start:
+            qs = MenstrualRecord.objects.filter(user_id=user_id, start_date=start)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    'start_date': f'{start} 已经有一条记录，同一天只能记一次；要改请直接编辑那一条',
+                })
+        return attrs
 
     def _auto_duration(self, validated_data: dict) -> dict:
         """持续天数自动计算：未显式提供时由 end_date - start_date 得出"""

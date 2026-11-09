@@ -245,8 +245,12 @@ def test_period_key_type_must_match_metric(client, stage):
 # ── 11. 模板库可自定义：建 → 改 → 删 ─────────────────────────
 def test_template_crud(client):
     listed = client.get(f'{URL}/templates/').json()
-    assert len(listed['templates']) == 9            # autouse fixture 种的 9 条
+    assert len(listed['templates']) == 10           # autouse fixture 种的内置模板条数
     assert {'agg', 'source_kind', 'plan_scope'} <= set(listed['enum'])
+    # 🔴 作品类型的候选**必须随接口下发**：前端下拉零副本，漏了这里就等于
+    #    「按类型取数」那条在界面上没法选类型（看着像功能没做）。
+    kinds = {o['value'] for o in listed['enum']['work_kind_options']}
+    assert {'drawing', 'embroidery'} <= kinds
 
     created = client.post(f'{URL}/templates/', {
         'name': '晨跑', 'period_type': 'weekly', 'unit': '次',

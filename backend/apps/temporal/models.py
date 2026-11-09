@@ -1,7 +1,7 @@
 from django.db import models
 from django.utils import timezone
 
-from .constants import ATTRIBUTION_CHOICES, CATEGORY_CHOICES
+from .constants import ATTRIBUTION_CHOICES, CATEGORY_CHOICES, DAILY_ROLE_CHOICES
 
 
 class TemporalTask(models.Model):
@@ -150,6 +150,26 @@ class TaskMeta(models.Model):
         choices=ATTRIBUTION_CHOICES, verbose_name='默认归因(L3)',
     )
     is_system = models.BooleanField(default=False, verbose_name='系统预设')
+    # 🔴 「成长计时」的**唯一依据**：勾了才计入每周状态的成长小时数。
+    #    此前口径是隐式的「L2 活动类型 = 深度工作」，藏在 KPI 的 `source_config.where` 里 ——
+    #    界面上看不见、也没法把别的分类拉进来。改成显式标记后：
+    #      · 迁移 `0017` 已把当时 L2=深度工作 的任务名回填为 True（数字不变）；
+    #      · 之后改 L2 **不再**自动改变成长计时（一把尺子，改分类不再暗改口径）。
+    counts_growth = models.BooleanField(
+        default=False, verbose_name='计入成长计时',
+        help_text='勾选后，该任务名下的时长进入每周状态的「成长小时数」',
+    )
+    # 🔴 「今天的三条线」的**唯一依据**（v3.64.12 起）：标了角色才进对应那条线。
+    #    空白 = 不参与；值域见 `constants.DAILY_ROLE_CHOICES`，阈值见 `DAILY_GUARD_LINES`。
+    #    口径放在标记上而不写死任务名：否则改名后护栏会静默变成「未记录」，
+    #    且看不出是改名导致的（症状与「成长计时」当年那条隐式口径一模一样）。
+    #    ⚠️ v3.64.13 起只有「夜间睡眠 / 午睡」用这一列；「流失」直接读 L1 归因
+    #       （玩游戏 / 刷短视频 / 看小说 本来就归流失），不需要再标一遍。
+    daily_role = models.CharField(
+        max_length=20, blank=True, default='', choices=DAILY_ROLE_CHOICES,
+        verbose_name='日常护栏角色',
+        help_text='标了才计入「今天的三条线」：夜间睡眠按醒来那一刻归属日期，午睡按开始时刻（流失不看这列）',
+    )
     note = models.TextField(blank=True, null=True, verbose_name='备注')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
@@ -169,3 +189,47 @@ class TaskMeta(models.Model):
 
     def __str__(self):
         return f'{self.task_name} → {self.activity_type}'
+
+
+class TimerSession(models.Model):
+    """实时计时会话（本表 managed，运行态落在这里）。
+
+    🔴 为什么不把「正在计时」直接写进 `TemporalTask`：
+       `TemporalTask` 是 `managed=False` 的外部表（`temporal_time_atracker_tasks_list`），
+       ① 不能给它加列；② end_time / duration_hours 为空的半截记录会进统计口径。
+       所以运行态单独存本表，**停止时才写一条真正的 `TemporalTask`**。
+
+    🔴 `task_id` 用裸整数而不是 ForeignKey：
+       目标表是外部表、主键类型由它的建表 DDL 决定，加 FK 约束有类型不匹配的风险。
+       这里只是「记住这条会话写进了哪条记录」，不参与跨表聚合，裸 id 足够。
+    """
+
+    STATUS_CHOICES = [
+        ('running', '计时中'),
+        ('done', '已入账'),
+        ('discarded', '已丢弃'),
+    ]
+
+    task_name = models.CharField(max_length=255, verbose_name='任务名称')
+    start_time = models.DateTimeField(verbose_name='开始时间')
+    end_time = models.DateTimeField(blank=True, null=True, verbose_name='结束时间')
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='running', verbose_name='状态',
+    )
+    task_id = models.IntegerField(blank=True, null=True, verbose_name='写入的时间记录ID')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'temporal_timer_session'
+        db_table_comment = '实时计时会话：运行态在此，停止时才写入时间记录'
+        verbose_name = '计时会话'
+        verbose_name_plural = '计时会话'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status'], name='temporal_timer_status_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.task_name} ({self.status})'

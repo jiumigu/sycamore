@@ -103,6 +103,8 @@ urlpatterns = [
     path('cashflow/snapshot/', views.SnapshotView.as_view(), name='cashflow-snapshot'),
     path('cashflow/snapshot/list/', views.SnapshotListView.as_view(), name='cashflow-snapshot-list'),
     path('cashflow/copy/', views.CopySnapshotView.as_view(), name='cashflow-copy'),
+    # 净值变动归因（v3.62.42）—— 资产存量与账本流量的勾稽
+    path('cashflow/networth-bridge/', views.NetworthBridgeView.as_view(), name='cashflow-networth-bridge'),
     # 定期存款
     path('regular/stats/', views.RegularStatsView.as_view(), name='regular-stats'),
     path('regular/expiring/', views.RegularExpiringView.as_view(), name='regular-expiring'),

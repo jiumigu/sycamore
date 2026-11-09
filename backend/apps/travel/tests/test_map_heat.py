@@ -11,7 +11,10 @@ from rest_framework.test import APIClient
 from apps.toolkit.models import CityCoordinate
 from apps.travel.models import TravelRecord
 from apps.travel.services import (
+    BUBBLE_SIZE_MAX,
+    BUBBLE_SIZE_MIN,
     MapDataService,
+    bubble_size,
     get_coordinates,
     heat_level,
     reset_coord_index,
@@ -241,3 +244,32 @@ def test_bubbles_keep_county_city_on_its_own_point(coords):
     bubbles = {b['city']: b for b in MapDataService.get_map_data()['bubbles']}
     assert bubbles['福鼎市']['latitude'] == 27.32
     assert bubbles['宁德市']['latitude'] == 26.67
+
+
+# ===== 气泡直径 =====
+
+def test_bubble_size_stays_within_renderable_range():
+    """直径必须落在可渲染区间：上限一撑破，气泡就把底图盖住了（旧上限是 50）"""
+    for cost, count in [(0, 1), (500, 1), (30000, 1), (200000, 9), (0, 20)]:
+        size = bubble_size(cost, count)
+        assert BUBBLE_SIZE_MIN <= size <= BUBBLE_SIZE_MAX
+
+
+def test_bubble_size_does_not_saturate_on_cost():
+    """一趟 1500 元与一趟 30000 元要看得出差别（旧公式两者都顶到上限 = 长得一样）"""
+    assert bubble_size(1500, 1) < bubble_size(30000, 1)
+
+
+def test_bubble_size_grows_with_visit_count():
+    """同等花费下，去得越多越大"""
+    assert bubble_size(3000, 1) < bubble_size(3000, 5)
+
+
+def test_map_bubbles_use_bubble_size(coords):
+    """接口下发的 size 就是 bubble_size 的值，前端不再算第二套刻度"""
+    _rec('温州市', '浙江省', cost=3000)
+    _rec('温州市', '浙江省', cost=2000)
+
+    bubbles = MapDataService.get_map_data()['bubbles']
+    assert len(bubbles) == 1
+    assert bubbles[0]['size'] == bubble_size(5000, 2)

@@ -12,6 +12,7 @@
 import datetime as dt
 
 import pytest
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -331,3 +332,65 @@ class TestPeriodBoundary:
         work.refresh_from_db()
         assert period_range('weekly', timezone.localtime(work.created_at).date())[2] != \
             period_range('weekly', timezone.localdate())[2]
+
+
+# ══════════════════════════════════════════════════════════════
+# 六、媒体（图片 / 视频）
+# ══════════════════════════════════════════════════════════════
+
+class TestMedia:
+    """作品媒体的上传 + `Work.media` 字段（图片 / 视频，非必填）。"""
+
+    def test_upload_image(self, client, tmp_path):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        f = SimpleUploadedFile('shot.png', b'\x89PNG-fake', content_type='image/png')
+        # 上传必须落临时目录，别污染真实 backend/media/（铁律：测试不碰真实数据）
+        with override_settings(MEDIA_ROOT=tmp_path):
+            resp = client.post(f'{URL}/media/', {'file': f}, format='multipart')
+        assert resp.status_code == 200
+        assert resp.json()['type'] == 'image'
+        assert '/media/works/' in resp.json()['url']
+        assert (tmp_path / 'works').exists()
+
+    def test_upload_video(self, client, tmp_path):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        f = SimpleUploadedFile('demo.mp4', b'\x00\x00fake', content_type='video/mp4')
+        with override_settings(MEDIA_ROOT=tmp_path):
+            resp = client.post(f'{URL}/media/', {'file': f}, format='multipart')
+        assert resp.status_code == 200
+        assert resp.json()['type'] == 'video'
+
+    def test_upload_rejects_unknown_ext(self, client):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        f = SimpleUploadedFile('evil.exe', b'MZ', content_type='application/octet-stream')
+        resp = client.post(f'{URL}/media/', {'file': f}, format='multipart')
+        assert resp.status_code == 400
+
+    def test_upload_requires_file(self, client):
+        resp = client.post(f'{URL}/media/', {}, format='multipart')
+        assert resp.status_code == 400
+
+    def test_work_with_media_roundtrip(self, client):
+        """新建带 media 的作品 ⇒ 列表出参带同一份 media。"""
+        media = [{'type': 'image', 'url': '/media/works/202610/a.png'}]
+        resp = client.post(
+            f'{URL}/items/',
+            {'name': '带图作品', 'kind': 'craft', 'media': media},
+            format='json',
+        )
+        assert resp.status_code == 201
+        assert resp.json()['work']['media'] == media
+        rows = client.get(f'{URL}/items/').json()
+        assert rows[0]['media'] == media
+
+    def test_work_rejects_bad_media_shape(self, client):
+        """media 结构不合法必须 400 —— 脏数据进库前端会静默画空。"""
+        resp = client.post(
+            f'{URL}/items/',
+            {'name': '坏结构', 'media': [{'type': 'movie', 'url': ''}]},
+            format='json',
+        )
+        assert resp.status_code == 400

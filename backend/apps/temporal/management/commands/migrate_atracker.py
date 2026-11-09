@@ -19,6 +19,11 @@ from django.utils import timezone
 from apps.temporal.models import TemporalTask
 from apps.temporal.services import _ensure_task_meta, find_duplicate_task
 
+# 来源标记（v3.64.34 补）：本命令此前**完全不写** `import_batch`，重跑一次就会
+# 往「未标注」桶里灌一批记录，且事后无从区分。裸词与 `timer` / `worklog` 同风格，
+# 由 `constants.SOURCE_BATCH_EXACT` 认成「旧库迁移」。
+ATRACKER_BATCH = 'atracker'
+
 
 class Command(BaseCommand):
     help = '迁移 sycamore_db.o_atracker_tasks_list 到 temporal_time_atracker_tasks_list（逐条）'
@@ -112,6 +117,8 @@ class Command(BaseCommand):
                         day=d.day,
                         week=d.isocalendar()[1],
                         quarter=(d.month - 1) // 3 + 1,
+                        # 新迁进来的记录自报家门；**更新已有记录时不动**它的来源
+                        import_batch=ATRACKER_BATCH,
                     )
                     created += 1
 

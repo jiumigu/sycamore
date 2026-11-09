@@ -41,10 +41,11 @@ KPI_TEMPLATES = [
         'floor_value': 5,
         'agg': 'sum_hours',
         'source_kind': 'auto',
-        # 🔴 口径：读**库**里的 `activity_type`（`temporal_task_meta`），
-        #    不是读常量表、也不走 redemption 侧的归因规则。
-        #    `ONEDAY`（写日记）当前就在「深度工作」桶里 —— 用户 2026-10-12 拍板**计入**。
-        'source_config': {'kind': 'temporal_hours', 'where': {'l2': ['深度工作']}},
+        # 🔴 口径（v3.64.11 起）：读 `temporal_task_meta.counts_growth` ——
+        #    即「分类映射编辑器」里那个「成长计时」开关，**唯一依据**。
+        #    此前是隐式的 `l2 = ['深度工作']`：界面上看不见、也没法把新分类拉进来，
+        #    且改 L2 会顺手改掉成长口径。现在改分类不再动这个数。
+        'source_config': {'kind': 'growth_hours'},
         'goal_why': '你写的：一天 3 小时 × 4 天 = 12h',
         'floor_why': '近 11 周中位数 5.50h · 达标 7/11（2026-10-13 设）',
         'sort_order': 10,
@@ -128,12 +129,34 @@ KPI_TEMPLATES = [
         'direction': 'at_least',
         'goal_value': 2,
         'floor_value': None,
-        'agg': 'manual_sum',
-        'source_kind': 'manual',
-        'source_config': {'kind': 'manual_sum'},
+        'agg': 'count',
+        # 🔴 v3.64.30：从「纯手工」改成「作品库按类型自动数 + 手工补记」。
+        #    理由：作品已经有了「绘画作品」这个类型，还让人手工数一遍
+        #    就是同一件事两个录入口 —— 迟早对不上，而且对不上不报错。
+        #    ⚠️ 只有**类型选对**的作品才会被数进来；线下随手画的仍可补记。
+        #    ⚠️ 这条只影响**新挑这条模板的阶段**；已建阶段是拷贝，不受影响（铁律 1）。
+        'source_kind': 'auto_plus_manual',
+        'source_config': {'kind': 'works_count', 'where': {'work_kind': 'drawing'}},
         'goal_why': '你写的：一个月 2 张画',
         'floor_why': '',
         'sort_order': 60,
+    },
+    {
+        'key': 'embroidery',
+        'name': '绣品',
+        'period_type': 'monthly',
+        'unit': '件',
+        'direction': 'at_least',
+        # ⚠️ 目标/底线都留空：「绣几件」没有历史数据，不替用户编一个数。
+        #    两条都空 ⇒ 该条只展示、不判定（`unconfigured`），这是合法状态。
+        'goal_value': None,
+        'floor_value': None,
+        'agg': 'count',
+        'source_kind': 'auto_plus_manual',
+        'source_config': {'kind': 'works_count', 'where': {'work_kind': 'embroidery'}},
+        'goal_why': '',
+        'floor_why': '',
+        'sort_order': 65,
     },
     {
         'key': 'income_verify',

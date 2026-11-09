@@ -344,11 +344,14 @@ class ReaderMonthlySummaryViewSet(viewsets.ModelViewSet):
                 'total_summaries': 0,
             })
 
+        # 这四个聚合用**裸 Sum**（文件顶部已从 django.db.models 导入）——
+        # 原写成 models.Sum 但本文件没有 import models，NameError 只在 qs 非空时才炸：
+        # 空数据年份走上面的早退分支，所以一直没暴露。
         agg = qs.aggregate(
-            total_new_followers=models.Sum('new_followers'),
-            total_new_unfollowers=models.Sum('new_unfollowers'),
-            total_interactions=models.Sum('total_interactions'),
-            total_high_energy=models.Sum('high_energy_count'),
+            total_new_followers=Sum('new_followers'),
+            total_new_unfollowers=Sum('new_unfollowers'),
+            total_interactions=Sum('total_interactions'),
+            total_high_energy=Sum('high_energy_count'),
         )
         total_new_followers = agg['total_new_followers'] or 0
         total_new_unfollowers = agg['total_new_unfollowers'] or 0

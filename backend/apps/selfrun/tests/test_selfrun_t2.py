@@ -44,14 +44,25 @@ def _aware(day, hour=9):
     return timezone.make_aware(dt.datetime.combine(day, dt.time(hour, 0)))
 
 
-def _seed_temporal(name, l2, days_ago_list, hours=1.0):
+def _week_days(count=2):
+    """取**当前自然周**的前 `count` 天（周一 → 周二、周三…）。
+
+    🔴 不要用「今天往前推 N 天」来造「本周内」的数据：**周一**跑这套测试时，
+       往前推 1 天落在**上一周**，周周期口径把它排除 ⇒ `auto_value` 只有 1。
+       这曾让本文件每逢周一红一次（v3.62.38 修），而代码本身是对的。
+    """
+    today = timezone.localdate()
+    start = today - dt.timedelta(days=today.weekday())
+    return [start + dt.timedelta(days=i) for i in range(count)]
+
+
+def _seed_temporal(name, l2, dates, hours=1.0):
     TaskMeta.objects.get_or_create(
         task_name=name, defaults={'activity_type': l2, 'default_attribution': '关系'},
     )
-    today = timezone.localdate()
-    for d in days_ago_list:
+    for day in dates:
         TemporalTask.objects.create(
-            task_name=name, start_time=_aware(today - dt.timedelta(days=d)),
+            task_name=name, start_time=_aware(day),
             duration_hours=hours, year=2026, mon='10', day=1,
         )
 
@@ -98,8 +109,8 @@ def test_auto_plus_manual_merges_and_keeps_three_numbers(client, stage):
     social = _metric(stage, 'social_days')
     assert social.source_kind == 'auto_plus_manual'
 
-    # 本周内造 2 天有「社交」记录
-    _seed_temporal('人际交往', '社交', [0, 1], hours=1.0)
+    # 本周内造 2 天有「社交」记录（按自然周取日，见 `_week_days` 的注释）
+    _seed_temporal('人际交往', '社交', _week_days(2), hours=1.0)
 
     resp = client.get(f'{URL}/periods/current/?period_type=weekly')
     readings = {r['name']: r for r in resp.json()['period']['readings']}

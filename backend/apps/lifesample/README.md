@@ -1,5 +1,7 @@
 # LifeSample — 人生样本
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 轻量索引人生参照样本，深度内容存放在 Obsidian。Sycamore 侧只存索引（姓名/别名/类型/标签/一句话简介/Obsidian 路径/我的笔记），Obsidian 仓库按 `frontmatter` 扫描自动关联。
 
 ## Models

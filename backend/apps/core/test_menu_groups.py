@@ -22,6 +22,7 @@
 不碰开发库。
 """
 import pytest
+from rest_framework.test import APIClient
 
 from apps.core.models import MenuGroup
 from apps.core.views import DEFAULT_MENU_GROUPS, ensure_default_menu_groups
@@ -79,3 +80,22 @@ def test_selfrun_sits_right_after_goals_even_when_sort_collides() -> None:
 
     ordered = list(MenuGroup.objects.values_list('group_key', flat=True))
     assert ordered.index('goals') < ordered.index('selfrun') < ordered.index('temporal')
+
+
+@pytest.mark.django_db
+def test_menu_groups_endpoint_returns_bare_array_with_all_groups():
+    """分组接口必须裸数组返回**全量**，绝不能走 DRF 全局分页。
+
+    v3.64.0 踩坑：showroom 补进库后分组总数 11 > 全局 page_size 10，
+    分页把排最末的 showroom 截到第 2 页，前端只读第一页 results ⇒ 侧边栏静默少一组。
+    """
+    _wipe()
+    resp = APIClient().get('/api/core/menu-groups/')
+    data = resp.json()
+
+    assert resp.status_code == 200
+    assert isinstance(data, list), '分组接口必须是裸数组（不是 {count,results}）'
+    assert len(data) == len(DEFAULT_MENU_GROUPS)
+    keys = {g['group_key'] for g in data}
+    assert keys == _DEFAULT_KEYS
+    assert 'showroom' in keys

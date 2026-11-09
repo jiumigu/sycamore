@@ -622,19 +622,49 @@ class TestPassiveCoverage:
 class TestDti:
 
     def test_no_liability_ledger_is_unavailable_not_zero(self):
-        """没录负债明细 ≠ 没有债。返回 0 会让空台账显示满分健康度"""
+        """台账**一行都没录** ⇒ 不可知，返回 0 会让空台账显示满分健康度
+
+        注意与下一条的区别：这是「不知道有没有债」，下一条是「确定没有债」。
+        """
         _fixed_scenario()
         ratio = _ratio_of(get_ratio_overview('2026-09'), 'dti')
         assert ratio['available'] is False
         assert ratio['value'] is None
-        assert '在还' in ratio['reason']
+        assert '还没录入' in ratio['reason']
 
-    def test_rows_but_none_active_has_distinct_reason(self):
+    def test_rows_all_settled_is_zero_not_unavailable(self):
+        """台账录过、且全部「已结清」⇒ **确实没有债**，DTI = 0%（不是数据不可用）
+
+        用户 2026-10-29 报的正是这个：3 笔负债全部还清，界面却显示
+        「数据不可用」，还附一句催他去把状态改成「在还」——
+        等于把最健康的一刻说成了缺数据。
+        """
         _fixed_scenario()
+        _liability('旧车贷', monthly_payment=800, status='已结清')
+        _liability('旧消费贷', monthly_payment=300, status='已结清')
+        overview = get_ratio_overview('2026-09')
+        ratio = _ratio_of(overview, 'dti')
+
+        assert ratio['available'] is True
+        assert ratio['value'] == 0.0
+        assert ratio['level'] == 'good'
+        assert ratio['level_label'] == '健康'
+        # 已结清的月供 800 + 300 一分都不许进分子
+        assert ratio['numerator']['value'] == 0
+        # 「台账总共几笔、几笔在还」这条信息仍然要给出（前端据此显示「2 笔，均不在还」）
+        assert overview['liability_state'] == {
+            'total': 2, 'active': 0, 'state': 'none_active',
+        }
+        # 有数了就不该再出现在「缺口」清单里
+        assert 'dti' not in [g['key'] for g in overview['gaps']]
+
+    def test_all_settled_without_income_still_unavailable(self):
+        """没有债、但也没有收入记录 ⇒ DTI 仍算不出（分母不可知，与分子无关）"""
+        _seed_classify_rules()
         _liability('旧车贷', monthly_payment=800, status='已结清')
         ratio = _ratio_of(get_ratio_overview('2026-09'), 'dti')
         assert ratio['available'] is False
-        assert '没有一笔是「在还」' in ratio['reason']
+        assert '收入' in ratio['reason']
 
     def test_dti_value_and_boundary_band(self):
         """月供 3000 ÷ 月均收入 10000 = 30.0 → 恰好落「承压」档"""

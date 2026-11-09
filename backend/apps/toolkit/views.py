@@ -790,6 +790,18 @@ def _option_payload(tracker) -> list[dict]:
     return [{'key': k, 'label': l} for k, l in _lean_option_pairs(tracker)]
 
 
+def _rank_tendencies(stat_keys, by_tendency, weighted) -> list[str]:
+    """倾向排名 —— **唯一实现**，preview 与 report 共用。
+
+    三级排序：条数降序 → 强度加权降序 → 选项定义顺序（保证并列时不随机）。
+    改口径只改这里；两处各自写一份的后果是「卡片说取前 2 名、报告标的却是另外两项」。
+    """
+    return sorted(
+        stat_keys,
+        key=lambda t: (-len(by_tendency.get(t, [])), -weighted[t], stat_keys.index(t)),
+    )
+
+
 def _build_preview(tracker, today):
     """单条决策的倾向预览——占比 + 强度加权分数 + 连续断记天数
 
@@ -831,14 +843,24 @@ def _build_preview(tracker, today):
             'high_ratio': round(high / count * 100, 1) if count else 0.0,
         })
 
-    # 主导倾向：先比条数，再比加权分，最后按选项定义顺序收敛
-    lean_tendency = None
-    if total:
-        lean_tendency = min(
-            stat_keys,
-            key=lambda t: (-len(by_tendency.get(t, [])), -weighted[t], stat_keys.index(t)),
-        )
+    # 排名：先比条数，再比加权分，最后按选项定义顺序收敛（口径不变，共用 _rank_tendencies）
+    ranked_all = _rank_tendencies(stat_keys, by_tendency, weighted) if total else []
+    # 🔴 只有「有记录」的选项能进结论：0 次的项不该占「前 3 名」里的一个位子，
+    #    否则 2 个选项各记 1 次、第 3 项 0 次，会输出「前 3 名」里带一个 0% 的空结论。
+    ranked_with_records = [t for t in ranked_all if by_tendency.get(t)]
+    top_n = tracker.effective_top_n()
+    conclusion_keys = ranked_with_records[:top_n]
+    lean_tendency = conclusion_keys[0] if conclusion_keys else None
     lean_stat = next((s for s in tendency_stats if s['tendency'] == lean_tendency), None)
+    stat_by_key = {s['tendency']: s for s in tendency_stats}
+    # 结论项（带名次）——卡片结论行与报告标注共用这一份，前端不再自己排序
+    lean_ranked = [
+        {**stat_by_key[t], 'rank': i + 1, 'is_top': i < top_n}
+        for i, t in enumerate(ranked_with_records)
+    ]
+    # 前 N 项加权合计占比：多选结论下用它替代「主导优势分」（后者只在单结论时有意义）
+    top_weight = sum(weighted[t] for t in conclusion_keys)
+    top_share = round(top_weight / weighted_total * 100, 1) if weighted_total else 0.0
 
     # 加权分：默认三项沿用「离开−留下」双向分；自定义选项改用「主导 − 次主导」优势分（恒 ≥ 0）
     ranked = sorted(stat_keys, key=lambda t: -weighted[t])
@@ -866,6 +888,14 @@ def _build_preview(tracker, today):
 
     if not total:
         conclusion = '还没有任何记录，先记一条看看'
+    elif len(conclusion_keys) > 1:
+        # 多选结论：逐项列名字与票数占比。不在这里复述「高强度占几成」——
+        # 每项都说一遍会变成一句话读不完，那部分留给报告页。
+        parts = [
+            f"{stat_by_key[t]['label']} {stat_by_key[t]['percent']}%"
+            for t in conclusion_keys
+        ]
+        conclusion = f"取前 {len(conclusion_keys)} 名：" + " · ".join(parts)
     elif lean_stat:
         if custom:
             conclusion = (
@@ -896,6 +926,11 @@ def _build_preview(tracker, today):
             else LEAN_LABELS.get(lean_tendency, '') if lean_tendency else ''
         ),
         'lean_percent': lean_stat['percent'] if lean_stat else 0.0,
+        # 结论口径：生效条数（已按「默认三项压回 1」「不超选项数」夹过）+ 带名次的排名
+        'result_top_n': top_n,
+        'lean_ranked': lean_ranked,
+        'conclusion_keys': conclusion_keys,
+        'top_share': top_share,
         'weighted_total': weighted_total,
         'weighted_score': weighted_score,
         'weighted_lean_percent': weighted_lean_percent,
@@ -950,6 +985,12 @@ class DecisionTrackerViewSet(viewsets.ModelViewSet):
         # 统计口径 = 定义的选项 + 历史记录里出现过但已不在选项中的（兜底显示原文）
         stat_keys = [k for k, _ in options] + [t for t in by_tendency if t not in labels]
 
+        # 与 preview 共用同一个排名函数，否则「卡片说前 2 名是 A/B、报告标的是 C/D」
+        weighted = {t: sum(r.intensity for r in by_tendency.get(t, [])) for t in stat_keys}
+        top_n = tracker.effective_top_n()
+        ranked = [t for t in _rank_tendencies(stat_keys, by_tendency, weighted) if by_tendency.get(t)] if total else []
+        top_rank = {t: i + 1 for i, t in enumerate(ranked)}
+
         tendency_stats = []
         for t in stat_keys:
             items = by_tendency.get(t, [])
@@ -958,6 +999,9 @@ class DecisionTrackerViewSet(viewsets.ModelViewSet):
                 'label': labels.get(t, t),
                 'count': len(items),
                 'percent': round(len(items) / total * 100, 1) if total else 0,
+                'weighted': weighted[t],
+                'rank': top_rank.get(t),
+                'is_top': t in ranked[:top_n],
             })
 
         monthly_trend = [
@@ -991,6 +1035,11 @@ class DecisionTrackerViewSet(viewsets.ModelViewSet):
             'options': _option_payload(tracker),
             'total_records': total,
             'record_days': len({r.record_date for r in records}),
+            # 结论口径与采纳结果一并回传，报告页的「采用建议」按钮据此预填
+            'result_top_n': top_n,
+            'conclusion_keys': ranked[:top_n],
+            'final_choices': tracker.final_choices or [],
+            'final_decision': tracker.final_decision,
             'tendency_stats': tendency_stats,
             'monthly_trend': monthly_trend,
             'reasons': reasons,
@@ -1040,16 +1089,55 @@ class DecisionTrackerViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def decide(self, request, pk=None):
-        """做出决定：填最终决定 + 决定日期 → 状态置为已决策"""
+        """做出决定：填最终决定 / 采纳若干倾向选项 → 状态置为已决策
+
+        两个字段语义不同，**不互相顶替**：
+
+        - `final_decision`：人写的那句话（「先做 A，B 放观察」），可空；
+        - `adopted`：采纳了哪几项倾向（选项标签数组），可空，落到 `final_choices`。
+
+        多选结论下用户往往「就按前 3 项办」，让他抄一遍既费事又会抄漏；
+        但把选中的选项拼进 `final_decision` 又会顶掉他本来想写的话
+        （且那列只有 50 字，三项就可能溢出）。所以两者分开存。
+        """
         tracker = self.get_object()
         final_decision = (request.data.get('final_decision') or '').strip()
-        if not final_decision:
-            return Response({'error': '请填写最终决定'}, status=status.HTTP_400_BAD_REQUEST)
+
+        adopted_raw = request.data.get('adopted')
+        adopted: list[str] = []
+        if adopted_raw:
+            if not isinstance(adopted_raw, list):
+                return Response({'error': 'adopted 需为字符串数组'}, status=status.HTTP_400_BAD_REQUEST)
+            valid = {label for _, label in tracker.tendency_options()}
+            for item in adopted_raw:
+                text = str(item).strip()
+                if not text:
+                    continue
+                if text not in valid:
+                    return Response(
+                        {'error': f'「{text}」不是本决策的倾向选项'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if text not in adopted:
+                    adopted.append(text)
+
+        if not final_decision and not adopted:
+            return Response({'error': '请填写最终决定，或采纳至少一项倾向'}, status=status.HTTP_400_BAD_REQUEST)
+        # 超长**报错不截断**：静默截成 50 字会让人以为存进去的是完整那句话
+        if len(final_decision) > 50:
+            return Response(
+                {'error': '最终决定不超过 50 个字，更长的说明请写在归档的事后回看里'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         decision_date = request.data.get('decision_date') or date.today().isoformat()
         tracker.final_decision = final_decision
+        tracker.final_choices = adopted or None
         tracker.decision_date = decision_date
         tracker.status = '已决策'
-        tracker.save(update_fields=['final_decision', 'decision_date', 'status', 'updated_at'])
+        tracker.save(update_fields=[
+            'final_decision', 'final_choices', 'decision_date', 'status', 'updated_at',
+        ])
         return Response(DecisionTrackerSerializer(tracker).data)
 
     @action(detail=True, methods=['post'])

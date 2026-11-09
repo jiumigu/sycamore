@@ -2,10 +2,9 @@
 
 from datetime import datetime
 
-from django.db.models import Avg, Count, Q
-from django.db.models.functions import TruncDate
+from django.db.models import Q
 
-from rest_framework import status, views, viewsets
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -20,6 +19,16 @@ class SummaryViewSet(viewsets.ViewSet):
     """综合进度看板 — 只读聚合 API"""
 
     permission_classes = [AllowAny]
+
+    def dispatch(self, request, *args, **kwargs):
+        """给整个请求开一个取数作用域
+
+        🔴 只在这里开：一次请求内「同一份事实」被反复取（年视图 + 月视图 +
+           强度），作用域内记一次就够。出作用域即销毁 —— **不做跨请求缓存**，
+           否则用户改完归因规则再刷新，页面还会显示旧口径。
+        """
+        with ProgressAggregator.request_scope():
+            return super().dispatch(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'])
     def overview(self, request):
@@ -67,24 +76,28 @@ class SummaryViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def yearly_detail(self, request):
-        """年度明细：每年一行（总进度/目标/7 模块/达成率）"""
+        """年度明细：每年一行（各维度**覆盖率** + 当年最短板）
+
+        🔴 v3.62.43 起不再有「总进度 / 目标 / 达成率」三列 —— 总分解散后
+        这些年行没有可加的量，硬凑一个合计就是又把不同量纲加回去。
+        """
         years = ProgressAggregator.get_available_years()
         rows = []
         for y in years:
             data = ProgressAggregator.get_yearly_overview(y)
-            mod_map = {m['module']: m['points'] for m in data['modules']}
+            mod_map = {m['module']: m['coverage']['pct'] for m in data['modules']}
+            weakest = data.get('weakest') or {}
             rows.append({
                 'year': data['year'],
-                'total_points': data['total_points'],
-                'yearly_target': data['yearly_target'],
-                'progress_percent': data['progress_percent'],
-                'wealth': mod_map.get('wealth', 0),
-                'health': mod_map.get('health', 0),
-                'times': mod_map.get('times', 0),
-                'book': mod_map.get('book', 0),
-                'sugar': mod_map.get('sugar', 0),
-                'travel': mod_map.get('travel', 0),
-                'words': mod_map.get('words', 0),
+                'weakest': weakest.get('label'),
+                'weakest_pct': weakest.get('coverage_pct'),
+                'wealth': mod_map.get('wealth'),
+                'health': mod_map.get('health'),
+                'times': mod_map.get('times'),
+                'book': mod_map.get('book'),
+                'sugar': mod_map.get('sugar'),
+                'travel': mod_map.get('travel'),
+                'words': mod_map.get('words'),
             })
         return Response({'years': rows})
 
@@ -281,172 +294,3 @@ class SummaryViewSet(viewsets.ViewSet):
         user_id = int(request.query_params.get('user_id', 1))
         data = BodyMindCorrelationService.get_correlation_data(user_id=user_id, weeks=weeks)
         return Response(data)
-
-
-class PersonalProfileView(views.APIView):
-    """个人画像仪表盘"""
-
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        year = request.query_params.get('year')
-        if year:
-            year = int(year)
-        else:
-            year = datetime.now().year
-
-        return Response({
-            'health': self._health_profile(year),
-            'energy': self._energy_profile(year),
-            'mood': self._mood_profile(year),
-            'relation': self._relation_profile(year),
-            'output': self._output_profile(year),
-            'inbox': self._inbox_profile(),
-            'decision': self._decision_profile(year),
-        })
-
-    def _health_profile(self, year: int) -> dict:
-        """健康画像：最新自查分 + 体重趋势"""
-        from apps.toolkit.models import HealthSelfCheck
-        from apps.health.models import WeightRecord
-
-        latest_check = HealthSelfCheck.objects.filter(
-            check_date__year=year, user_id=1,
-        ).order_by('-check_date').first()
-
-        checks = list(HealthSelfCheck.objects.filter(
-            check_date__year=year, user_id=1,
-        ).values('check_date', 'health_score').order_by('check_date'))
-
-        weight_qs = WeightRecord.objects.filter(
-            record_date__year=year,
-        ).order_by('-record_date')
-
-        latest_weight = weight_qs.first()
-        all_weights = list(weight_qs.order_by('record_date').values('record_date', 'weight_kg'))
-
-        return {
-            'latest_score': latest_check.health_score if latest_check else None,
-            'score_trend': [{'date': c['check_date'], 'value': c['health_score']} for c in checks],
-            'latest_weight': float(latest_weight.weight_kg) if latest_weight else None,
-            'weight_trend': [{'date': w['record_date'], 'value': float(w['weight_kg'])} for w in all_weights],
-            'check_count': len(checks),
-        }
-
-    def _energy_profile(self, year: int) -> dict:
-        """职业能量画像"""
-        from apps.toolkit.models import CareerEnergyAudit
-
-        latest = CareerEnergyAudit.objects.filter(
-            audit_date__year=year, user_id=1,
-        ).order_by('-audit_date').first()
-
-        all_audits = list(CareerEnergyAudit.objects.filter(
-            audit_date__year=year, user_id=1,
-        ).values('audit_date', 'total_score', 'work_score', 'env_score', 'growth_score', 'body_score').order_by('audit_date'))
-
-        return {
-            'latest': {
-                'total_score': latest.total_score if latest else None,
-                'work_score': latest.work_score if latest else None,
-                'env_score': latest.env_score if latest else None,
-                'growth_score': latest.growth_score if latest else None,
-                'body_score': latest.body_score if latest else None,
-                'decision': latest.decision if latest else None,
-            } if latest else None,
-            'trend': [{
-                'date': a['audit_date'],
-                'total': a['total_score'],
-                'work': a['work_score'],
-                'env': a['env_score'],
-                'growth': a['growth_score'],
-                'body': a['body_score'],
-            } for a in all_audits],
-            'audit_count': len(all_audits),
-        }
-
-    def _mood_profile(self, year: int) -> dict:
-        """情绪画像：小确幸数据"""
-        from apps.sugar.models import SugarRecord
-
-        qs = SugarRecord.objects.filter(years=year)
-        total = qs.count()
-
-        if total == 0:
-            return {'total_records': 0, 'avg_happiness': None, 'happiness_trend': [], 'active_days': 0}
-
-        agg = qs.aggregate(avg=Avg('level_of_happiness'))
-        trend = list(qs.values('time', 'level_of_happiness').order_by('time'))
-
-        return {
-            'total_records': total,
-            'avg_happiness': round(float(agg['avg'] or 0), 2),
-            'happiness_trend': [{'date': t['time'], 'value': float(t['level_of_happiness'])} for t in trend],
-            'active_days': qs.dates('time', 'day').count(),
-        }
-
-    def _relation_profile(self, year: int) -> dict:
-        """关系画像"""
-        from apps.relation.models import Relationship, Interaction
-
-        total_relations = Relationship.objects.count()
-        active_relations = Interaction.objects.filter(
-            happened_at__year=year,
-        ).values('relationship_id').distinct().count()
-
-        interaction_count = Interaction.objects.filter(happened_at__year=year).count()
-
-        return {
-            'total_relations': total_relations,
-            'active_relations': active_relations,
-            'interactions_this_year': interaction_count,
-        }
-
-    def _output_profile(self, year: int) -> dict:
-        """良品率画像"""
-        from apps.goals.models import OutputRecord
-
-        qs = OutputRecord.objects.filter(created_at__year=year)
-        total = qs.count()
-        if total == 0:
-            return {'total_records': 0, 'good_rate': None, 'by_category': []}
-
-        good = qs.filter(quality='good').count()
-        by_cat = list(qs.values('category').annotate(
-            total=Count('id'),
-            good=Count('id', filter=Q(quality='good')),
-        ))
-
-        return {
-            'total_records': total,
-            'good_rate': round(good / total * 100, 1) if total > 0 else 0,
-            'by_category': [{
-                'category': c['category'],
-                'total': c['total'],
-                'good': c['good'],
-                'rate': round(c['good'] / c['total'] * 100, 1) if c['total'] > 0 else 0,
-            } for c in by_cat],
-        }
-
-    def _inbox_profile(self) -> dict:
-        """收件箱画像"""
-        from apps.inbox.models import InboxItem
-
-        pending = InboxItem.objects.filter(status='pending').count()
-        hesitating = InboxItem.objects.filter(status='hesitating').count()
-        done_this_year = InboxItem.objects.filter(
-            status='done', updated_at__year=datetime.now().year,
-        ).count()
-        total = InboxItem.objects.count()
-
-        by_category = list(InboxItem.objects.values('category').annotate(
-            count=Count('id'),
-        ))
-
-        return {
-            'pending': pending,
-            'hesitating': hesitating,
-            'done_this_year': done_this_year,
-            'total': total,
-            'by_category': by_category,
-        }

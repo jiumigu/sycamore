@@ -266,6 +266,8 @@ CREATE TABLE IF NOT EXISTS `toolkit_decision_tracker` (
   `decision_date` date NULL,
   `review_note` longtext NOT NULL,
   `lean_options` json NULL,
+  `result_top_n` smallint unsigned NOT NULL DEFAULT 1,
+  `final_choices` json NULL,
   `created_at` datetime(6) NOT NULL,
   `updated_at` datetime(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -409,63 +411,12 @@ CREATE TABLE IF NOT EXISTS `travel_wish` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
-# 三年赎回期（redemption app，managed 表，--no-migrations 下镜像）
-_CREATE_REDEMPTION_PERIOD_SQL = """
-CREATE TABLE IF NOT EXISTS `redemption_period` (
-  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  `start_date` date NOT NULL,
-  `end_date` date NOT NULL,
-  `pool_principal` numeric(14, 2) NOT NULL,
-  `tracking_status` varchar(10) NOT NULL,
-  `paused_since` date NULL,
-  `resume_at` date NULL,
-  `baseline_toward_ratio` numeric(5, 4) NULL,
-  `baseline_set_week` integer NULL,
-  `created_at` datetime(6) NOT NULL,
-  `updated_at` datetime(6) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-"""
-_CREATE_REDEMPTION_INJECT_SQL = """
-CREATE TABLE IF NOT EXISTS `redemption_pool_inject` (
-  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  `inject_date` date NOT NULL,
-  `amount` numeric(14, 2) NOT NULL,
-  `source` varchar(20) NOT NULL,
-  `note` longtext NULL,
-  `created_at` datetime(6) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-"""
-_CREATE_REDEMPTION_RULE_SQL = """
-CREATE TABLE IF NOT EXISTS `redemption_attr_rule` (
-  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  `match_field` varchar(20) NOT NULL,
-  `match_value` varchar(100) NOT NULL,
-  `attribution` varchar(10) NOT NULL,
-  `priority` integer NOT NULL,
-  `is_active` tinyint(1) NOT NULL,
-  `note` longtext NULL,
-  `created_at` datetime(6) NOT NULL,
-  `updated_at` datetime(6) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-"""
-_CREATE_REDEMPTION_SNAPSHOT_SQL = """
-CREATE TABLE IF NOT EXISTS `redemption_week_snapshot` (
-  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  `year` integer NOT NULL,
-  `week` integer NOT NULL,
-  `toward_hours` double NOT NULL,
-  `maintain_hours` double NOT NULL,
-  `external_hours` double NOT NULL,
-  `drain_hours` double NOT NULL,
-  `covered_hours` double NOT NULL,
-  `theoretical_hours` double NOT NULL,
-  `coverage_rate` double NOT NULL,
-  `toward_ratio` double NOT NULL,
-  `unit_cost` numeric(10, 2) NULL,
-  `snapshot_at` datetime(6) NOT NULL,
-  UNIQUE KEY `redemption_week_snapshot_year_week_1d0c3b_idx` (`year`, `week`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-"""
+# ⚠️ 2026-11-02 起赎回期**已无表**（v3.64.20 第 4 轮）：
+#    `redemption_period` / `redemption_week_snapshot` 退役，
+#    `redemption_pool_inject` 搬到 `selfrun_pool_inject`（见 selfrun 那一段）。
+#    旧镜像 DDL 已删 —— 留着会让 `--reuse-db` 下的旧库继续带着三张本该消失的表，
+#    于是「已删表」这件事在测试里永远看不出来。
+
 
 # 时间重构 L1 分组 / L2 活动类型映射（managed 表，--no-migrations 下镜像）
 _CREATE_ACTIVITY_GROUP_SQL = """
@@ -488,6 +439,8 @@ CREATE TABLE IF NOT EXISTS `temporal_task_meta` (
   `activity_type` varchar(50) NOT NULL,
   `default_attribution` varchar(10) NULL,
   `is_system` tinyint(1) NOT NULL,
+  `counts_growth` tinyint(1) DEFAULT 0 NOT NULL,
+  `daily_role` varchar(20) DEFAULT '' NOT NULL,
   `note` longtext NULL,
   `created_at` datetime(6) NOT NULL,
   `updated_at` datetime(6) NOT NULL,
@@ -497,6 +450,24 @@ CREATE TABLE IF NOT EXISTS `temporal_task_meta` (
   KEY `temporal_ta_group_3c4b7e_idx` (`group_id`),
   CONSTRAINT `temporal_task_meta_group_id_8c9d2a_fk` FOREIGN KEY (`group_id`)
     REFERENCES `temporal_activity_group` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# 实时计时会话（v3.63.x，managed 新表；--no-migrations --reuse-db 下镜像）。
+# ⚠️ 列定义与 `manage.py sqlmigrate temporal 0016` 逐字对齐：
+#    少一列 ⇒ 测试报「表存在但没有 xxx 列」，且报错点在业务代码里、看起来像代码 bug。
+_CREATE_TIMER_SESSION_SQL = """
+CREATE TABLE IF NOT EXISTS `temporal_timer_session` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `task_name` varchar(255) NOT NULL,
+  `start_time` datetime(6) NOT NULL,
+  `end_time` datetime(6) NULL,
+  `notes` longtext NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `task_id` integer NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  KEY `temporal_timer_status_idx` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
@@ -983,6 +954,7 @@ _CREATE_SELFRUN_STAGE_SQL = """
 CREATE TABLE IF NOT EXISTS `selfrun_stage` (
   `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
   `name` varchar(100) NOT NULL,
+  `parent_id` integer NULL,
   `start_date` date NOT NULL,
   `end_date` date NULL,
   `status` varchar(10) NOT NULL,
@@ -994,10 +966,47 @@ CREATE TABLE IF NOT EXISTS `selfrun_stage` (
   `summary_snapshot` json NULL,
   `summary_at` datetime(6) NULL,
   `note` varchar(200) NOT NULL,
+  `ledger_config` json DEFAULT ('{}') NOT NULL,
   `created_at` datetime(6) NOT NULL,
-  `updated_at` datetime(6) NOT NULL
+  `updated_at` datetime(6) NOT NULL,
+  CONSTRAINT `selfrun_stage_parent_id_e1842814_fk_selfrun_stage_id` FOREIGN KEY (`parent_id`) REFERENCES `selfrun_stage` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
+
+# selfrun 0008（v3.65.0）：给 `selfrun_stage` 加「上级阶段」与「账本参数」。
+# ⚠️ 与 survival / treasure / showroom 同款问题：`--reuse-db` 的旧测试库里这张表
+#    已经存在，`CREATE TABLE IF NOT EXISTS` 会**静默跳过** ⇒ 新列永远补不上，
+#    随后 ORM 一 SELECT `parent_id` 就报 `Unknown column`（看着像「迁移没跑」）。
+#    列定义逐字照抄 `sqlmigrate selfrun 0008`。
+_SELFRUN_STAGE_COLUMNS_0008 = (
+    ('parent_id', 'integer NULL'),
+    ('ledger_config', "json DEFAULT ('{}') NOT NULL"),
+)
+_SELFRUN_STAGE_PARENT_FK_0008 = 'selfrun_stage_parent_id_e1842814_fk_selfrun_stage_id'
+
+
+def _patch_selfrun_stage_columns(cursor) -> None:
+    """给已存在的 `selfrun_stage` 补 0008 的两列 + 自引用外键（幂等、不删不动）。"""
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'selfrun_stage'
+        """,
+    )
+    existing = {row[0] for row in cursor.fetchall()}
+    if not existing:
+        return          # 表还没建：上面那条 CREATE 已经带着新列一起建了
+    for name, definition in _SELFRUN_STAGE_COLUMNS_0008:
+        if name in existing:
+            continue
+        cursor.execute(
+            f'ALTER TABLE `selfrun_stage` ADD COLUMN `{name}` {definition}',
+        )
+    if 'parent_id' not in existing:
+        cursor.execute(
+            f'ALTER TABLE `selfrun_stage` ADD CONSTRAINT `{_SELFRUN_STAGE_PARENT_FK_0008}`'
+            ' FOREIGN KEY (`parent_id`) REFERENCES `selfrun_stage` (`id`)',
+        )
 _CREATE_SELFRUN_METRIC_SQL = """
 CREATE TABLE IF NOT EXISTS `selfrun_metric` (
   `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -1102,6 +1111,19 @@ CREATE TABLE IF NOT EXISTS `selfrun_template` (
   `updated_at` datetime(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
+# selfrun 0010（v3.64.26）：池注入从「自记金额」改成「标记账单」。
+#    ⚠️ 这张表的 DDL 与 `manage.py sqlmigrate selfrun 0010` 逐字对齐。
+#    ⚠️ 不再有 `stage_id` / `amount` / `inject_date` —— 金额与日期从账单读，
+#       注入额按阶段区间夹窗口算（与本金、消耗同一把尺子）。
+#       ⇒ 建表顺序也不再依赖 `selfrun_stage`。
+_CREATE_SELFRUN_POOL_INJECT_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_pool_inject` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `bill_id` integer NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  UNIQUE KEY `bill_id` (`bill_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
 _CREATE_SELFRUN_METRIC_PLAN_SQL = """
 CREATE TABLE IF NOT EXISTS `selfrun_metric_plan` (
   `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -1135,6 +1157,7 @@ CREATE TABLE IF NOT EXISTS `works_work` (
   `status` varchar(10) NOT NULL,
   `channel` varchar(40) NOT NULL,
   `note` varchar(200) NOT NULL,
+  `media` json DEFAULT ('[]') NOT NULL,
   `created_at` datetime(6) NOT NULL,
   `updated_at` datetime(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -1191,6 +1214,63 @@ CREATE TABLE IF NOT EXISTS `wealth_body_need` (
   CONSTRAINT `wealth_body_need_part_id_f11c9581_fk_wealth_body_part_id` FOREIGN KEY (`part_id`) REFERENCES `wealth_body_part` (`id`),
   KEY `wealth_body_need_user_part_idx` (`user_id`, `part_id`),
   KEY `wealth_body_need_status_idx` (`find_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# 展厅（v3.64.0）：4 张 managed 表。DDL 逐字照抄 `sqlmigrate showroom 0001`。
+# ⚠️ 顺序：profile / case / skill 无外键，work 的外键指向 works_work（本文件上方已建）。
+# ⚠️ 主键是 bigint（showroom 用 BigAutoField）；FK 不带 ON DELETE（Django 应用层管级联）。
+_CREATE_SHOWROOM_PROFILE_SQL = """
+CREATE TABLE IF NOT EXISTS `showroom_profile` (
+  `id` bigint AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `ip_name` varchar(50) NOT NULL,
+  `tagline` varchar(100) NOT NULL,
+  `positioning` varchar(200) NOT NULL,
+  `bio` longtext NOT NULL,
+  `email` varchar(254) NOT NULL,
+  `wechat` varchar(50) NOT NULL,
+  `other_contact` longtext NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_SHOWROOM_CASE_SQL = """
+CREATE TABLE IF NOT EXISTS `showroom_case` (
+  `id` bigint AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `title` varchar(200) NOT NULL,
+  `client` varchar(100) NOT NULL,
+  `time_label` varchar(50) NOT NULL,
+  `problem` longtext NOT NULL,
+  `result` longtext NOT NULL,
+  `skill_tags` json NOT NULL,
+  `media` json DEFAULT ('[]') NOT NULL,
+  `source_module` varchar(50) NOT NULL,
+  `source_id` integer NULL,
+  `is_visible` bool NOT NULL,
+  `sort_order` integer NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_SHOWROOM_SKILL_SQL = """
+CREATE TABLE IF NOT EXISTS `showroom_skill` (
+  `id` bigint AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `name` varchar(50) NOT NULL,
+  `level` varchar(20) NOT NULL,
+  `is_visible` bool NOT NULL,
+  `sort_order` integer NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+_CREATE_SHOWROOM_WORK_SQL = """
+CREATE TABLE IF NOT EXISTS `showroom_work` (
+  `id` bigint AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `title_snapshot` varchar(120) NOT NULL,
+  `curator_note` longtext NOT NULL,
+  `media` json DEFAULT ('[]') NOT NULL,
+  `is_visible` bool NOT NULL,
+  `sort_order` integer NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `work_id` bigint NULL,
+  CONSTRAINT `showroom_work_work_id_fe8809ad_fk_works_work_id` FOREIGN KEY (`work_id`) REFERENCES `works_work` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
@@ -1339,6 +1419,135 @@ def _patch_treasure_columns(cursor) -> None:
         )
 
 
+# works 0005（v3.64.x）：给 `works_work` 加 `media` 列。
+# ⚠️ 与 survival / treasure / showroom 同款问题：--reuse-db 的旧测试库表已存在，
+#    CREATE TABLE IF NOT EXISTS 不会补列；列定义逐字照抄 `sqlmigrate works 0005`。
+_WORKS_WORK_MEDIA_COLUMNS_0005 = (
+    ('media', "json DEFAULT ('[]') NOT NULL"),
+)
+
+
+def _patch_works_media_column(cursor) -> None:
+    """给已存在的 `works_work` 补 0005 的 media 列（幂等、不删不动）。"""
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'works_work'
+        """,
+    )
+    existing = {row[0] for row in cursor.fetchall()}
+    if not existing:
+        return          # 表还没建：上面那条 CREATE 已经带着新列一起建了
+    for name, definition in _WORKS_WORK_MEDIA_COLUMNS_0005:
+        if name in existing:
+            continue
+        cursor.execute(
+            f'ALTER TABLE `works_work` ADD COLUMN `{name}` {definition}',
+        )
+
+
+# 展厅 0002（v3.64.x）：给 `showroom_case` / `showroom_work` 加 `media` 列。
+# ⚠️ 与上面 survival / treasure 同款问题：--reuse-db 的旧测试库表已存在，
+#    CREATE TABLE IF NOT EXISTS 不会补列；列定义逐字照抄 `sqlmigrate showroom 0002`。
+_SHOWROOM_MEDIA_COLUMNS_0002 = (
+    ('media', "json DEFAULT ('[]') NOT NULL"),
+)
+
+
+def _patch_showroom_media_columns(cursor) -> None:
+    """给已存在的两张展厅表补 0002 的 media 列（幂等、不删不动）。"""
+    for table, columns in (
+        ('showroom_case', _SHOWROOM_MEDIA_COLUMNS_0002),
+        ('showroom_work', _SHOWROOM_MEDIA_COLUMNS_0002),
+    ):
+        cursor.execute(
+            """
+            SELECT COLUMN_NAME FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+            """,
+            [table],
+        )
+        existing = {row[0] for row in cursor.fetchall()}
+        if not existing:
+            continue      # 表还没建：Django 侧用当前模型建表，已经带着新列
+        for name, definition in columns:
+            if name in existing:
+                continue
+            cursor.execute(
+                f'ALTER TABLE `{table}` ADD COLUMN `{name}` {definition}',
+            )
+
+
+# 决策追踪 0025（v3.63.20）：给 `toolkit_decision_tracker` 加「结论取前 N 项」与「采纳的选项」。
+# ⚠️ 与 survival / treasure / works / showroom 同款问题：`--reuse-db` 的旧测试库
+#    表已存在，`CREATE TABLE IF NOT EXISTS` 会静默跳过 ⇒ 新列永远补不上，
+#    随后 ORM 一 SELECT `result_top_n` 就报 Unknown column（看着像「迁移没跑」）。
+#    列定义对齐 `sqlmigrate toolkit 0025`；但**刻意保留 `DEFAULT 1`**
+#    （Django 生成的是「ADD ... DEFAULT 1 NOT NULL」再一条 DROP DEFAULT）——
+#    测试库是靠 SQL 镜像建的，不经过模型层，没有默认值的老行会拦住 INSERT。
+_DECISION_TRACKER_MULTI_COLUMNS_0025 = (
+    ('result_top_n', 'smallint unsigned DEFAULT 1 NOT NULL'),
+    ('final_choices', 'json NULL'),
+)
+
+
+def _patch_decision_tracker_columns(cursor) -> None:
+    """给已存在的 `toolkit_decision_tracker` 补 0025 的两列（幂等、不删不动）。"""
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'toolkit_decision_tracker'
+        """,
+    )
+    existing = {row[0] for row in cursor.fetchall()}
+    if not existing:
+        return          # 表还没建：上面那条 CREATE 已经带着新列一起建了
+    for name, definition in _DECISION_TRACKER_MULTI_COLUMNS_0025:
+        if name in existing:
+            continue
+        cursor.execute(
+            f'ALTER TABLE `toolkit_decision_tracker` ADD COLUMN `{name}` {definition}',
+        )
+
+
+# 成长计时（v3.64.11）：给 `temporal_task_meta` 加 `counts_growth`。
+# ⚠️ 同款问题：`--reuse-db` 的旧测试库表已存在，上面那条 CREATE 会静默跳过，
+#    随后 ORM 一 SELECT `counts_growth` 就报 Unknown column ——
+#    报错点在业务代码里，看着像「代码写错了」，其实是测试库没补列。
+#    列定义对齐 `sqlmigrate temporal 0017`；**刻意保留 `DEFAULT 0`**
+#    （Django 生成的是「ADD ... DEFAULT b'0' NOT NULL」再一条 DROP DEFAULT）——
+#    测试库靠 SQL 镜像建，不经过模型层，没有默认值的老行会拦住 INSERT。
+_TASK_META_GROWTH_COLUMNS_0017 = (
+    ('counts_growth', 'tinyint(1) DEFAULT 0 NOT NULL'),
+)
+
+# 「今天的三条线」角色列（v3.64.12）。同样对齐 `sqlmigrate temporal 0018`、
+# 同样**刻意保留 `DEFAULT ''`** —— `--reuse-db` 下老表靠 ALTER 补列，
+# 没有默认值的话，不带该列的 INSERT 会被 NOT NULL 拦下（报错点在业务代码里）。
+_TASK_META_ROLE_COLUMNS_0018 = (
+    ('daily_role', "varchar(20) DEFAULT '' NOT NULL"),
+)
+
+
+def _patch_task_meta_columns(cursor) -> None:
+    """给已存在的 `temporal_task_meta` 补 0017 / 0018 的新列（幂等、不删不动）。"""
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'temporal_task_meta'
+        """,
+    )
+    existing = {row[0] for row in cursor.fetchall()}
+    if not existing:
+        return          # 表还没建：上面那条 CREATE 已经带着新列一起建了
+    for name, definition in _TASK_META_GROWTH_COLUMNS_0017 + _TASK_META_ROLE_COLUMNS_0018:
+        if name in existing:
+            continue
+        cursor.execute(
+            f'ALTER TABLE `temporal_task_meta` ADD COLUMN `{name}` {definition}',
+        )
+
+
 @pytest.fixture(scope='session')
 def django_db_setup(django_db_setup, django_db_blocker):
     """在 Django 迁移建库之后，补齐原生 SQL 表"""
@@ -1361,18 +1570,17 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_TOOLKIT_DEF_TABLE_SQL)
             cursor.execute(_CREATE_TRACKER_TABLE_SQL)
             cursor.execute(_CREATE_RECORD_TABLE_SQL)
+            _patch_decision_tracker_columns(cursor)
             cursor.execute(_CREATE_QUOTE_SQL)
             cursor.execute(_CREATE_ASK_SCENE_SQL)
             cursor.execute(_CREATE_ASK_TOPIC_SQL)
             cursor.execute(_CREATE_ASK_ANSWER_SQL)
             cursor.execute(_CREATE_ELECTRICITY_TABLE_SQL)
             cursor.execute(_CREATE_WISH_TABLE_SQL)
-            cursor.execute(_CREATE_REDEMPTION_PERIOD_SQL)
-            cursor.execute(_CREATE_REDEMPTION_INJECT_SQL)
-            cursor.execute(_CREATE_REDEMPTION_RULE_SQL)
-            cursor.execute(_CREATE_REDEMPTION_SNAPSHOT_SQL)
             cursor.execute(_CREATE_ACTIVITY_GROUP_SQL)
             cursor.execute(_CREATE_TASK_META_SQL)
+            _patch_task_meta_columns(cursor)
+            cursor.execute(_CREATE_TIMER_SESSION_SQL)
             cursor.execute(_CREATE_LIABILITY_TABLE_SQL)
             cursor.execute(_CREATE_RECEIVABLE_TABLE_SQL)
             cursor.execute(_CREATE_CASHFLOW_TABLE_SQL)
@@ -1424,12 +1632,26 @@ def django_db_setup(django_db_setup, django_db_blocker):
             # `selfrun_metric_plan.metric_id` 指向 `selfrun_metric`。
             cursor.execute(_CREATE_SELFRUN_TEMPLATE_SQL)
             cursor.execute(_CREATE_SELFRUN_METRIC_PLAN_SQL)
+            # selfrun 0008（v3.65.0）：旧测试库的 stage 表已存在 ⇒ 补 parent / ledger_config
+            _patch_selfrun_stage_columns(cursor)
+            # selfrun 0009（v3.64.20）：池注入流水（原 redemption_pool_inject）
+            cursor.execute(_CREATE_SELFRUN_POOL_INJECT_SQL)
             # 作品（v3.62.0）：2 张 managed 表。顺序不能改 ——
             # `works_capture.work_id` 指向 `works_work`。
             cursor.execute(_CREATE_WORKS_WORK_SQL)
             cursor.execute(_CREATE_WORKS_CAPTURE_SQL)
+            # works 0005：旧测试库的 works_work 已存在 ⇒ 补 media 列（幂等）
+            _patch_works_media_column(cursor)
             # 身上之物（v3.62.4）：2 张 managed 表。顺序不能改 ——
             # `wealth_body_need` 的三个 FK 指向 body_part / wealth_property /
             # wealth_survival_item，三者都已在上方建好。
             cursor.execute(_CREATE_BODY_PART_SQL)
             cursor.execute(_CREATE_BODY_NEED_SQL)
+            # 展厅（v3.64.0）：4 张 managed 表。顺序 —— showroom_work 的外键
+            # 指向 works_work（本文件上方已建），故全部排在末尾天然满足。
+            cursor.execute(_CREATE_SHOWROOM_PROFILE_SQL)
+            cursor.execute(_CREATE_SHOWROOM_CASE_SQL)
+            cursor.execute(_CREATE_SHOWROOM_SKILL_SQL)
+            cursor.execute(_CREATE_SHOWROOM_WORK_SQL)
+            # 展厅 0002：旧测试库的两张表已存在 ⇒ 补 media 列（幂等）
+            _patch_showroom_media_columns(cursor)

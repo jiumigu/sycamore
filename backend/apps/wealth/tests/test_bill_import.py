@@ -123,3 +123,92 @@ def test_import_invalid_date_format_counts_as_skipped() -> None:
     result = _upload(content)
     assert result['skipped'] == 1
     assert result['created'] == 1
+
+
+# ══════════════════════════════════════════════════════════
+# DQ-1：判重口径从「秒级」改成「按天半开区间 + 计重数」
+# ══════════════════════════════════════════════════════════
+
+@pytest.mark.django_db
+def test_import_same_transaction_different_second_is_duplicate() -> None:
+    """同一笔账，导出时秒数抖了 7 秒 —— 旧口径会重复入库，现在必须判重。
+
+    这是 DQ-1 的原始症状：`WHERE date = %s` 是秒级比对，
+    换个导出时间就对不上，支出被记两遍而不报错。
+    """
+    first = CSV_HEADER + CSV_HEADER2 + \
+        '支出,2025-01-07 12:00:00,餐饮,午餐,,支付宝,CNY,30.00,,麦当劳,午饭\n'
+    second = CSV_HEADER + CSV_HEADER2 + \
+        '支出,2025-01-07 12:00:07,餐饮,午餐,,支付宝,CNY,30.00,,麦当劳,午饭\n'
+
+    assert _upload(first)['created'] == 1
+    result = _upload(second)
+
+    assert result['created'] == 0, '同一天同一笔不该再插一条'
+    assert result['duplicated'] == 1
+    assert _bill_count() == 1
+
+
+@pytest.mark.django_db
+def test_import_two_identical_rows_in_one_file_both_created() -> None:
+    """反证：同一天两笔真的一模一样的消费，**不能被判成重复**。
+
+    按天判重最容易犯的错是「这一天有一笔 15 元了 ⇒ 后面的 15 元都算重复」。
+    这里用计重数（Counter）防止那种误杀：库里 0 条、文件里 2 条 ⇒ 建 2 条。
+    """
+    content = (
+        CSV_HEADER + CSV_HEADER2 +
+        '支出,2025-01-07 09:00:00,餐饮,咖啡,,支付宝,CNY,15.00,,Manner,早咖啡\n'
+        '支出,2025-01-07 15:30:00,餐饮,咖啡,,支付宝,CNY,15.00,,Manner,下午咖啡\n'
+    )
+    result = _upload(content)
+
+    assert result['created'] == 2
+    assert result['duplicated'] == 0
+    assert _bill_count() == 2
+
+
+@pytest.mark.django_db
+def test_import_same_day_different_amount_not_duplicate() -> None:
+    """同一天、同类型、金额不同 ⇒ 是两笔，不能判重。"""
+    content = (
+        CSV_HEADER + CSV_HEADER2 +
+        '支出,2025-01-07 12:00:00,餐饮,午餐,,支付宝,CNY,30.00,,麦当劳,午饭\n'
+        '支出,2025-01-07 19:00:00,餐饮,晚餐,,支付宝,CNY,45.00,,真功夫,晚饭\n'
+    )
+    result = _upload(content)
+
+    assert result['created'] == 2
+    assert result['duplicated'] == 0
+
+
+@pytest.mark.django_db
+def test_import_multiset_dedup_against_existing_day() -> None:
+    """库里已有 1 条 15 元；新文件里 2 条 15 元 ⇒ 只补插 1 条。"""
+    base = '支出,2025-01-07 09:00:00,餐饮,咖啡,,支付宝,CNY,15.00,,Manner,早咖啡\n'
+    assert _upload(CSV_HEADER + CSV_HEADER2 + base)['created'] == 1
+
+    two_rows = (
+        CSV_HEADER + CSV_HEADER2 +
+        '支出,2025-01-07 09:00:00,餐饮,咖啡,,支付宝,CNY,15.00,,Manner,早咖啡\n'
+        '支出,2025-01-07 15:30:00,餐饮,咖啡,,支付宝,CNY,15.00,,Manner,下午咖啡\n'
+    )
+    result = _upload(two_rows)
+
+    assert result['duplicated'] == 1, '库里那 1 条要判重'
+    assert result['created'] == 1, '多出来的那 1 条要补插'
+    assert _bill_count() == 2
+
+
+@pytest.mark.django_db
+def test_import_different_day_not_duplicate() -> None:
+    """跨天同金额同类型 ⇒ 两笔。半开区间不能把边界日吞掉。"""
+    content = (
+        CSV_HEADER + CSV_HEADER2 +
+        '支出,2025-01-07 12:00:00,餐饮,午餐,,支付宝,CNY,30.00,,麦当劳,午饭\n'
+        '支出,2025-01-08 12:00:00,餐饮,午餐,,支付宝,CNY,30.00,,麦当劳,午饭\n'
+    )
+    result = _upload(content)
+
+    assert result['created'] == 2
+    assert result['duplicated'] == 0

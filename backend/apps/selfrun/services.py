@@ -13,6 +13,7 @@
 5. **`None` ≠ `0`** —— 取不到返回 `None`（显示「—」+ 原因），真 0 返回 `0`（显示 `0h`）。
 """
 import datetime as dt
+import re
 import uuid
 
 from django.db import transaction
@@ -22,10 +23,13 @@ from django.utils import timezone
 from .constants import (
     BACKFILL_WARN_DAYS,
     MODULE_VALUE_WHITELIST,
-    MONTHLY_QUESTION_BANDS,
+    MONTHLY_QUESTION_COUNT,
+    MONTHLY_QUESTION_KEYS,
     OPEN_STAGE_STATUSES,
+    PERIOD_STATUS_CHOICES,
     PERIOD_VERDICT_BANDS,
     PLAN_SCOPE_CHOICES,
+    READER_AGG,
     READER_KEYS,
     STALE_RULES,
     TARGET_SOURCE_FROM,
@@ -35,9 +39,11 @@ from .constants import (
 )
 from .models import (
     SelfRunCheckin, SelfRunMetric, SelfRunMetricLog, SelfRunMetricPlan,
-    SelfRunPeriod, SelfRunStage, SelfRunTemplate,
+    SelfRunPeriod, SelfRunPoolInject, SelfRunStage, SelfRunTemplate,
 )
-from .readers import config_fingerprint, period_range, run_reader
+from .readers import (
+    config_fingerprint, period_range, pool_inject_totals, run_reader, temporal_rows,
+)
 from .templates import TEMPLATE_COPY_FIELDS
 
 
@@ -72,8 +78,42 @@ def _cmp(value, line, direction):
 
 
 def get_open_stage():
-    """当前进行中（或暂停中）的阶段。**同一时间只允许一个。**"""
-    return SelfRunStage.objects.filter(status__in=OPEN_STAGE_STATUSES).first()
+    """当前进行中的**叶子**阶段（= 那一个挂 KPI 的）。没有则 `None`。
+
+    🔴 v3.65.0 起阶段可以分两层，所以「全局唯一 open」不成立了：
+       长阶段与它的小阶段会**同时**处于 open。本函数只回答
+       「**哪一层在跑 KPI**」—— 期判定、当期目标、心跳、归档全都只认这一层。
+
+    🔴 用 `metrics__status='active'` 把长阶段排除，**不用** `parent__isnull`
+       —— 后者会误伤「历史遗留的无父阶段」（那种阶段有 KPI、本该被选中）。
+
+    ⚠️ 已知副作用：某阶段的 KPI **全部退役**时这里返回 `None`，
+       页面会落到「还没有进行中的阶段」。语义上是对的（没 KPI 就没判定），
+       但空态文案要说清「你有阶段，只是 KPI 全退役了」，否则看着像阶段丢了。
+    """
+    return (
+        SelfRunStage.objects
+        .filter(status__in=OPEN_STAGE_STATUSES, metrics__status='active')
+        .distinct()
+        .first()
+    )
+
+
+def get_open_long_stage():
+    """当前进行中的**长阶段**（有子阶段、零 KPI 的那一个）。没有则 `None`。
+
+    ⚠️ 判据是「零 KPI」而不是「有孩子」—— 长阶段可以先建、后挂小阶段，
+       建完还没挂孩子的那段时间它同样是长阶段。
+    """
+    return (
+        SelfRunStage.objects
+        .filter(
+            status__in=OPEN_STAGE_STATUSES,
+            parent__isnull=True,
+            metrics__isnull=True,
+        )
+        .first()
+    )
 
 
 def get_closed_stages():
@@ -354,27 +394,58 @@ def compute_period_status(stage, readings):
     if not counted:
         return 'no_record'
     ok = sum(1 for r in counted if r['verdict'] in ('goal', 'floor'))
-    ratio = ok / len(counted)
+    return _ratio_band(ok / len(counted))
+
+
+def _ratio_band(ratio):
+    """比例 → 档位（**唯一一份**分档实现，周与月共用同一张表）"""
     for name, lower in PERIOD_VERDICT_BANDS:
         if ratio >= lower:
             return name
     return 'slid'
 
 
+def monthly_answer_stats(answer_sheet):
+    """数一次月度三问：`(答「是」个数, 已答个数)`。
+
+    🔴 **唯一实现** —— 判定（`compute_monthly_status`）、判定说明
+    （`views._status_explain`）、归档前置校验、阶段汇总的 `yes_count`
+    都从这里取，别各写一份 `is True` 的循环（少一处就差一个口径）。
+
+    🔴 `answer=None`（**还没答**）与 `answer=False`（**答了否**）必须分开：
+       前者不计已答，后者计已答但不算「是」—— 又是一处 `null ≠ 0`。
+    """
+    yes = 0
+    answered = 0
+    for key in MONTHLY_QUESTION_KEYS:
+        ans = ((answer_sheet or {}).get(key) or {}).get('answer')
+        if ans is True:
+            yes += 1
+            answered += 1
+        elif ans is False:
+            answered += 1
+    return yes, answered
+
+
 def compute_monthly_status(answer_sheet):
-    """月度判定：按三问里答「是」的个数。
+    """月度判定：三问里答「是」的个数 ÷ 3。
 
     🔴 `answer=None`（**还没答**）与 `answer=False`（**答了否**）必须分开 ——
        又是一处 `null ≠ 0`。只数 `is True` 的。
+    🔴 但分母**恒为 3**（`MONTHLY_QUESTION_COUNT`），不按已答数：
+       答了 1 个「是」就是 1/3，不是 1/1 —— 否则「只答一个还答了是」会判成满分。
+    🔴 一个都没答（全是 `None`）⇒ 返回 `''`：**未判定**，不是「活着」也不是
+       「按 KPI 算」。调用方据此显示「待答三问」并给答题入口（v3.64.6）——
+       旧实现让调用方落回 KPI 档位，于是「4/4=100% 我超棒」与「2/3=67% 合格」
+       在同一期上先后出现，读起来就是「归档给我降了档」。
     """
     if not answer_sheet:
         return ''
-    yes = 0
-    for key in ('q1_income', 'q2_output', 'q3_runway'):
-        item = answer_sheet.get(key) or {}
-        if item.get('answer') is True:
-            yes += 1
-    return MONTHLY_QUESTION_BANDS.get(yes, '')
+    yes, answered = monthly_answer_stats(answer_sheet)
+    if not answered:
+        return ''
+    return _ratio_band(yes / MONTHLY_QUESTION_COUNT)
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -679,14 +750,53 @@ def create_stage(payload):
     ⇒ `Stage`（一步到位 `status='active'`，不留 draft 残留）
       + `Metric × N`
       + `MetricLog × N`（`created` —— 「创建」也是「一次配置变更」）
+
+    v3.65.0 起两种形态，**必须由调用方显式声明**（见下方 `is_long_stage`）：
+
+    | 形态 | `is_long_stage` | `parent` | `metrics` | 写几张表 |
+    |---|---|---|---|---|
+    | 叶子阶段（跑 KPI 的） | 否（默认） | 可空 | **≥ 1 条** | 3 |
+    | 小阶段（挂在长阶段下） | 否（默认） | **必填** | **≥ 1 条** | 3 |
+    | 长阶段（只汇总） | **是** | 必须为空 | **必须为空** | 1 |
     """
     metrics_in = payload.get('metrics') or []
-    if not metrics_in:
-        raise SelfRunError('至少要有一条 KPI 才能开始。')
-    if SelfRunStage.objects.filter(status__in=OPEN_STAGE_STATUSES).exists():
-        existing = SelfRunStage.objects.filter(status__in=OPEN_STAGE_STATUSES).first()
+    is_long = bool(payload.get('is_long_stage'))
+    parent_id = payload.get('parent')
+
+    parent = None
+    if parent_id:
+        parent = SelfRunStage.objects.filter(pk=parent_id).first()
+        if parent is None:
+            raise SelfRunError('上级阶段不存在。')
+        # 🔴 两层封顶，服务层再判一次（`model.clean()` 挡不住 `objects.create()`）
+        if parent.parent_id:
+            raise SelfRunError('只支持两层：上级阶段不能再有上级。')
+        if parent.status == 'closed':
+            raise SelfRunError(f'上级阶段「{parent.name}」已收尾，不能再往下开小阶段。')
+
+    if is_long:
+        if parent is not None:
+            raise SelfRunError('长阶段不能挂在别的阶段下 —— 它本身就是最上面那一层。')
+        if metrics_in:
+            raise SelfRunError('长阶段只汇总，不配 KPI —— 请把 KPI 挂到它下面的小阶段上。')
+    elif not metrics_in:
+        # 🔴 不静默把「忘填 KPI 的叶子」变成长阶段：两者行为完全不同，
+        #    靠「有没有 metrics」猜意图就是让一个错配变成一个看起来正常的错。
+        raise SelfRunError('至少要有一条 KPI 才能开始；若这是只做汇总的长阶段，请显式声明。')
+
+    # 互斥按 `parent` 分组（不是全局唯一）—— 长阶段开着时，叶子必须挂在它下面。
+    siblings = SelfRunStage.objects.filter(
+        status__in=OPEN_STAGE_STATUSES, parent_id=parent_id,
+    )
+    existing = siblings.first()
+    if existing is not None:
+        if existing.metrics.exists():
+            raise SelfRunError(
+                f'已有进行中的阶段「{existing.name}」，请先收尾它再开启新的。'
+            )
         raise SelfRunError(
-            f'已有进行中的阶段「{existing.name}」，请先收尾它再开启新的。'
+            f'长阶段「{existing.name}」正在进行中 —— 新阶段请挂在它下面（parent 填 {existing.pk}），'
+            '不要另起一个平行的顶级阶段。'
         )
 
     name = (payload.get('name') or '').strip()
@@ -697,9 +807,27 @@ def create_stage(payload):
     if end_date and end_date < start_date:
         raise SelfRunError('终点不能早于起点。')
 
+    # 🔴 小阶段的区间必须落在上级阶段区间内。
+    #    长阶段的账本按**自己的起止**现算（`stage_ledger`），跑出父区间的那些天
+    #    既进不了任何一个小阶段、也不会从长阶段的汇总里消失 ——
+    #    「长阶段 = 各小阶段之和」这条恒等式就此破掉，而两边各自看着都合理。
+    if parent is not None:
+        if start_date < parent.start_date:
+            raise SelfRunError(
+                f'起点早于上级阶段「{parent.name}」的起点（{parent.start_date}）—— '
+                '小阶段不能跑到上级阶段之外。'
+            )
+        if parent.end_date and end_date and end_date > parent.end_date:
+            raise SelfRunError(
+                f'终点晚于上级阶段「{parent.name}」的终点（{parent.end_date}）—— '
+                '小阶段不能跑到上级阶段之外。'
+            )
+
     stage = SelfRunStage.objects.create(
         name=name, start_date=start_date, end_date=end_date,
         status='active', note=payload.get('note') or '',
+        parent=parent,
+        ledger_config=payload.get('ledger_config') or {},
     )
 
     created = []
@@ -1028,14 +1156,34 @@ def reverse_checkin(checkin):
 
 @transaction.atomic
 def update_metric(metric, data, reason=None, reason_note=''):
-    """改 KPI 配置（goal / floor / source_config / …）。
+    """改 KPI 配置（goal / floor / 取数方式 / …）。
 
     🔴 **不新建 Metric 行** —— `metric_id` 必须稳定，否则 `Period.readings` 里的引用会失效。
     🔴 **每次改都写 `MetricLog`**，且**必须问原因**（校准 or 状态）——
        系统不判断对错，只记录；三个月后你在时间轴上自己看得出来。
+
+    🔴 v3.64.31 起**取数方式（`source_kind`）也在这里改** —— 以前只有「建 KPI 时
+       从模板挑」一个入口，建完发现「这条该自动取数」就无路可走（只能退役重建，
+       而退役会带走全部手工登记）。改口径 = 换尺子：校验与建模板同一套
+       （`_validate_source_config`），`agg` 由取数器推导，不许两处各说一套。
     """
-    tracked = ('goal_value', 'floor_value', 'source_config', 'agg', 'direction',
-               'name', 'unit', 'sort_order')
+    data = dict(data or {})
+    if 'source_kind' in data or 'source_config' in data:
+        kind = data.get('source_kind') or metric.source_kind
+        cfg = data.get('source_config', metric.source_config)
+        if kind == 'manual':
+            # 手工项的口径只有一种：把手记的加起来。别让「手工 + 作品库取数器」
+            # 这种混血存在 —— 界面会写「手工」，数却来自另一个模块。
+            cfg = {'kind': 'manual_sum'}
+        data['source_config'] = _validate_source_config(
+            kind, cfg, f'KPI「{data.get("name") or metric.name}」',
+        )
+        # 取数器 → 聚合方式跟着走；调用方显式给了 `agg` 就不覆盖（保留旧行为）
+        if 'agg' not in data:
+            data['agg'] = READER_AGG[data['source_config']['kind']]
+
+    tracked = ('goal_value', 'floor_value', 'source_kind', 'source_config', 'agg',
+               'direction', 'name', 'unit', 'sort_order')
     logs = []
     for field in tracked:
         if field not in data:
@@ -1208,8 +1356,18 @@ def close_period(period_type, period_key, skipped_metric_ids=None, answer_sheet=
     ]
 
     now = timezone.now()
-    # 判定：周按达标率；月按三问（未答则留空，等答题时重判）
+    # ── 判定 ──────────────────────────────────────────────────
+    # 周按达标率；月**只按三问**（v3.64.6）。
+    # 🔴 月度归档必须先答完三问：档位在归档这一刻定格，之后补答不改档
+    #    （要改走「重开这一期」）。若允许「没答就归档」，这一期会落一个空档位，
+    #    而补答又不许改档 ⇒ 这期永远没有结论 —— 所以在这里拦住，而不是事后补。
     if period_type == 'monthly':
+        _, answered = monthly_answer_stats(answer_sheet)
+        if answered < MONTHLY_QUESTION_COUNT:
+            raise SelfRunError(
+                f'月度的结论只来自三问，还有 {MONTHLY_QUESTION_COUNT - answered} 个没答 —— '
+                '先答完这 3 个问题再归档（答「否」也算答过）。'
+            )
         status = compute_monthly_status(answer_sheet)
     else:
         status = compute_period_status(stage, readings)
@@ -1246,6 +1404,11 @@ def update_review(period, review_text=None, answer_sheet=None):
 
     🔴 每次补写留 `at` ⇒ 界面上标「补写于归档后 N 天」——
        「当时的想法」和「事后的解释」不能混在一起。
+
+    🔴 v3.64.6：**补答三问不再重判档位**。归档 = 定格，档位要改必须走
+       `reopen_period`（限最近一期 + 写原因 + 留痕）。旧实现在这里直接
+       `period.status = new_status`，于是「归档后补答一句」就能把历史结论改掉，
+       而历史复盘页还写着「归档那刻数字定格」—— 同一屏两套说法。
     """
     written = []
     if review_text is not None and review_text != period.review_text:
@@ -1262,11 +1425,6 @@ def update_review(period, review_text=None, answer_sheet=None):
         written.append('review_text')
     if answer_sheet is not None:
         period.answer_sheet = answer_sheet
-        # 月度判定在答题这刻由三问**重判**（设计稿 §2.5 的「10-31 填三问」那一步）
-        if period.period_type == 'monthly':
-            new_status = compute_monthly_status(answer_sheet)
-            if new_status:
-                period.status = new_status
         written.append('answer_sheet')
     if written:
         period.save()
@@ -1333,7 +1491,12 @@ def compute_stage_summary(stage):
                 if r.get('verdict') in ('goal', 'floor'):
                     hits += 1
                 if best is None or v > best['value']:
-                    best = {'value': v, 'period_key': p.period_key}
+                    best = {
+                        'value': v,
+                        'period_key': p.period_key,
+                        # 周号 + 日期区间，前端零算（「W42」单独印出来读不出是哪几天）
+                        'period_label': period_range_label(p),
+                    }
         plans = plans_map.get(m.id) or []
         per_metric.append({
             'metric_id': m.id,
@@ -1353,13 +1516,11 @@ def compute_stage_summary(stage):
             'best': best,
         })
 
-    breakdown = {
-        'period_type': 'weekly',
-        'on_track': sum(1 for p in counted_weeks if p.status == 'on_track'),
-        'slipping': sum(1 for p in counted_weeks if p.status == 'slipping'),
-        'slid': sum(1 for p in counted_weeks if p.status == 'slid'),
-        'fallow': sum(1 for p in counted_weeks if p.status == 'fallow'),
-    }
+    # 🔴 按**枚举**生成，不逐档手写 —— 加一档（v3.62.45 的 `great`）时
+    #    手写版会静默漏掉它，分布图少一根柱、总数还对不上（最难发现的那种）。
+    breakdown = {'period_type': 'weekly'}
+    for key, _label in PERIOD_STATUS_CHOICES:
+        breakdown[key] = sum(1 for p in counted_weeks if p.status == key)
 
     return {
         'stage_id': stage.id,
@@ -1383,12 +1544,11 @@ def compute_stage_summary(stage):
 
 
 def _monthly_yes_count(answer_sheet):
+    """阶段汇总里的「答『是』几问」—— 一个都没答返 `None`（**不是 0**）。"""
     if not answer_sheet:
         return None
-    return sum(
-        1 for k in ('q1_income', 'q2_output', 'q3_runway')
-        if (answer_sheet.get(k) or {}).get('answer') is True
-    )
+    yes, answered = monthly_answer_stats(answer_sheet)
+    return yes if answered else None
 
 
 def _fingerprint_groups(periods):
@@ -1446,15 +1606,28 @@ def copy_stage(from_stage, name, start_date):
     """
     if not name or not name.strip():
         raise SelfRunError('新阶段名称不能为空。')
-    if SelfRunStage.objects.filter(status__in=OPEN_STAGE_STATUSES).exists():
+    source_metrics = list(
+        from_stage.metrics.filter(status='active').order_by('sort_order', 'id')
+    )
+    # 🔴 长阶段零 KPI，复制出来会变成一个「没有判定的阶段」—— 看着正常、实际空转。
+    if not source_metrics:
+        raise SelfRunError(
+            f'「{from_stage.name}」没有 KPI（长阶段只汇总），不能复制成跑 KPI 的阶段。'
+        )
+    # 互斥按 parent 分组；复制**继承上级** —— 在长阶段下复制出来的仍是它的小阶段。
+    siblings = SelfRunStage.objects.filter(
+        status__in=OPEN_STAGE_STATUSES, parent_id=from_stage.parent_id,
+    )
+    if siblings.exists():
         raise SelfRunError('已有进行中的阶段，请先收尾它。')
 
     stage = SelfRunStage.objects.create(
         name=name.strip(), start_date=start_date or timezone.localdate(),
         status='active', note=f'复制自「{from_stage.name}」',
+        parent=from_stage.parent,
     )
     created = []
-    for m in from_stage.metrics.filter(status='active').order_by('sort_order', 'id'):
+    for m in source_metrics:
         new = SelfRunMetric.objects.create(
             stage=stage, template_key=m.template_key, name=m.name,
             period_type=m.period_type, unit=m.unit, direction=m.direction,
@@ -1470,3 +1643,854 @@ def copy_stage(from_stage, name, start_date):
         )
         created.append(new)
     return stage, created
+
+
+# ══════════════════════════════════════════════════════════════
+# 模板 vs 库里的行：差异只读出口（§114.1）
+# ══════════════════════════════════════════════════════════════
+
+# 构成「口径」的字段：改这些等于换了尺子，必须让人看见
+DRIFT_FIELDS = (
+    'name', 'unit', 'period_type', 'direction', 'agg',
+    'source_config', 'goal_value', 'floor_value',
+)
+
+_FIELD_LABELS = {
+    'name': '名称', 'unit': '单位', 'period_type': '周期类型',
+    'direction': '方向', 'agg': '汇总方式', 'source_config': '取数口径',
+    'goal_value': '目标值', 'floor_value': '底线值',
+}
+
+
+def _plain(value):
+    """Decimal / None 统一成可 JSON 化的字面量，便于前端直接显示。"""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def template_drift(stage):
+    """本阶段各 KPI 与**模板库**之间的口径差异（只读，不修数据）。
+
+    🔴 为什么需要它：模板是「起点」、阶段是「拷贝」（`templates.py` 铁律 1）。
+       模板改了不会回溯改已建阶段 —— 这条规则是对的（否则改模板会重写历史口径），
+       但它带来一个副作用：**两处数字不一样，而没有任何地方会告诉你**。
+       v3.62.0 那次「输出次数 → 留下件数」就静默漏掉了库里那两行。
+
+    🔴 本函数**只报差异、绝不写库**。要不要追平、追哪几个字段，是用户的决定
+       —— 尤其 `goal_value` / `floor_value` 属于「用户手调过的输入」，
+       自动覆盖会把人的判断抹掉（§114.1）。
+
+    返回结构：
+        [{'metric_id', 'template_key', 'name', 'status',
+          'diffs': [{'field', 'label', 'db', 'tpl'}]}, ...]
+        只含有差异的条目；无差异返回 []。
+    """
+    metrics = list(stage.metrics.all().order_by('sort_order', 'id'))
+    keys = [m.template_key for m in metrics if m.template_key]
+    if not keys:
+        return []
+    tpl_map = {t.key: t for t in SelfRunTemplate.objects.filter(key__in=keys)}
+
+    out = []
+    for m in metrics:
+        tpl = tpl_map.get(m.template_key) if m.template_key else None
+        if tpl is None:
+            # 模板被用户删了 —— 不是差异，是「来源已不在了」，单独标出
+            if m.template_key and m.status == 'active':
+                out.append({
+                    'metric_id': m.id, 'template_key': m.template_key,
+                    'name': m.name, 'status': m.status,
+                    'diffs': [{'field': 'template', 'label': '来源模板',
+                               'db': m.template_key, 'tpl': None}],
+                })
+            continue
+        diffs = []
+        for field in DRIFT_FIELDS:
+            a, b = getattr(m, field, None), getattr(tpl, field, None)
+            if field in ('goal_value', 'floor_value'):
+                a, b = _plain(a), _plain(b)
+            if a != b:
+                diffs.append({
+                    'field': field, 'label': _FIELD_LABELS.get(field, field),
+                    'db': a, 'tpl': b,
+                })
+        if diffs:
+            out.append({
+                'metric_id': m.id, 'template_key': m.template_key,
+                'name': m.name, 'status': m.status, 'diffs': diffs,
+            })
+    return out
+
+
+# ══════════════════════════════════════════════════════════════
+# 复盘补充：本周目标完成情况 + 时间流失（只读，不落库）
+# ══════════════════════════════════════════════════════════════
+
+LOSS_ATTRIBUTION = '流失'      # 六词归因里的那一档（真源 temporal/constants.py）
+
+# 「这一周我做了什么」每天列几件 —— 这是**版面预算**，不是口径：
+# 多列几件不改变任何数，只改变一屏里能看见几行。
+WHAT_HAPPENED_PER_DAY = 3
+
+# 时段轴一次最多画多少块。一周实测 47 条、一个月约 200 条，400 是防极端值。
+# 🔴 真触发了必须**说出来**（`truncated` 随数下发）：图上少一块而没人知道，
+#    比不画更糟 —— 用户会以为「那天就这些」。
+WHAT_HAPPENED_BLOCK_LIMIT = 400
+
+# 跨午夜被切成残片的门槛（分钟）：短于这个的 split 段不参与纵轴范围计算。
+# 🔴 一条 `23:35 → 次日 00:37` 的记录会切成 25 分钟的头段和 37 分钟的尾段。
+#    头段本来就把当天画到 24:00，尾段那 37 分钟却足以把纵轴从 07:00 拉到 00:00 ——
+#    实测 W42 一周 51 分钟的残片换来 235px 空白，用户看到的是「凌晨 2 点 / 4 点 / 6 点」
+#    三条毫无内容的刻度。⚠️ 残片**照样下发**，前端在列头标出来，
+#    「按错位置画一个块」比「不画」更糟。
+WHAT_HAPPENED_FRAGMENT_MIN = 60
+
+
+def _day_segments(start_local, end_local):
+    """把一段真实时间切成「每个本地日一段」，返回 `[(date, 起分钟, 止分钟)]`。
+
+    🔴 为什么必须按天切：`23:00 → 次日 02:00` 那 3 小时跨两列。
+       整块挪到第二天，「昨晚熬夜」就变成「今天凌晨」；不切而画在第一天，
+       块会冲出 24:00 的底边。
+    🔴 分钟**相对当天 00:00**（0–1440），不是绝对时间戳 —— 前端按比例摆位置即可，
+       不必解析时间串、不必再碰一次时区（`USE_TZ` 下 `new Date()` 会差 8 小时）。
+    """
+    out = []
+    cur = start_local
+    while cur < end_local:
+        midnight = dt.datetime.combine(
+            cur.date() + dt.timedelta(days=1), dt.time.min,
+        ).replace(tzinfo=cur.tzinfo)
+        seg_end = min(end_local, midnight)
+        frm = cur.hour * 60 + cur.minute + cur.second / 60
+        to = 1440.0 if seg_end >= midnight else (
+            seg_end.hour * 60 + seg_end.minute + seg_end.second / 60
+        )
+        if to > frm:
+            out.append((cur.date(), round(frm, 1), round(to, 1)))
+        cur = seg_end
+    return out
+
+
+def _span_of(blocks):
+    """纵轴范围：**上边界只由主体块决定**，跨午夜的零碎残片不参与。
+
+    🔴 为什么上边界要裁：一条 `23:35 → 次日 00:37` 的记录会切成 25 分钟的头段
+       和 37 分钟的尾段。头段本来就把当天画到 24:00，尾段那 37 分钟却足以
+       把纵轴从 07:00 拉回 00:00 —— 实测 W42 一周 51 分钟残片换来 235px 空白，
+       用户看到的是「凌晨 2 点 / 4 点 / 6 点」三条什么都没记的刻度。
+    🔴 为什么**下边界不裁**：只有 `23:35–24:00` 那种头段能顶到 24:00，
+       而它离别的块通常只差几十分钟（几十像素）；裁掉它，一条真实的
+       深夜活动就只剩列顶一个数字。宁可多 40px，不丢事。
+    ⚠️ 被裁掉的残片**仍在 `blocks` 里**，前端在列顶标「＋37m」——
+       它的头段就画在左边那一列，所以什么都没丢。
+    ⚠️ 全是残片时（只记了一条 `23:50 → 00:30`）退回用全部块，
+       否则纵轴会是一个没有意义的零长度区间。
+    """
+    core = [b for b in blocks
+            if b['split'] is None or b['minutes'] >= WHAT_HAPPENED_FRAGMENT_MIN]
+    basis = core or blocks
+    return {
+        'from': min(b['from'] for b in basis),
+        'to': max(b['to'] for b in blocks),
+    }
+
+
+def _build_blocks(rows, attr):
+    """时段轴的数据：**一条记录一块**，跨天切成多块。
+
+    与 `days` 的差别是**不合并**：同一天「刷短视频」有 3 条就画 3 块，
+    因为它们在一天里的位置不同 —— 合并了就没有「几点到几点」这回事了。
+    `days` 那边合并是为了让文字列表回答「今天做了几件事」，两个用途各按各的来。
+
+    ⚠️ 只给「画得出来」的字段，不给时间串：前端不解析日期、不碰时区。
+    """
+    blocks = []
+    for r in rows:
+        if r.start_time is None:
+            continue
+        s = timezone.localtime(r.start_time)
+        if r.end_time is not None:
+            e = timezone.localtime(r.end_time)
+        else:
+            # `end_time` 缺失时用时长兜 —— 时长是录入时给的那一个，
+            # 比「不知道到几点」诚实，也不会在图上留一个空洞。
+            e = s + dt.timedelta(hours=float(r.duration_hours or 0))
+        if e <= s:
+            continue    # 脏数据（终点早于起点）不画，也不报错 —— 它不影响别的块
+
+        segs = _day_segments(s, e)
+        for i, (day, frm, to) in enumerate(segs):
+            blocks.append({
+                'date': day.isoformat(),
+                'from': frm,
+                'to': to,
+                'minutes': round(to - frm, 1),
+                'task_name': r.task_name,
+                'attribution': attr.get(r.task_name) or '',
+                # None=完整；head=前一天那截；tail=次日那截；mid=中间整天
+                'split': None if len(segs) == 1 else (
+                    'head' if i == 0 else 'tail' if i == len(segs) - 1 else 'mid'
+                ),
+            })
+
+    # 🔴 `span` 用**截断前**的全集算：截断是版面限制，
+    #    不该顺手把纵轴范围也改小（那会让剩下的块换个比例尺）。
+    span = _span_of(blocks) if blocks else None
+
+    truncated = 0
+    if len(blocks) > WHAT_HAPPENED_BLOCK_LIMIT:
+        truncated = len(blocks) - WHAT_HAPPENED_BLOCK_LIMIT
+        blocks.sort(key=lambda b: -b['minutes'])    # 先保时长长的（信息量大）
+        blocks = blocks[:WHAT_HAPPENED_BLOCK_LIMIT]
+    blocks.sort(key=lambda b: (b['date'], b['from']))
+    return blocks, span, truncated
+
+
+def _what_happened(rows, attr, excluded, start, end):
+    """「这一周我做了什么」——按**本地日期**分组，每天取时长最长的几件。
+
+    🔴 为什么按本地日期：`start_time` 存的是 UTC（`USE_TZ=True`），直接 `.date()`
+       会把 0–8 点的记录算到前一天 —— 而「昨晚熬夜写代码」正好落在那个区间。
+       错一天，回忆就对不上号。
+    🔴 这里给的是**做过的事**（任务名），不是汇总数：复盘页要回答的是
+       「我忘了这周干了什么」，「成长 15.4h」这种数勾不起任何回忆。
+    🔴 排除**睡眠类**（`contrib_excluded_names()`，与贡献图同一份名单）：
+       睡眠每天都有、时长最长，不排掉它「周一做了：休息睡眠 8h」就恒排第一，
+       这一块等于白做。而且「睡了多久」在健康/护栏卡里已经有出口。
+
+    🔴 同一个函数产出两套视图（v3.64.35）：
+       · `days`  —— **合并后**的任务与小时（文字列表用，回答「今天做了几件事」）
+       · `blocks` —— **不合并**的时段区间（时间轴用，回答「几点到几点」）
+       两套都从这里出，不各写一份取数：一旦分成两个函数，「这周做了什么」
+       就会在列表和图里给出两组不同的记录（铁律「同一事实一把尺子」）。
+    """
+    from apps.temporal.constants import ATTRIBUTION_ORDER, WEEKDAY_LABELS
+
+    rows = [r for r in rows if r.task_name not in excluded]
+
+    by_day = {}
+    for r in rows:
+        if r.start_time is None:
+            continue
+        by_day.setdefault(timezone.localtime(r.start_time).date(), []).append(r)
+
+    days = []
+    for d in sorted(by_day):
+        # 先按任务名合并**再**排序：同一天「刷短视频」常有 3–4 条记录，
+        # 不合并的话前 3 格里会有两格是同名任务，一天看起来只做了 2 件事。
+        per = {}
+        for r in by_day[d]:
+            per[r.task_name] = per.get(r.task_name, 0.0) + float(r.duration_hours or 0)
+        ranked = sorted(per.items(), key=lambda x: -x[1])
+        days.append({
+            'date': d.isoformat(),
+            'md': f'{d.month}/{d.day}',
+            'weekday': WEEKDAY_LABELS[d.weekday()],
+            'total_hours': round(sum(per.values()), 1),
+            'items': [
+                {
+                    'task_name': k,
+                    'hours': round(v, 1),
+                    'attribution': attr.get(k, ''),
+                }
+                for k, v in ranked[:WHAT_HAPPENED_PER_DAY]
+            ],
+            # 没列出来的还有几件 —— 让「3 件」看起来是节选，不像「这周只做了 3 件」
+            'more': max(len(ranked) - WHAT_HAPPENED_PER_DAY, 0),
+        })
+
+    by_attr = {}
+    for r in rows:
+        k = attr.get(r.task_name) or '未归类'
+        by_attr[k] = by_attr.get(k, 0.0) + float(r.duration_hours or 0)
+    order = {k: i for i, k in enumerate(ATTRIBUTION_ORDER)}
+    attr_totals = [
+        {'label': k, 'hours': round(v, 1)}
+        for k, v in sorted(by_attr.items(), key=lambda x: order.get(x[0], 99))
+    ]
+
+    blocks, span, truncated = _build_blocks(rows, attr)
+
+    # 列 = 周期内的**每一天**，没记录的那天也占一列 ——
+    # 否则「周三整天没记」和「周三窄一截」在图上看不出区别，而它们是两件事。
+    columns = []
+    d = start
+    while d < end:
+        columns.append({
+            'date': d.isoformat(),
+            'md': f'{d.month}/{d.day}',
+            'weekday': WEEKDAY_LABELS[d.weekday()],
+        })
+        d += dt.timedelta(days=1)
+
+    return {
+        'days': days,
+        'day_count': len(days),
+        'attr_totals': attr_totals,
+        'columns': columns,
+        'blocks': blocks,
+        'span': span,
+        'truncated': truncated,
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# 这一期干成了什么（v3.64.37 · 只读汇总，不落库）
+# ══════════════════════════════════════════════════════════════
+#
+# 三栏：出了成品（作品）/ 完成了里程碑 / 办完的事（小确幸秩序型 + 收件箱 done）。
+#
+# 🔴 **不给跨源总数**：同一件事可能既是「作品」又在「小确幸」里记过
+#    （10-18 那篇文章两处都有），合并成一个数就是重复计数，而且无法回头去重。
+#    三栏各报各的数，是唯一诚实的做法。
+#
+# 🔴 **小确幸只收 `joy_type='秩序型'`**（用户 2026-11-07 定的判据：秩序型 = 掌控感）：
+#    「吃了个大榴莲」「看电影」不该进「干成了什么」。代价是**未标类型的会漏**
+#    （库里 71 条有 36 条空着）—— 所以同时下发 `untyped_count`，
+#    让前端能说一句「另有 N 条没标类型」，而不是让它们静默消失。
+#    （铁律：取数上限必须说明或给出路。）
+
+_OUTCOME_LIMIT = {'works': 8, 'milestones': 8, 'finished': 20}
+
+_COMPLETED_PREFIX = re.compile(r'^完成[：:\s]+')
+
+
+def _norm_outcome_title(text):
+    """把「完成：xxx」和「xxx」归一到同一个比较键，用于收件箱与小确幸去重。
+
+    用户的真实用法是：收件箱里一件事做完标 `done`，觉得值得回味再手写一条
+    小确幸（库里 43 条 done 有 8 条与小确幸标题逐字相同）。
+
+    🔴 **只做精确相等，不做模糊匹配**：包含 / 相似度会把
+       「发公众号关于一步的内容」和「发表了文章」判成同一件 —— 那是**猜**。
+       猜错的后果是「干成的事少了一件」，而页面上看不出来（少一行不报错）。
+       精确匹配的代价是漏掉措辞不同的重复 —— **宁可漏，不可错**。
+    """
+    return _COMPLETED_PREFIX.sub('', (text or '').strip())
+
+
+def _md_weekday(day):
+    """`{date, md, weekday}` —— 时间一律后端给，前端零算（禁 `new Date()`）。"""
+    from apps.temporal.constants import WEEKDAY_LABELS
+
+    return {
+        'date': day.isoformat(),
+        'md': f'{day.month}/{day.day}',
+        'weekday': WEEKDAY_LABELS[day.weekday()],
+    }
+
+
+def _period_outcomes(start, end, done_milestones):
+    """这一期「干成了什么」：三栏明细，每栏 `count` 与 `items` 出自同一次取数。
+
+    区间一律**半开** `[start, end)`：
+    - 作品 `created_at`（timestamptz）
+    - 收件箱 `processed_at`（timestamptz）
+    - 小确幸 `time`（DateField；`__lt=end` 即「到 end 前一天」，含当天）
+
+    ⚠️ `done_milestones` 由调用方从**同一个** `due_rows` 筛出来传进来 ——
+       不在这里重查。自己再查一次就是「同一件事两份取数」，一旦分叉
+       就是「成果卡说 2 个、缺口卡说 3 个」，而两个数各自看着都合理。
+    """
+    from apps.inbox.models import InboxItem
+    from apps.sugar.constants import resolve_happiness_band
+    from apps.sugar.models import SugarRecord
+
+    from . import readers
+
+    # ① 出了成品 —— 复用 KPI「留下件数」的取数器（`works_count`），不另查一次。
+    #    ⚠️ 不走 `_stage_works`：那个函数内部会 `end + 1 天`（它的调用方传的是
+    #    「区间最后一天 inclusive」），而这里的 `end` 是半开上界，走它会**多吃一天**。
+    works_out = readers.works_count(None, start, end)
+    works_items = []
+    for row in works_out['breakdown'][::-1]:  # 倒序 = 最近成形的排前面
+        day = dt.date.fromisoformat(row['extra']['created_at'][:10])
+        works_items.append({
+            'id': row['extra']['id'],
+            # 三栏统一叫 `title`（作品模型里字段名是 `name`）——
+            # 前端一张卡一条时间线，不该为「这栏取哪个键」写分支
+            'title': row['label'],
+            'kind': row['l2'],
+            'status': row['extra']['status'],
+            **_md_weekday(day),
+        })
+
+    # ② 完成了里程碑（口径见 `compute_period_extras` docstring：本期该交且已交）
+    milestone_items = [
+        {
+            'id': m.id,
+            'title': m.title,
+            'goal': m.goal.title if m.goal_id else '',
+            **_md_weekday(m.target_date),
+        }
+        for m in reversed(done_milestones)
+    ]
+
+    # ③ 办完的事 = 小确幸（只秩序型）+ 收件箱 done，按标题归一后去重
+    sugar_qs = SugarRecord.objects.filter(time__gte=start, time__lt=end)
+    merged = {}
+    for r in sugar_qs.filter(joy_type='秩序型').order_by('time', 's_id'):
+        band = resolve_happiness_band(r.level_of_happiness)
+        merged[_norm_outcome_title(r.title)] = {
+            'id': r.s_id,
+            'title': r.title,
+            'source': 'sugar',
+            'date': r.time,  # 先留 date 对象，排序要用
+            'happiness_label': band['label'],
+            'happiness_color': band['color'],
+        }
+
+    # ⚠️ 时间边界只在 `readers._aware` 一处实现（本地零点 → UTC aware）——
+    #    这里不另写一份 `make_aware(combine(...))`：那会是第二把尺子，
+    #    哪天它改了（比如换时区策略），这一处会静默错开 8 小时。
+    inbox_qs = InboxItem.objects.filter(
+        status='done',
+        processed_at__gte=readers._aware(start),
+        processed_at__lt=readers._aware(end),
+    ).order_by('processed_at')
+    for it in inbox_qs:
+        key = _norm_outcome_title(it.content)
+        if key in merged:
+            # 同一件事两处都记过 —— 只出一行，来源标「两处」。
+            # 不删除任何一边：小确幸那条带着快乐档位，是本行更好的载体。
+            merged[key]['source'] = 'both'
+            continue
+        merged[key] = {
+            'id': it.id,
+            'title': it.content,
+            'source': 'inbox',
+            'date': timezone.localtime(it.processed_at).date(),
+            'happiness_label': None,
+            'happiness_color': None,
+        }
+
+    finished = sorted(
+        merged.values(), key=lambda x: (x['date'], x['id']), reverse=True,
+    )
+    for item in finished:
+        item.update(_md_weekday(item['date']))  # date 对象 → ISO 串 + md/weekday
+
+    def _pack(items, limit):
+        return {
+            'count': len(items),
+            'items': items[:limit],
+            'limit': limit,
+            # `count` 是全量、`items` 可能截断 —— 两个数都下发，前端才能说「还有 N 条」
+            'truncated': len(items) > limit,
+        }
+
+    works = _pack(works_items, _OUTCOME_LIMIT['works'])
+    milestones = _pack(milestone_items, _OUTCOME_LIMIT['milestones'])
+    finished_pack = _pack(finished, _OUTCOME_LIMIT['finished'])
+    # 未标类型 ≠ 没完成、也 ≠ 不是完成：是「没分类」，所以单列、不进 count。
+    # 脏值（'社交' / '其他' / '创造' 等早期词表残留）也不算未标 —— 它们标过。
+    finished_pack['untyped_count'] = sugar_qs.filter(joy_type='').count()
+
+    return {
+        'works': works,
+        'milestones': milestones,
+        'finished': finished_pack,
+        'empty': not (works['count'] or milestones['count'] or finished_pack['count']),
+    }
+
+
+def compute_period_extras(period_type, start, end):
+    """每周/每月复盘的三块补充。
+
+    ① **这一周我做了什么**：按天分组的具体任务（勾回忆用）。
+    ② **目标完成情况**：本期到期的里程碑、其中完成了几个、历史逾期还没清的几个。
+    ③ **时间流失**：本期归因「流失」的小时、占全部记录小时的比例、TOP 明细。
+
+    🔴 只读、不落库：这三块是**派生值**（以后能重算出同样结果 ⇒ 不落库），
+       归档时它们会随 `readings` 一起冻进快照——但快照里存的是**结论**，
+       这里算的是**当下**。所以归档后不要指望它跟快照一致，属于正常。
+
+    ⚠️ 里程碑没有 `completed_at` 字段，「本期完成」只能用 `target_date` 落在
+       本期 + `status='completed'` 判定，语义是「**本期该交、且已交**」，
+       不是「本期交的」。两者在补记场景下会不同，这里刻意选前者——
+       因为复盘问的是「这周该做的事做完了吗」。
+    """
+    from apps.goals.models import Milestone
+    from apps.temporal.services import contrib_excluded_names, resolve_attribution
+
+    # 一次取出本期到期的里程碑，`due` / `done` / 缺口卡的 `items` / 成果卡的
+    # 「完成了里程碑」全都从**这一份**里取（v3.64.37）。
+    # 🔴 原先 `due`/`done` 各一次 `count()`、`items` 再一次 `select_related`，
+    #    三处口径虽然一致，但成果卡要的「已完成明细」被 `[:8]` 截掉了 ——
+    #    共用这一份就不存在「缺口卡 8 条、成果卡另算」的分叉。
+    due_rows = list(
+        Milestone.objects.filter(target_date__gte=start, target_date__lt=end)
+        .select_related('goal').order_by('target_date')
+    )
+    due = len(due_rows)
+    done_milestones = [m for m in due_rows if m.status == 'completed']
+    done = len(done_milestones)
+    overdue_qs = Milestone.objects.filter(target_date__lt=start).exclude(status='completed')
+    overdue = overdue_qs.count()
+
+    items = [
+        {
+            'id': m.id,
+            'title': m.title,
+            'goal': m.goal.title if m.goal_id else '',
+            'target_date': m.target_date.isoformat() if m.target_date else None,
+            'status': m.status,
+        }
+        for m in due_rows[:8]
+    ]
+
+    all_rows = temporal_rows({}, start, end)
+    # 🔴 归因走**同一个函数**（`resolve_attribution`，含赎回期规则覆盖）——
+    #    时间统计页、仪表盘护栏卡都是它。旧实现用 `{'l1': ['流失']}` 过滤，
+    #    而那条路读的是 `TaskMeta.default_attribution`：被规则覆盖成「流失」的任务
+    #    在这里会**静默漏掉**，同一件事于是有两个数（铁律「一把尺子」）。
+    names = sorted({r.task_name for r in all_rows})
+    attr = resolve_attribution(names) if names else {}
+
+    loss_rows = [r for r in all_rows if attr.get(r.task_name) == LOSS_ATTRIBUTION]
+    loss = sum(float(r.duration_hours or 0) for r in loss_rows)
+    total = sum(float(r.duration_hours or 0) for r in all_rows)
+
+    per = {}
+    for r in loss_rows:
+        per[r.task_name] = per.get(r.task_name, 0.0) + float(r.duration_hours or 0)
+    top = [
+        {'task_name': k, 'hours': round(v, 1)}
+        for k, v in sorted(per.items(), key=lambda x: -x[1])[:5]
+    ]
+
+    # 当期还没走完（比如周三）⇒ 按已过天数折算，别拿半周去比整周
+    today = timezone.localdate()
+    elapsed_days = max((min(end, today + dt.timedelta(days=1)) - start).days, 1)
+
+    return {
+        'period_type': period_type,
+        'what_happened': _what_happened(all_rows, attr, contrib_excluded_names(), start, end),
+        # 「这一期干成了什么」—— 投入（what_happened）之外的**产出**视角。
+        # 三栏各报各的数，不给跨源总数（见 `_period_outcomes` 顶部注释）。
+        'outcomes': _period_outcomes(start, end, done_milestones),
+        'goals': {
+            'due': due,
+            'done': done,
+            # 「本期新增逾期」= 该交没交的那部分（`due - done`）。
+            # 累积的 `overdue` 保留在响应里给「目标」模块用，但**不再当本周的账**
+            # —— 那个数跨周恒定，放在周复盘里每期都是同一个值，信息量为 0。
+            'missed': max(due - done, 0),
+            'overdue': overdue,
+            'items': items,
+        },
+        'time_loss': {
+            'loss_hours': round(loss, 1),
+            'total_hours': round(total, 1),
+            # ⚠️ `None` = 这一期没有任何时间记录（≠ 流失 0%）
+            'ratio': round(loss / total, 4) if total else None,
+            'per_day': round(loss / elapsed_days, 2),
+            'days': elapsed_days,
+            'top': top,
+        },
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# 阶段账本（长阶段的「钱 / 时间 / 作品 / 小阶段」，只读现算）
+# ══════════════════════════════════════════════════════════════
+#
+# 🔴 四个展示函数（`stage_elapsed_days` / `stage_range_label` /
+#    `stage_status_display` / `stage_days_label`）**从这里出发**，
+#    `serializers.SelfRunStageSerializer` 的 `get_*` 只是委托。
+#    替身理由（项目铁律五）：「唯一实现」的注释不值钱，值钱的是调用同一份代码 ——
+#    账本的 `range` 与阶段页头必须印同一个「第 N 天 / 共 N 天」，
+#    两处各写一个三元表达式，迟早在一个边界上分叉（已归档阶段、未开始阶段）。
+
+def stage_elapsed_days(stage):
+    """今天在阶段里是第几天。现算不落库（重算得出同样结果，所以不存）。
+
+    🔴 取 `min(今天, 终点)`，**不是** `end_date or 今天`：
+       后者会让「设了计划终点」的阶段直接显示**计划总长**（v3.63.13 前的 bug：
+       离职适应期 11-01→12-31 显示「第 61 天」，而当天 10-22 还没开始）。
+    """
+    today = timezone.localdate()
+    end = min(today, stage.end_date) if stage.end_date else today
+    return max((end - stage.start_date).days + 1, 0)
+
+
+def stage_range_label(stage):
+    """阶段区间：**从哪天到哪天、一共多少天** —— 全站只在这里拼一份。
+
+    ⚠️ 本来页头只印 `days_label`，而它的「未开始」分支带的是 `MM-DD 起`，
+       于是整页**只有起点、没有终点**（2026-10-31 用户提出：
+       「阶段总结、阶段 KPI 制定里都看不到这个阶段什么时候结束」）。
+       区间是阶段第一性的信息，不该藏在「第 N 天」这种进度词里。
+    """
+    start = f'{stage.start_date:%Y-%m-%d}'
+    if not stage.end_date:
+        return f'{start} 起（不设终点，手动收尾）'
+    total = (stage.end_date - stage.start_date).days + 1
+    return f'{start} ~ {stage.end_date:%Y-%m-%d}（{total} 天）'
+
+
+def period_range_label(period):
+    """一期的**显示词**：「2026-W42（10-12 ~ 10-18）」—— 全站只在这里拼一份。
+
+    🔴 光有 `period_key` 读不出「这一周到底是哪几天」。用户看「最好的一期
+       2026-W42」得自己去数第 42 周是哪天 —— 而 ISO 周号本身还会跨年
+       （12-29 可能属于下一年 W01），心算必错。所以周号后面必须跟日期。
+    🔴 `period_end` 是**半开**的（`[start, end)`，见模型注释）⇒ 显示时要减一天。
+       不减的话每周都会印成「10-12 ~ 10-19」，看着像 8 天，用户会以为自己记错。
+    ⚠️ 用**库里存的** `period_start` / `period_end`，不用 `parse_period_key` 重算：
+       残缺周期（阶段起于周中）的行存的是阶段真实起点，不是一个整周。
+    """
+    last = period.period_end - dt.timedelta(days=1)
+    return f'{period.period_key}（{period.period_start:%m-%d} ~ {last:%m-%d}）'
+
+
+def stage_status_display(stage):
+    """阶段状态的**显示词**。
+
+    🔴 `active` + 今天还没到起点 ⇒ 显示「未开始」。
+       库里的 `status='active'` 说的是「这是当前在册的那一个阶段」，
+       不是「已经在跑了」。两种情况都印「进行中」，页头就会写成
+       「进行中 · 还有 1 天开始」。
+    """
+    if stage.status == 'active' and stage.start_date > timezone.localdate():
+        return '未开始'
+    return stage.get_status_display()
+
+
+def stage_days_label(stage):
+    """天数的**显示词**（三种态用三种词）。
+
+    三种态必须用三种词，因为「第 61 天」印在已归档阶段上会被读成「还在跑」。
+
+    🔴 这里**不回带起点日期**：区间交给 `stage_range_label`。
+       两处都写，页头就会变成「2026-11-01 ~ 2026-12-31 · 未开始 · 11-01 起」
+       —— 同一件事写两遍，看着像两个不同的值。
+       未开始时说的是**还差几天**（进度），不是区间。
+    """
+    n = stage_elapsed_days(stage)
+    if n <= 0:
+        return f'还有 {(stage.start_date - timezone.localdate()).days} 天开始'
+    if stage.status == 'closed':
+        return f'共 {n} 天'
+    return f'第 {n} 天'
+
+
+def stage_ledger(stage):
+    """阶段账本：`range` / `time` / `money` / `works` / `children`。**只读现算，不写库。**
+
+    🔴 时间与钱两块**不自己算**，一律调 `apps.redemption.services` 那几个函数
+       （2026-11-02 起它们吃显式区间 `(start, end)`）。同一件事两份实现 ⇒
+       两个数迟早分叉，而分叉是静默的：页面上下两块各自看着都合理。
+    🔴 **六类小时之和必须等于 `covered_hours`**（跨轮验收红线）：账本把**除睡眠外的**
+       全部记录都摊进六类，没设默认归因的部分单列 `fallback_hours`，但**不从六类里排除**。
+    🔴 **睡眠（夜间 + 午睡）两边都不计**（2026-11-02）：覆盖率分母是「每天可支配小时」
+       （`rs.THEORETICAL_DAILY_HOURS`，2026-11-05 由 12h 调到 14h），本来就不含睡眠；
+       分子再含睡眠 ⇒ 覆盖率必然冲破 100%（实测 141.5%）。
+       剔除量单列 `excluded_sleep_hours`，且 `covered_hours + excluded_sleep_hours`
+       == 区间内全部记录时长 —— 让页面能把「这块时间去哪了」交代清楚。
+    🔴 长阶段**没有任何 period 读数** —— `children` 里的 `reach_rate` 是小阶段的，
+       它由 `compute_stage_summary()`（阶段总结同一个函数）逐个子阶段现算得出，
+       不是长阶段自己的判定结果。长阶段只汇总，不判定。
+    """
+    from apps.redemption import services as rs
+
+    start = stage.start_date
+    # 不设终点的阶段按「到今天」算 —— 与 `stage_elapsed_days` 同一取法
+    end = stage.end_date or timezone.localdate()
+    if end < start:
+        end = start      # 脏数据（终点早于起点）不能让区间反向，否则天数算成负数
+
+    today = min(timezone.localdate(), end)
+    total_days = (end - start).days + 1
+    elapsed_days = max((today - start).days + 1, 0)
+
+    cfg = stage.ledger_config or {}
+    principal = float(cfg.get('pool_principal') or 0)
+
+    # 注入 = 区间内**被标为「中途注入」的收入**，金额从账单读、窗口与本金/消耗同一把尺子
+    #（v3.64.26 起不再自己记金额，也不再按阶段总量取）。
+    # 🔴 这些账单同时要从净消耗里排除，否则「加进注入 + 减少消耗」双算。
+    injected, inject_ids = pool_inject_totals(start, end)
+
+    pool = rs.compute_pool_balance(
+        principal, start, end, injected, exclude_bill_ids=inject_ids,
+    )
+    avg = rs.compute_avg_daily_self_net_detail(start, end)
+    avg_daily = avg['avg_daily']
+    support_until, support_reason = rs.compute_support_until(
+        pool['balance'], avg_daily, today,
+    )
+
+    # 🔴 2026-11-05 撤掉 ¥/h 那一对（原「单位赎回成本」÷ 已过小时、「理论下限」
+    #    ÷ 全期小时）。它们分子分母都不同，并排放必然读出「28.56 高于 11.74 ⇒
+    #    超标了」—— 而这个读法本身不成立（阶段才第 5 天，大额支出还没摊开）。
+    #    判断「撑不撑得到终点」只需要一把尺子：**每天多少钱**。
+    remaining_days = max(total_days - elapsed_days, 0)
+    # 允许日均 = 剩余余额 ÷ 剩余天数；和「日均净消耗」同量纲，可直接比大小。
+    # ⚠️ 没设本金 ⇒ `None` + 原因码，不是 0：允许值为 0 意味着「一花钱就超额」，
+    #    那是个结论，不是默认值。
+    if principal <= 0:
+        daily_allowance, allowance_reason = None, 'no_principal'
+    elif remaining_days <= 0:
+        daily_allowance, allowance_reason = None, 'no_day_left'
+    else:
+        daily_allowance = round(pool['balance'] / remaining_days, 2)
+        allowance_reason = None
+    # 预算占用 = 日均 ÷ 允许日均。两种「算不出来」要分开说：
+    #   `no_allowance` = 允许值缺失或 ≤0（没本金 / 已超支）
+    #   `net_inflow`   = 日均是负的（钱在变多），比值没有意义 —— 拿它算会得出
+    #                    「-295%」，看着像「省了一半」，实际是净流入（用户截图实证）
+    if daily_allowance is None or daily_allowance <= 0:
+        daily_use_rate, rate_reason = None, 'no_allowance'
+    elif avg_daily < 0:
+        daily_use_rate, rate_reason = None, 'net_inflow'
+    else:
+        daily_use_rate, rate_reason = round(avg_daily / daily_allowance, 4), None
+
+    time_block = rs.compute_time_attribution(start, end)
+    # ⚠️ 同一个量只留一个出处：区间天数在 `range` 里，`time` 块自带的那个删掉
+    #    （两处各给一个 `days_elapsed`，改口径时必然只改一处）。
+    time_block.pop('days_elapsed', None)
+
+    children = []
+    for child in stage.children.order_by('start_date', 'id'):
+        summary = compute_stage_summary(child)
+        hit = sum(m['hit'] for m in summary['metrics'])
+        judged = sum(m['total'] for m in summary['metrics'])
+        children.append({
+            'id': child.id,
+            'name': child.name,
+            'range_label': stage_range_label(child),
+            'status_display': stage_status_display(child),
+            # 达标率 = 命中次数 / 有判定的次数。**复用阶段总结的逐 KPI hit/total**，
+            # 不在这条链路上另算一遍。
+            'hit': hit,
+            'judged': judged,
+            'reach_rate': round(hit / judged, 4) if judged else None,
+        })
+
+    return {
+        'stage_id': stage.id,
+        'range': {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'total_days': total_days,
+            'elapsed_days': elapsed_days,
+            'remaining_days': remaining_days,
+        },
+        'time': time_block,
+        'money': {
+            'pool': {
+                **pool,
+                'avg_daily': avg_daily,
+                'support_until': support_until,
+                'support_zero_reason': support_reason,
+            },
+            'tier': rs.compute_tier_stats(start, end),
+            'daily_allowance': daily_allowance,
+            'daily_allowance_zero_reason': allowance_reason,
+            'daily_use_rate': daily_use_rate,
+            'daily_use_rate_zero_reason': rate_reason,
+            # 日均的样本可信度：阶段刚开时 30 天窗口里大半没有「为自己」的账，
+            # 均值被稀释 ⇒ 三个键必须一起摆出来，页面才说得清「¥38 是摊出来的」。
+            'avg_daily_sample_days': avg['sample_days'],
+            'avg_daily_sample_net_per_day': avg['net_per_day'],
+            'avg_daily_sample_thin': avg['thin'],
+        },
+        'works': _stage_works(start, end),
+        'children': children,
+    }
+
+
+# 账本明细弹窗最多列几条。一个走了大半年的长阶段可能成形几十件，
+# 全塞进一个弹窗要滚很久；超出的部分给「去作品」出口。
+# 🔴 上限**必须随数据下发**（`limit` / `truncated`）：只截断不说，
+#    用户会拿弹窗里那几条当全集 —— 那又是一句「看着合理」的谎。
+_STAGE_WORKS_LIMIT = 50
+
+
+def _stage_works(start, end):
+    """区间内**成形**的作品：件数 + 明细。**同一次取数**出两样。
+
+    ⚠️ 「成形于」是合成那件作品的那一刻，不是「那件事发生的那一刻」——
+       与 `WorkCapture.captured_at` 同一个取舍：算「这期间整理出了什么」。
+
+    🔴 复用 `readers.works_count`（KPI「留下件数」用的那个函数），不自己再查一次。
+       原先这里是独立实现 `_stage_work_count` —— 同一件事两份取数；加了明细之后
+       一旦分叉，表现就是**「写着 2 件、点开 3 条」，而两个数各自看着都合理**。
+    🔴 `count` 与 `items` 必须出自同一次取数：分别查两次，两次之间作品被改动，
+       页面就会自相矛盾（而且无法复现）。
+    ⚠️ 两侧 `end` 语义不同：`works_count` 收**半开上界** `[start, end)`，
+       账本收**区间最后一天**（inclusive）⇒ 这里 +1 天再传。
+    """
+    from apps.selfrun import readers
+
+    out = readers.works_count(None, start, end + dt.timedelta(days=1))
+    # 倒序 = 最近的排前面。`works_count` 给的是**时间升序**（KPI breakdown 的读法），
+    # 而点开弹窗问的是「最近成形了什么」—— 照原序列，上个月的会排在最后。
+    rows = out['breakdown'][::-1]
+    items = [
+        {
+            'id': r['extra']['id'],
+            'name': r['label'],
+            'kind': r['l2'],
+            'status': r['extra']['status'],
+            'summary': r['extra']['summary'],
+            'channel': r['extra']['channel'],
+            'created_at': r['extra']['created_at'],
+        }
+        for r in rows[:_STAGE_WORKS_LIMIT]
+    ]
+    return {
+        'count': out['count'],
+        'items': items,
+        'limit': _STAGE_WORKS_LIMIT,
+        'truncated': len(rows) > _STAGE_WORKS_LIMIT,
+    }
+
+
+
+# ══════════════════════════════════════════════════════════════
+# 池注入标记（v3.64.26）
+# ══════════════════════════════════════════════════════════════
+def list_pool_inject_bill_ids():
+    """已标记为「中途注入」的账单 id 列表（前端拿它给账单行打标）。"""
+    return list(SelfRunPoolInject.objects.values_list('bill_id', flat=True))
+
+
+def set_pool_inject(bill_id, marked):
+    """标记 / 取消标记一笔账单 → 返回 `(bill_id, 当前是否已标记)`。
+
+    🔴 **只允许收入**：注入是「钱进来」。支出被标了会让余额凭空变大
+       （它既要被当作注入 +amount，又会正常减少余额），而且页面看着合理。
+    🔴 **金额不落库**：标记表只存 `bill_id`，金额与日期一律从账单读
+       （`readers.pool_inject_totals`）。存第二份 = 两把尺子。
+    ⚠️ 两个方向都**幂等**：重复标记 / 重复取消都返回 200，不报 409 ——
+       前端是开关，用户手快点两下不该看到红色报错。
+    """
+    from apps.wealth.models import WealthBillList
+
+    try:
+        bill_id = int(bill_id)
+    except (TypeError, ValueError):
+        raise SelfRunError('bill_id 必须是整数')
+
+    bill = WealthBillList.objects.filter(id=bill_id, user_id=1).first()
+    if bill is None:
+        raise NotFoundError(f'账单 {bill_id} 不存在')
+    if bill.transaction_type != '收入':
+        raise SelfRunError(
+            f'只有收入能标为中途注入（这笔是「{bill.transaction_type}」）—— '
+            '注入是钱进来，支出标了会把余额算歪'
+        )
+
+    if marked:
+        SelfRunPoolInject.objects.get_or_create(bill_id=bill_id)
+    else:
+        SelfRunPoolInject.objects.filter(bill_id=bill_id).delete()
+    return bill_id, bool(marked)

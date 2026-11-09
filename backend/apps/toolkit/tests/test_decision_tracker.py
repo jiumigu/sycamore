@@ -271,7 +271,9 @@ def test_custom_lean_options_full_flow() -> None:
     report = resp.data
     assert {o['key'] for o in report['options']} == {'想现在买', '再等等', '不买了'}
     assert len(report['reasons']['想现在买']) == 2
-    assert report['monthly_trend'][0]['想现在买'] == 2
+    # 🔴 按**各月合计**断言，不要取 `[0]`：本用例造数是 days_ago=3/2/1，
+    #    在月初（1–3 号）跑会跨月，`monthly_trend[0]` 只剩 1 条 —— 2026-11-02 就红过一次。
+    assert sum(m['想现在买'] for m in report['monthly_trend']) == 2
 
     # 默认三项追踪不受影响（不带 lean_options 建的既有追踪仍可用 continue/quit）
     legacy = _create_tracker()

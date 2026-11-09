@@ -105,6 +105,11 @@ ATTRIBUTION_COLORS = {
 ATTRIBUTION_COUNTED = ('成长', '体验', '关系', '谋生', '维持')
 DEFAULT_FALLBACK_ATTR = '成长'   # 解析兜底（v0.2 §6.3）
 
+# 周历表：**唯一一份**，`datetime.weekday()` 0 = 周一。
+# ⚠️ 周标签属于「时间」这一域，别在别的 app 里再抄一份（dance 模型里还有两处硬编码，
+#    下次动到那里时一并换过来 —— 本轮不动它们，免得扩大改动面）。
+WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
 # 旧归因值 → 新值（数据迁移与旧数据兼容用；维持/流失 未变故不在表中）
 ATTRIBUTION_RENAME_MAP = {'投向': '成长', '外部': '谋生'}
 
@@ -212,4 +217,151 @@ TASK_TO_L2 = {
 #    贡献图里（症状与这次一模一样）。用例
 #    `TestContribExcludesSleep::test_exclusion_list_is_pinned` 钉住了名单内容，
 #    改名时它会失败，提醒来这里。
+#
+# 🔴 v3.64.12：这张名单**不再是唯一入口**。`TaskMeta.daily_role` 里标为
+#    「夜间睡眠 / 午睡」的任务名会自动并入（见 `services.contrib_excluded_names`），
+#    这里是**并集的一半**（老名字兜底，防库没标时贡献图口径突然变）。
+#    新增睡眠类任务只需在映射编辑器里标角色，不必再来改这里。
 CONTRIB_EXCLUDED_TASK_NAMES = {'休息睡眠', '午睡'}
+
+
+# ══════════════════════════════════════════════════════════════
+# 日常护栏（v3.64.12）：「今天的三条线」唯一真源
+# ══════════════════════════════════════════════════════════════
+#
+# 裸辞后最先滑坡的三条线：睡不够 → 白天没精神 → 拿手机填空 → 一天消失。
+# 这三条线做成**每日状态**（不是静态文案）：有实测值、有阈值、有「未记录」。
+#
+# 🔴 阈值只在本文件。前端 **0 个数字**，只按 `status` 上色（同 `PERIOD_VERDICT_BANDS`）。
+# 🔴 两种取数口径，别混（`role` 是否为 None 就是分界）：
+#    · `role` 非空 ⇒ 按 `TaskMeta.daily_role` 标记取数。睡眠 / 午睡必须走这条：
+#      它们是「哪一类时间」，L1 归因表达不了（两件事都归「维持」）。
+#    · `role` 为 None ⇒ 按 **L1 归因**取数。流失走这条：台账里玩游戏 / 刷短视频 /
+#      看小说本来就归「流失」，再标一遍角色是同一件事量两次，且标漏会静默失效。
+# 🔴 状态只有三档：`ok` / `off` / `unrecorded`。**不设 `unknown` 之类的兜底桶**：
+#    没记录就是 `unrecorded`，它**永远不算达标**（`unrecorded ≠ ok`）。
+
+DAILY_ROLE_CHOICES = [
+    ('', '不参与'),
+    ('sleep_night', '夜间睡眠'),
+    ('nap', '午睡'),
+]
+
+# 合法角色值（**不含空串**：空串是「不参与」，单独判断，别让它混进「合法角色」里）
+DAILY_ROLE_VALUES = {value for value, _ in DAILY_ROLE_CHOICES if value}
+
+# 归属日口径（两支尺子，不能混）：
+#   · `wakeup_day`：按**醒来那一刻**归属 —— 23:40 睡 8h 算到次日。
+#     夜间睡眠必须用它，否则「白天打开页面永远显示今天还没睡」。
+#   · `start_day`：按开始时刻归属 —— 午睡 / 流失都不跨日，用它才对。
+DAILY_GUARD_LINES = [
+    {
+        'key': 'sleep',
+        'role': 'sleep_night',
+        'label': '昨夜睡眠',
+        'direction': 'at_least',
+        'threshold_hours': 8.0,
+        'day_bucket': 'wakeup_day',
+        'unrecorded_text': '还没有今天的睡眠记录',
+        'unconfigured_text': '还没标「夜间睡眠」角色',
+    },
+    {
+        'key': 'nap',
+        'role': 'nap',
+        'label': '午睡',
+        'direction': 'at_most',
+        'threshold_hours': 1.5,
+        'day_bucket': 'start_day',
+        'unrecorded_text': '今天没有午睡记录',
+        'unconfigured_text': '还没标「午睡」角色',
+    },
+    {
+        # 🔴 v3.64.13：原来的「游戏 ≤ 2h」换成「流失 ≤ 4h」，**不是加一条**。
+        #    换的理由有两条，都不是口味问题：
+        #    ① 游戏是流失的**子集**（玩游戏 / 刷短视频 / 看小说 全归流失），
+        #       两根线量同一件事 ⇒ 读的时候要自己判「哪个才算数」；
+        #    ② 原来那条线**永远不会亮**：实测历史最高 1.37h，2h 的门槛等于没设。
+        #       换成每日流失合计后，近 14 天有两天真的越线（4.43h / 4.78h）。
+        # ✅ 为什么不用角色：`resolve_attribution` 已经给出答案，
+        #    用户装个新的短视频 App 也不用回来标角色（标漏不会静默失效）。
+        'key': 'lost',
+        'role': None,                    # None = 不看角色，按 L1 归因取数
+        'attribution_value': '流失',
+        'label': '流失',
+        'direction': 'at_most',
+        'threshold_hours': 4.0,
+        'day_bucket': 'start_day',
+        'unrecorded_text': '今天没有流失记录',
+        'unconfigured_text': '还没有任务名归到「流失」',
+    },
+]
+
+# 状态词（🔴 唯一一份；后端算好下发，前端不再写中文表）
+DAILY_GUARD_STATUS_TEXT = {
+    ('at_least', 'ok'): '达标',
+    ('at_least', 'off'): '未达',
+    ('at_most', 'ok'): '达标',
+    ('at_most', 'off'): '越线',
+    ('any', 'unrecorded'): '未记录',
+}
+
+# ══════════════════════════════════════════════════════════════
+# 记录来源（v3.64.33）：「这条时间记录是谁写进来的」唯一真源
+# ══════════════════════════════════════════════════════════════
+#
+# 依据**只有一列**：`TemporalTask.import_batch`（外部表，加不了新列 —— 铁律）。
+# 但那一列存的是 `import_3c3fff90846d` 这种哈希批次号，界面上既读不懂、也分不出
+# 「手机导的还是电脑记的」。本表把批次号**归类**成人能读的来源词，只此一份：
+# 后端下发 `source_label`，前端不写任何中文映射（否则一处改词、两处不一致）。
+#
+# 🔴 「未标注」与「其它来源」**必须分开**，别合成一个兜底桶：
+#    · `unlabeled` = 库里 `import_batch` 为空（早期记录 + 本版之前的手工新增）。
+#      这是「不知道从哪来」，是**事实的缺失**。
+#    · `other`     = 有批次号，但代码不认识（将来别处写入、或前缀改了）。
+#      这是「知道有来源，只是这次没认出来」。把它说成「未标注」等于**抹掉线索**。
+#    两者在界面上的处理也不同：前者灰字提示「早期记录没留来源」，
+#    后者直接把批次号亮出来 —— 至少还能顺着批次号去查。
+#
+# ⚠️ 新增写入方 ⇒ 必须在这里登记一个 kind，否则它会落进 `other`（看得到、说不清）。
+#
+# v3.64.34：`label_manual_source` 把那 41 条按用户核实补记为 `manual` 之后，
+# `unlabeled` **应当恒为 0**。它再冒出来只有两种可能：① 又有写入方没登记 kind
+# （代码漏了）② 有人绕过 API 直接往库里塞（数据脏了）。两种情况都该查，不该习惯它。
+SOURCE_KINDS = [
+    ('manual', '手工录入'),
+    ('timer', '实时计时'),
+    ('csv', 'CSV 导入'),
+    ('worklog', '工作日志'),
+    ('overtime_recon', '加班反推'),
+    ('atracker', '旧库迁移'),
+    ('unlabeled', '未标注'),
+    ('other', '其它来源'),
+]
+SOURCE_KIND_LABELS = dict(SOURCE_KINDS)
+SOURCE_KIND_VALUES = [k for k, _ in SOURCE_KINDS]
+
+# 批次号前缀 → kind。顺序敏感：**先具体、后通用**（`overtime_recon_*` 也以字母开头，
+# 但将来若有人把批次号写成 `import_worklog_xxx`，必须先命中更具体的那个）。
+SOURCE_BATCH_PREFIXES = [
+    ('overtime_recon', 'overtime_recon'),
+    ('import_', 'csv'),
+]
+# 批次号**恰好等于**这些值时按固定 kind 认（导入脚本写的是裸词，没有前缀）
+SOURCE_BATCH_EXACT = {
+    'timer': 'timer',
+    'worklog': 'worklog',
+    'manual': 'manual',
+    'atracker': 'atracker',
+}
+
+# 各来源的一句话说明（批次清单弹窗里显示，避免用户猜「工作日志」是什么）
+SOURCE_KIND_HINTS = {
+    'manual': '在「时间任务清单」里手动新增的记录',
+    'timer': '用「实时计时」记下的，有真实起止',
+    'csv': '从 ATracker 导出 / 手机端记录的 CSV 批量导入',
+    'worklog': '从工作日志 Excel 补记的工作时段',
+    'overtime_recon': '按月度加班汇总反推出来的推定工时',
+    'atracker': '从旧库 o_atracker_tasks_list 逐条迁过来的原始记录',
+    'unlabeled': '早期记录，没有留下来源标记',
+    'other': '有批次号，但当前代码不认识这个来源',
+}

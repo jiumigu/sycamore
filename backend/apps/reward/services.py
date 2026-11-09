@@ -8,6 +8,21 @@ from django.db import transaction as db_transaction
 from .models import GiftList, RewardPool, RewardTransaction
 
 
+def _to_decimal(value) -> Decimal:
+    """金额归一 —— 写进奖励池的**唯一入口**。
+
+    `RewardPool.balance / total_earned` 是 DecimalField，`Decimal += float`
+    会抛 `TypeError: unsupported operand type(s) for +=: 'decimal.Decimal' and 'float'`。
+    而调用方给的类型并不统一：serializer 的 `FloatField` 是 float、前端 JS 传的是
+    float、`DecimalField` 给的是 Decimal ⇒ 在每个调用方各转一次必然漏，收在服务入口
+    统一转一次（转成 str 再进 Decimal，避免 `Decimal(0.1)` 的二进制尾差）。
+    """
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+
 class RewardPoolService:
     """奖励池业务逻辑"""
 
@@ -23,6 +38,7 @@ class RewardPoolService:
     def add_reward(*, source_id: int, source_type: str, amount: Decimal,
                    transaction_type: str, description: str = '') -> RewardTransaction:
         """增加奖励（里程碑完成/小确幸等）"""
+        amount = _to_decimal(amount)
         pool = RewardPoolService._get_or_create_pool()
         old_balance = pool.balance
 
@@ -47,6 +63,7 @@ class RewardPoolService:
     def adjust_reward(*, source_id: int, source_type: str, delta: Decimal,
                       description: str = '') -> RewardTransaction | None:
         """调整奖励（里程碑金额变更时）"""
+        delta = _to_decimal(delta)
         if delta == 0:
             return None
 
@@ -76,6 +93,7 @@ class RewardPoolService:
     def deduct_reward(*, source_id: int, source_type: str, amount: Decimal,
                       reason: str = 'milestone_delete', description: str = '') -> RewardTransaction:
         """扣除奖励（删除已完成里程碑时）"""
+        amount = _to_decimal(amount)
         pool = RewardPoolService._get_or_create_pool()
         old_balance = pool.balance
 
@@ -97,24 +115,50 @@ class RewardPoolService:
 
     @staticmethod
     def get_pool() -> dict:
-        """获取奖励池概览"""
-        pool = RewardPoolService._get_or_create_pool()
+        """奖励池概览 —— 三个数全部**从流水派生**。
+
+        🔴 池表上的 `total_earned / total_withdrawn` 是独立累加字段，
+        删流水、历史迁移、任何绕过 service 的写库都会让它与账本脱钩。
+        2026-10-23 实测：字段 22,092.00 / 21,395.90，
+        而流水实际正数 12,063.00、负数 11,378.00 —— 而且
+        `earned - withdrawn = 696.10 ≠ 余额 685.00`，三个数字互相打架。
+
+        流水的 `balance_before / balance_after` 从 0 起算、逐条连续
+        （最早一条 before=0.00），才是唯一可信的账本 ⇒ 展示一律派生，
+        两个累计字段不再作为真源（写入路径仍维护，只为兼容旧读法）。
+        """
+        from django.db.models import Q, Sum
+
+        agg = RewardTransaction.objects.aggregate(
+            income=Sum('amount', filter=Q(amount__gt=0)),
+            expense=Sum('amount', filter=Q(amount__lt=0)),
+        )
+        income = agg['income'] or Decimal('0')
+        expense = agg['expense'] or Decimal('0')
         return {
-            'balance': float(pool.balance),
-            'total_earned': float(pool.total_earned),
-            'total_withdrawn': float(pool.total_withdrawn),
+            'balance': float(income + expense),
+            'total_earned': float(income),
+            'total_withdrawn': float(-expense),
         }
 
     @staticmethod
     def get_stats_by_source() -> dict:
-        """按来源统计奖励"""
+        """按来源统计**收入** —— 只算正数流水。
+
+        🔴 口径必须与 `get_pool()['total_earned']` 同源：两者都只取正数，
+        所以「四个来源之和 == 累计获得」是恒等式，百分比的分母也才对得上。
+        混进负数（小确幸删除扣回、快乐程度调低）会让来源合计永远比累计获得
+        少一截 —— 页面看起来就是「流水明细和总数对不上」。
+        """
         from django.db.models import Sum
 
-        sugar_total = RewardTransaction.objects.filter(
+        income = RewardTransaction.objects.filter(amount__gt=0)
+
+        sugar_total = income.filter(
             source_type='sugar',
         ).aggregate(total=Sum('amount'))['total'] or 0
 
-        milestone_total = RewardTransaction.objects.filter(
+        milestone_total = income.filter(
             source_type='milestone',
         ).aggregate(total=Sum('amount'))['total'] or 0
 
@@ -125,11 +169,11 @@ class RewardPoolService:
             .order_by('-created_at')
         )
 
-        goal_complete_total = RewardTransaction.objects.filter(
+        goal_complete_total = income.filter(
             source_type='goal_complete',
         ).aggregate(total=Sum('amount'))['total'] or 0
 
-        inbox_complete_total = RewardTransaction.objects.filter(
+        inbox_complete_total = income.filter(
             source_type='inbox_complete',
         ).aggregate(total=Sum('amount'))['total'] or 0
 

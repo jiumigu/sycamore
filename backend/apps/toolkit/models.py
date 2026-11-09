@@ -458,6 +458,21 @@ class DecisionTracker(models.Model):
         verbose_name='自定义倾向选项',
         help_text='字符串数组（2–6 项），如 ["想现在买","再等等","不买"]；留空用默认三项（想继续/不想继续/不确定）',
     )
+    # 🔴 结论口径：取票数前 N 项都算结论。1 = 只取第一名（旧行为，也是默认）。
+    #    只对「自定义选项」有意义 —— 默认三项（想继续/不想继续/不确定）本身互斥，
+    #    「想继续 + 不想继续」同时成立讲不通，所以 serializer 会把非自定义追踪的 N 压回 1。
+    #    放在追踪上而不是查询参数上：一条决策的口径应该是它的属性，
+    #    不该因为换一个人看报告就变（否则同一个决策能得出两种结论）。
+    result_top_n = models.PositiveSmallIntegerField(
+        default=1,
+        verbose_name='结论取前几项',
+        help_text='1 = 只取票数最高的一项（默认）；自定义选项时可设 2–6，取前 N 名作为结论',
+    )
+    final_choices = models.JSONField(
+        null=True, blank=True,
+        verbose_name='采纳的倾向选项',
+        help_text='做出决定时一键采纳的选项标签数组；与手写的 final_decision 并存，语义不同',
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -479,6 +494,22 @@ class DecisionTracker(models.Model):
         if self.lean_options:
             return [(str(s), str(s)) for s in self.lean_options]
         return [('continue', '想继续'), ('quit', '不想继续'), ('uncertain', '不确定')]
+
+    def effective_top_n(self) -> int:
+        """实际生效的结论条数 —— 把所有「不该取多项」的情况收口到这一个地方。
+
+        三条收敛规则（改口径只能改这里）：
+
+        1. **默认三项一律 1**：`continue` / `quit` / `uncertain` 是互斥判断，
+           取前 2 名会输出「想继续 40% · 不想继续 35%」，读起来像没说。
+        2. **老数据兜底 1**：字段加之前建的追踪 `result_top_n` 落到默认值 1，
+           与改动前的单结论行为完全一致。
+        3. **不超过选项数**：2 个选项却要「前 3 名」，第 3 名只能是空位。
+           serializer 在写入时就报错拦掉；这里再夹一次，防绕过接口直接写库。
+        """
+        if not self.lean_options:
+            return 1
+        return max(1, min(int(self.result_top_n or 1), len(self.lean_options)))
 
 
 class DecisionRecord(models.Model):

@@ -83,8 +83,17 @@ class RewardTransactionDeleteView(APIView):
         # 扣回奖励池余额
         pool = RewardPool.objects.first()
         if pool:
+            # 🔴 按流水方向回退：正数只影响「累计获得」，负数只影响「累计提取」。
+            #    原写法 `total_earned = total_earned - tx.amount` 对负数流水等于**加** ——
+            #    删掉一条 -11350.90 的礼物兑换流水，会让「累计获得」凭空涨一万多；
+            #    同时 total_withdrawn 从头到尾没有回退。2026-10-23 实查：
+            #    池字段 22,092.00 / 21,395.90，流水实际 12,063.00 / 11,378.00，
+            #    且 earned - withdrawn = 696.10 ≠ 余额 685.00（id 1~379 但只剩 360 条 ⇒ 删过 19 条）。
+            if tx.amount > 0:
+                pool.total_earned = models.F('total_earned') - tx.amount
+            else:
+                pool.total_withdrawn = models.F('total_withdrawn') - abs(tx.amount)
             pool.balance = models.F('balance') - tx.amount
-            pool.total_earned = models.F('total_earned') - tx.amount
             pool.save()
 
         tx.delete()

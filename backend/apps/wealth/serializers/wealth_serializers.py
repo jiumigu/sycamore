@@ -2,6 +2,8 @@ import re
 
 from rest_framework import serializers
 
+from apps.core.fields import AmountNumberField
+
 from ..constants import (
     ASSET_CATEGORIES,
     CASHFLOW_CLASSES,
@@ -167,6 +169,13 @@ class BillCreateSerializer(serializers.Serializer):
 
 class BillSerializer(serializers.ModelSerializer):
     """账单明细（清单 CRUD：备注 notes / 商户 merchant / 必要性 necessity 可编辑）"""
+
+    # 🔴 未显式声明 ⇒ 接口吐 `"150.00"`（字符串），而前端 `formatAmount` /
+    #    `formatSignedAmount` 只认 number。列表主行侥幸没事，是因为模板里
+    #    写的是 `Number(row.amount)`；但**别处一旦直接传字段就会显示 `¥—`**
+    #    （删除确认弹窗 `BillListView.vue:552` 就是这种写法）。
+    #    前端 TS 类型里 `amount` 声明的是 `number` —— 由后端保证这个契约。
+    amount = AmountNumberField(max_digits=10, decimal_places=2)
 
     class Meta:
         model = WealthBillList
@@ -485,8 +494,53 @@ class AssetTrendItemSerializer(serializers.Serializer):
     lend = serializers.FloatField()
 
 
+class NetworthBridgePeriodSerializer(serializers.Serializer):
+    """净值变动归因单期
+
+    显式白名单：少声明一个键，前端就恒显 `--` 且不报错（§109 同族问题）。
+    流量四件（income/expense/adjustment/flow_net）在「盘点没填日期」时是 None ——
+    `null` 不是 0，`allow_null=True` 必须显式写。
+    """
+
+    from_yearmon = serializers.CharField()
+    to_yearmon = serializers.CharField()
+    from_date = serializers.DateField(allow_null=True)
+    to_date = serializers.DateField(allow_null=True)
+    days = serializers.IntegerField(allow_null=True)
+    assets_start = serializers.FloatField()
+    assets_end = serializers.FloatField()
+    assets_change = serializers.FloatField()
+    borrow_start = serializers.FloatField()
+    borrow_end = serializers.FloatField()
+    borrow_change = serializers.FloatField()
+    net_worth_start = serializers.FloatField()
+    net_worth_end = serializers.FloatField()
+    net_worth_change = serializers.FloatField()
+    income = serializers.FloatField(allow_null=True)
+    expense = serializers.FloatField(allow_null=True)
+    adjustment = serializers.FloatField(allow_null=True)
+    flow_net = serializers.FloatField(allow_null=True)
+    bill_count = serializers.IntegerField(allow_null=True)
+    unexplained = serializers.FloatField(allow_null=True)
+    unexplained_pct = serializers.FloatField(allow_null=True)
+    unexplained_side = serializers.CharField(allow_null=True)
+    window_reason = serializers.CharField()
+    level = serializers.CharField()
+
+
+class NetworthBridgeSerializer(serializers.Serializer):
+    """净值变动归因 —— 门槛随结果下发，前端不硬编码"""
+
+    as_of = serializers.CharField(allow_null=True)
+    latest = NetworthBridgePeriodSerializer(allow_null=True)
+    periods = NetworthBridgePeriodSerializer(many=True)
+    summary = serializers.DictField()
+    thresholds = serializers.DictField()
+
+
 class SnapshotListItemSerializer(serializers.Serializer):
     """盘点历史项"""
+
     baid = serializers.IntegerField()
     yearmon = serializers.CharField(allow_null=True)
     btime = serializers.CharField(allow_null=True)

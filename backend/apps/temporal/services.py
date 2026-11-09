@@ -1,18 +1,28 @@
+import calendar
 import csv
 import io
+import uuid
 from collections import defaultdict
 from datetime import datetime, date, timedelta
 
 from django.db import models, transaction
-from django.db.models import Avg, Count, Sum
+from django.db.models import Avg, Count, Max, Min, Sum
 from django.utils import timezone
 
 from .constants import (
     ACTIVITY_TYPE_COLORS,
     ATTRIBUTION_COLORS,
     ATTRIBUTION_ORDER,
+    CONTRIB_EXCLUDED_TASK_NAMES,
+    DAILY_GUARD_LINES,
+    DAILY_GUARD_STATUS_TEXT,
     DEFAULT_FALLBACK_ATTR,
     LEGACY_FOUR_TO_L2,
+    SOURCE_BATCH_EXACT,
+    SOURCE_BATCH_PREFIXES,
+    SOURCE_KIND_HINTS,
+    SOURCE_KIND_LABELS,
+    SOURCE_KIND_VALUES,
     TASK_CATEGORY_MAPPING,
     TASK_TO_L2,
 )
@@ -37,57 +47,36 @@ def resolve_task_meta(task_names: list[str]) -> dict:
 
 
 def resolve_attribution_detail(task_names: list[str]) -> dict:
-    """task_name(L3) → {'attribution': 有效归因, 'source': 来源, 'rule_*': 命中的规则}
+    """task_name(L3) → {'attribution': 有效归因, 'source': 来源}
 
-    优先级：redemption_attr_rule(override) > temporal_task_meta.default_attribution > 兜底 DEFAULT_FALLBACK_ATTR
-    source ∈ {'rule' 赎回期规则覆盖, 'default' TaskMeta 默认, 'fallback' 兜底}
+    优先级：temporal_task_meta.default_attribution > 兜底 DEFAULT_FALLBACK_ATTR
+    source ∈ {'default' 映射表那列的默认值, 'fallback' 兜底}
 
-    ⚠️ `source='rule'` 时**必须再分清命中维度**（`rule_field`）：只有 `task_name` 维度的规则
-    能按任务名「撤销覆盖」；若命中 `activity_type`（L2）规则，该规则同时覆盖同一类型下的
-    **其他**任务名，撤不掉也不该由单行编辑撤。三个 `rule_*` 键在非 rule 来源时恒为 None
-    （键恒定存在，前端可直接读，不必做存在性判断）。
+    🔴 v3.64.16：这里曾是**三层**（redemption_attr_rule > default > fallback）。
+       那条「外挂规则」已整条退役，原因不是重复而是**漏数**：
+       它只是映射表 L1 列的影子副本（改值时顺带写一条 priority=100 的 task_name 规则），
+       却只覆盖被改过的那几个任务名；赎回期页面拿「命中规则」当口径，
+       未覆盖的记录**静默不计** —— 实测 2 天窗口 33.96h 只算了 20h，
+       「成长」1.99h 而真实 12.39h，「谋生」恒为 0，且全程不报错。
+       现在全站只有这一把尺子：映射表那一列。
     """
     if not task_names:
         return {}
-    from apps.redemption.models import RedemptionAttrRule
-    # 匹配逻辑单一真源：与 redemption 侧赎回期覆盖率共用同一函数，避免两套口径漂移
-    # （曾出现 activity_type 规则在时间统计页生效、在赎回期页面被静默跳过）。
-    from apps.redemption.services import match_attribution_rule_obj
-
-    rules = list(RedemptionAttrRule.objects.filter(is_active=True))
     meta_map = {m.task_name: m for m in TaskMeta.objects.filter(task_name__in=task_names)}
-
-    def _plain(base):
-        base.update({'rule_id': None, 'rule_field': None, 'rule_value': None})
-        return base
-
     out = {}
     for tn in task_names:
         m = meta_map.get(tn)
-        if not m:
-            out[tn] = _plain({'attribution': DEFAULT_FALLBACK_ATTR, 'source': 'fallback'})
-            continue
-        # ⚠️ task_type 直接传 tn：外部表的写入约定是 `task_type = task_name`
-        #    （见 serializers 手工新增、import_worklog、migrate_atracker），实测 4383 行 0 例外。
-        rule = match_attribution_rule_obj(
-            task_name=tn, activity_type=m.activity_type, task_type=tn, rules=rules,
-        )
-        if rule:
-            out[tn] = {
-                'attribution': rule.attribution, 'source': 'rule',
-                'rule_id': rule.id, 'rule_field': rule.match_field, 'rule_value': rule.match_value,
-            }
-        elif m.default_attribution:
-            out[tn] = _plain({'attribution': m.default_attribution, 'source': 'default'})
+        if m and m.default_attribution:
+            out[tn] = {'attribution': m.default_attribution, 'source': 'default'}
         else:
-            out[tn] = _plain({'attribution': DEFAULT_FALLBACK_ATTR, 'source': 'fallback'})
+            out[tn] = {'attribution': DEFAULT_FALLBACK_ATTR, 'source': 'fallback'}
     return out
 
 
 def resolve_attribution(task_names: list[str]) -> dict:
     """task_name(L3) → 价值归因（L1：见 constants.ATTRIBUTION_ORDER）
 
-    优先级：redemption_attr_rule(override) > temporal_task_meta.default_attribution > 兜底 DEFAULT_FALLBACK_ATTR
+    优先级：temporal_task_meta.default_attribution > 兜底 DEFAULT_FALLBACK_ATTR
     仅取有效值；需要知道「来源」时用 resolve_attribution_detail。
     """
     return {tn: d['attribution'] for tn, d in resolve_attribution_detail(task_names).items()}
@@ -127,6 +116,38 @@ def build_time_fields(start_dt: datetime, end_dt: datetime | None = None) -> dic
 DUP_OVERLAP_RATIO = 0.8      # 重叠时长 ÷ 较短一方时长 ≥ 此值 ⇒ 判为同一条
 DUP_SEARCH_WINDOW_DAYS = 1   # 在开始时刻前后各搜 1 天（容忍跨天的长记录）
 
+# ── 时段重叠（手工新增/编辑的**提示**口径，v3.63.6）──────────────────────
+# 🔴 与上面的「重复判定」是**两件事**，别合并：
+#   · `find_duplicate_task`：同任务名 + 比值 ≥0.8 ⇒ **删除/跳过**（导入去重）
+#   · `find_overlaps`：任意任务名 + 绝对交集 ⇒ **只提示、不阻断**（下面这份）
+# 本库实测（2026-08~10 共 339 条记录）里有 19 对记录时段相交，其中「牛马工作 07:46-18:00」
+# 内再细分「代码编程」是最常见形态 —— 重叠在本项目里**是合法记录**，
+# 所以这里绝不能拿来做「禁止保存」的闸门，只能是给用户看的提醒。
+OVERLAP_MIN_SECONDS = 60      # 交集 < 1 分钟视为 ATracker 分段的秒级抖动，不提示
+OVERLAP_SEARCH_WINDOW_DAYS = 2  # 候选下界：只跳过 2 天以前的开始时刻（单条记录不会更长）
+
+# ── 重叠的**语义**分类（导入预演用，v3.64.32）────────────────────────────
+# 🔴 「重叠」不是一件事，是四件事：合法细分、跨整点摩擦、同一件事记两遍、真要人判。
+#    本库实测（2026-11-07，5457 条 / 262 对重叠）：
+#      contained 214 对（82%）、edge 36 对、review 7 对、likely_dup 5 对。
+#    把一个「禁止重叠」的闸门装上去，会把那 214 对合法的细分记录一起堵死；
+#    什么都不做，则 12 对真问题永远埋在月度统计里 —— 都错，所以先分类再谈处理。
+CONFLICT_CONTAINED = 'contained'    # 短的完全落在长的里面 ⇒ 合法细分（上班时段里记代码）
+CONFLICT_EDGE = 'edge'              # 只相交 ≤10 分钟 ⇒ 跨整点 / 两端精度差，无害
+CONFLICT_LIKELY_DUP = 'likely_dup'  # 长度接近且几乎完全重合 ⇒ 同一件事记了两遍
+CONFLICT_REVIEW = 'review'          # 其余交叉 ⇒ 摊开给人看
+# 严重度：数字越大越需要人看（预演时一行只报最严重的那条关系）
+CONFLICT_SEVERITY = {
+    CONFLICT_CONTAINED: 0,
+    CONFLICT_EDGE: 1,
+    CONFLICT_REVIEW: 2,
+    CONFLICT_LIKELY_DUP: 3,
+}
+CONFLICT_KEYS = tuple(CONFLICT_SEVERITY)      # 预演汇总的固定键序（前端只查表，不自造）
+EDGE_MAX_SECONDS = 10 * 60                    # 「边缘摩擦」的交集上限
+EDGE_MAX_RATIO = 0.3                          # 且占较短一方不足 30%
+DUP_MIN_LENGTH_RATIO = 0.8                    # 包含关系里，长度比 ≥ 此值才算「疑似同一条」
+
 
 def _to_aware(dt: datetime | None) -> datetime | None:
     """库里读出的 datetime 恒为 aware（`USE_TZ=True`），外部传入的可能是 naive ⇒ 统一。"""
@@ -152,6 +173,17 @@ def _span(start_dt, end_dt, duration_hours) -> tuple[datetime, datetime] | None:
     return start, end
 
 
+def _dedup_key(name: str, start_dt) -> tuple:
+    """**同一个 CSV 内部**判重的键（同任务名 + 同一开始时刻）。
+
+    ⚠️ 与 `find_duplicate_task`（与**库里**比，容错到「时段重叠」）不是一回事：
+       这里可以要求精确，因为两行来自同一次导出、中间没有任何流程改写它们；
+       而库里那条可能被 `import_worklog` 规则 A 补全过开始时刻，精确匹配会失效。
+       预演与落库共用本函数，别各写一份（否则「预演说重复 2 条、实际去重 1 条」）。
+    """
+    return (name, start_dt)
+
+
 def _overlap_ratio(a: tuple, b: tuple) -> float:
     """重叠时长 ÷ **较短一方**时长。
 
@@ -170,6 +202,55 @@ def _overlap_ratio(a: tuple, b: tuple) -> float:
         return 1.0 if a_start <= b_start <= a_end else 0.0
     overlap = (min(a_end, b_end) - max(a_start, b_start)).total_seconds()
     return max(overlap, 0.0) / min(a_secs, b_secs)
+
+
+def classify_overlap(a: tuple, b: tuple) -> str:
+    """两条时段「怎么重叠的」—— 四类之一，供导入预演分拣（不是判重）。
+
+    与 `find_duplicate_task`（同任务名 + 比值 ≥0.8 ⇒ 跳过/更新）的分工：
+    那条回答「这是不是同一条」，本条回答「这两条摆在一起像什么」，**不看任务名**
+    （异名重叠恰恰是最需要人看的那一类）。
+
+    🔴 判据顺序不能换：**先判包含，再看比值**。
+       `_overlap_ratio` 的分母是「较短一方」，所以「A 完全包住 B」的比值恒为 1.0 ——
+       一旦先看比值，本库 214 对合法细分（`牛马工作 09:00-18:00` 里记
+       `代码编程 10:00-11:00`）会全部被判成「疑似重复」，而那正是 82% 的重叠。
+
+    四类的不变量（写测试时按这个钉）：
+    - `contained`：短的完全落在长的里面，且 `短/长 < 0.8`
+    - `likely_dup`：长度接近（`短/长 ≥ 0.8`）**且**重合 ≥ `DUP_OVERLAP_RATIO`
+    - `edge`：非包含，且交集 ≤ 10 分钟、占较短一方 < 30%
+    - `review`：其余一切交叉（含零宽退化）
+    """
+    a_start, a_end = a
+    b_start, b_end = b
+    a_len = (a_end - a_start).total_seconds()
+    b_len = (b_end - b_start).total_seconds()
+    if a_len <= 0 or b_len <= 0:
+        # 零宽（只记了开始时刻）：表达不了「占了哪一段」，交给人和上面那条单条提示，
+        # 不在这里猜 —— 猜成 edge 会把它从清单里折叠掉。
+        return CONFLICT_REVIEW
+
+    overlap = (min(a_end, b_end) - max(a_start, b_start)).total_seconds()
+    if overlap <= 0:
+        return CONFLICT_REVIEW
+
+    short, long_ = (a_len, b_len) if a_len <= b_len else (b_len, a_len)
+    ratio = overlap / short
+    length_ratio = short / long_
+    contained = (
+        (a_start <= b_start and b_end <= a_end)
+        or (b_start <= a_start and a_end <= b_end)
+    )
+
+    if contained:
+        return (CONFLICT_LIKELY_DUP if length_ratio >= DUP_MIN_LENGTH_RATIO
+                else CONFLICT_CONTAINED)
+    if ratio >= DUP_OVERLAP_RATIO:
+        return CONFLICT_LIKELY_DUP
+    if overlap <= EDGE_MAX_SECONDS and ratio < EDGE_MAX_RATIO:
+        return CONFLICT_EDGE
+    return CONFLICT_REVIEW
 
 
 def find_duplicate_task(task_name: str, start_dt, end_dt=None, duration_hours=None):
@@ -204,6 +285,223 @@ def find_duplicate_task(task_name: str, start_dt, end_dt=None, duration_hours=No
         if ratio > best_ratio:
             best, best_ratio = cand, ratio
     return best if best_ratio >= DUP_OVERLAP_RATIO else None
+
+
+def find_overlaps(start_dt, end_dt=None, duration_hours=None,
+                  exclude_id=None, task_name: str | None = None,
+                  limit: int = 5) -> list[dict]:
+    """找与 `[start, end)` 时段相交的已有记录（**不限任务名**），供新增/编辑时提示。
+
+    与 `find_duplicate_task` 的分工见上方 `OVERLAP_MIN_SECONDS` 的注释。
+
+    - 交集必须 ≥ `OVERLAP_MIN_SECONDS`（默认 60s）才算一条，避免把
+      「上一段 10:00 结束、下一段 10:00:03 开始」这种**相接分段**报成重复。
+    - `exclude_id`：编辑时排除自己（否则一条记录永远与自己重叠）。
+    - `task_name`：只用来标 `same_name`，**不参与筛选** —— 异名重叠同样要提示。
+    - 返回值按交集时长倒序，最多 `limit` 条；`same_name` 供前端决定文案
+      （同名重叠 = 极可能重复新增；异名重叠 = 合法并行，需用户自己判断）。
+    - 结束时刻缺失时用 `duration_hours` 推算（与 `_span` 同一规则，单一日历口径）。
+    """
+    span = _span(start_dt, end_dt, duration_hours)
+    if span is None:
+        return []
+    s, e = span
+    # 零宽区间（只有开始时刻、也没有时长）：无法表达"占了哪一段"，不参与提示
+    if e <= s:
+        return []
+
+    lo = s - timedelta(days=OVERLAP_SEARCH_WINDOW_DAYS)
+    qs = TemporalTask.objects.filter(start_time__gte=lo, start_time__lt=e)
+    if exclude_id:
+        qs = qs.exclude(id=exclude_id)
+
+    hits = []
+    for cand in qs:
+        c = _span(cand.start_time, cand.end_time, cand.duration_hours)
+        if c is None:
+            continue
+        overlap = (min(e, c[1]) - max(s, c[0])).total_seconds()
+        if overlap >= OVERLAP_MIN_SECONDS:
+            hits.append({
+                'id': cand.id,
+                'task_name': cand.task_name,
+                'start_time': timezone.localtime(c[0]).strftime('%Y-%m-%d %H:%M'),
+                'end_time': timezone.localtime(c[1]).strftime('%Y-%m-%d %H:%M'),
+                'overlap_minutes': round(overlap / 60),
+                'same_name': bool(task_name) and cand.task_name == task_name,
+                # 四类语义（`classify_overlap` 是唯一实现）——单条录入时前端不用它，
+                # 导入预演用它决定「这条要不要摊开给人看」。
+                'relation': classify_overlap((s, e), (c[0], c[1])),
+            })
+    hits.sort(key=lambda x: (-x['overlap_minutes'], x['start_time']))
+    return hits[:limit]
+
+
+# ── 记录来源（v3.64.33）───────────────────────────────────────────────────
+# 口径全在 `constants.SOURCE_*`；这里只有「怎么读批次号」和「怎么汇总」两件事。
+
+
+def make_batch_id(now=None) -> str:
+    """新导入批次的编号：`import_20261107_1832_ab12`。
+
+    🔴 为什么要带日期：旧格式 `import_3c3fff90846d` 是纯哈希，界面上既读不懂
+       「这是哪天导的」，两个批次也没法按时间排。带 `YYYYmmdd_HHMM` 后，
+       用户在批次清单里一眼能对上「那天我导了手机上的记录」。
+    🔴 前缀仍是 `import_` —— 分类（`SOURCE_BATCH_PREFIXES`）、按批次回滚的命令
+       都按前缀认，换前缀会把它们一起打穿。
+    ⚠️ 尾巴留 4 位随机：同一分钟连导两次也不会撞号（撞号 = 两批合并、事后无法区分）。
+    """
+    stamp = (now or timezone.localtime()).strftime('%Y%m%d_%H%M')
+    return f'import_{stamp}_{uuid.uuid4().hex[:4]}'
+
+
+def classify_source(import_batch: str | None) -> dict:
+    """批次号 → `{kind, label, batch, hint}`（**唯一实现**，纯字符串判断、不查库）。
+
+    调用方：序列化器（每行都要，所以**绝不能**在这里查库）、来源筛选、批次清单。
+    """
+    batch = (import_batch or '').strip()
+    if not batch:
+        kind = 'unlabeled'
+    elif batch in SOURCE_BATCH_EXACT:
+        kind = SOURCE_BATCH_EXACT[batch]
+    else:
+        kind = 'other'
+        for prefix, k in SOURCE_BATCH_PREFIXES:
+            if batch.startswith(prefix):
+                kind = k
+                break
+    return {
+        'kind': kind,
+        'label': SOURCE_KIND_LABELS.get(kind, SOURCE_KIND_LABELS['other']),
+        'batch': batch or None,
+        'hint': SOURCE_KIND_HINTS.get(kind, ''),
+    }
+
+
+def batches_of_kind(kind: str) -> list[str | None]:
+    """该来源名下出现过的批次号（含 None）。
+
+    来源筛选时用它把「kind」翻成「一批 import_batch 值」——
+    `TemporalTask` 上没有 kind 列（外部表加不了列），分类只能事后做。
+    """
+    raw = (TemporalTask.objects.order_by()
+           .values_list('import_batch', flat=True).distinct())
+    return [b for b in raw if classify_source(b)['kind'] == kind]
+
+
+def list_record_sources() -> dict:
+    """全库按来源聚合：批次明细 + 按 kind 汇总（供「来源可见」弹窗）。
+
+    🔴 `.order_by()` 必须清序：模型 Meta 是 `ordering = ['-start_time']`，
+       不清序 Django 会把 start_time 注入 GROUP BY，一个批次会被拆成许多行
+       —— 本项目反复踩过的坑，且**不报错**，只是数字看起来变小。
+    """
+    rows = (TemporalTask.objects.order_by()
+            .values('import_batch')
+            .annotate(
+                n=Count('id'),
+                name_kinds=Count('task_name', distinct=True),
+                first_start=Min('start_time'),
+                last_start=Max('start_time'),
+                last_touch=Max('updated_at'),
+            ))
+
+    def _fmt(dt):
+        return timezone.localtime(dt).strftime('%Y-%m-%d %H:%M') if dt else None
+
+    items = []
+    by_kind = {}
+    total = 0
+    for r in rows:
+        info = classify_source(r['import_batch'])
+        n = r['n']
+        total += n
+        items.append({
+            'batch': info['batch'],
+            'kind': info['kind'],
+            'label': info['label'],
+            'count': n,
+            'name_kinds': r['name_kinds'],
+            'first_start': _fmt(r['first_start']),
+            'last_start': _fmt(r['last_start']),
+            'last_touch': _fmt(r['last_touch']),
+        })
+        agg = by_kind.setdefault(info['kind'], {
+            'kind': info['kind'], 'label': info['label'], 'hint': info['hint'],
+            'count': 0, 'batches': 0,
+        })
+        agg['count'] += n
+        agg['batches'] += 1
+
+    # 批次明细按条数倒序（未标注同样参与排序，不特殊照顾 —— 它的条数本身就是信息）
+    items.sort(key=lambda x: (-x['count'], x['label']))
+
+    # 汇总按枚举固定顺序下发：同一页面每次打开顺序一致，不随数据量跳动
+    kinds = [by_kind[k] for k in SOURCE_KIND_VALUES if k in by_kind]
+
+    return {
+        'total_records': total,
+        'total_batches': len(items),
+        'items': items,
+        'kinds': kinds,
+        'unlabeled_count': by_kind.get('unlabeled', {}).get('count', 0),
+    }
+
+
+def label_unlabeled_source(target: str = 'manual', *, ids=None, dry_run: bool = True) -> dict:
+    """把「没有来源标记」的历史记录补上来源（**数据修复**，不是分类）。
+
+    只动 `import_batch` 为空（NULL 或空串）的行；**已有任何来源的一律不碰**
+    —— 修历史不该顺手改写已知来源。
+
+    🔴 为什么不能按时间/任务名自动猜：这些行的写入路径当年没留任何痕迹
+       （`updated_at` 被后续改写刷过、`task_description` 也可能是被 `import_worklog`
+       规则 A 回填的），从库里推不出来源。猜出来的来源就是伪造数据。
+       所以这里只接受**已核实过的结论**（`target` 由调用方给），并把将改动的
+       每一行摊开回报，让人能逐行否决（用 `ids` 收窄）。
+
+    `dry_run=True`（默认）只回报、不写库。返回 `{target, label, total, updated, dry_run, rows}`。
+    """
+    if target not in SOURCE_KIND_VALUES:
+        raise ValueError(f'未知来源 kind: {target!r}')
+    if target in ('unlabeled', 'other'):
+        raise ValueError(f'{target!r} 不是可写入的来源，别拿它打补丁')
+
+    qs = TemporalTask.objects.filter(
+        models.Q(import_batch__isnull=True) | models.Q(import_batch='')
+    )
+    if ids is not None:
+        qs = qs.filter(id__in=list(ids))
+
+    rows = [
+        {
+            'id': r['id'],
+            'start': timezone.localtime(r['start_time']).strftime('%Y-%m-%d %H:%M'),
+            'task_name': r['task_name'],
+            # 有描述的行要人看一眼：`import_worklog` 规则 A 会回填描述，
+            # 光凭描述分不清「这段是敲进去的」还是「被脚本改写过的」
+            'has_description': bool((r['task_description'] or '').strip()),
+        }
+        for r in qs.order_by('start_time').values(
+            'id', 'start_time', 'task_name', 'task_description')
+    ]
+
+    updated = 0
+    if not dry_run and rows:
+        # ⚠️ 用 `update()` 而不是逐条 `save()`：`updated_at` 是 auto_now，只在 `save()` 时刷。
+        # 这里改的是**来源标签**、不是记录内容，不该把「最后改动」一起抹成今天
+        # —— 那是这批记录唯一还能说明「什么时候被编辑过」的痕迹。
+        updated = qs.update(import_batch=target)
+
+    return {
+        'target': target,
+        'label': SOURCE_KIND_LABELS.get(target, target),
+        'total': len(rows),
+        'updated': updated,
+        'dry_run': dry_run,
+        'rows': rows,
+    }
 
 
 def _ensure_task_meta(task_names: list[str]) -> int:
@@ -249,9 +547,16 @@ class CSVImportService:
             return datetime(*map(int, m.groups()))
         return None
 
-    @transaction.atomic
-    def import_from_csv(self, file, batch_id: str) -> dict:
-        # ── 读取文件内容 ──
+    # ── 唯一解析实现（预演与落库共用，🔴 别各写一份）────────────────────
+    def _read_rows(self, file) -> tuple[list[dict], dict, str]:
+        """把上传的 CSV 解成标准行列表；第三个返回值是给人看的错因（`''` = 没出错）。
+
+        🔴 **预演与落库必须共用这一份**：预演按 `row_no` 告诉用户「第 7 行不要」，
+           落库若用另一份解析、哪怕只差一行，就会**跳错记录** ——
+           表现是「该跳的没跳、该留的被吞」，两边都不报错。
+        🔴 `row_no` 是 **CSV 物理行号（表头占第 1 行）**，不是 rows 的下标：
+           解析失败的行会占掉一个行号，用下标当行号就会整体错位。
+        """
         raw = file.read()
         print(f'[CSV 导入] 收到文件: {file.name!r}, 大小: {len(raw)} 字节')
 
@@ -266,9 +571,7 @@ class CSVImportService:
             except (UnicodeDecodeError, LookupError):
                 continue
         if content is None:
-            return {'error': '无法解码文件，请确认编码为 UTF-8 或 GBK', 'inserted': 0, 'updated': 0, 'skipped': 0}
-
-        print(f'[CSV 导入] 文件前 500 字符:\n{content[:500]}')
+            return [], {}, '无法解码文件，请确认编码为 UTF-8 或 GBK'
 
         # ── 解析 CSV ──
         reader = csv.DictReader(io.StringIO(content))
@@ -277,7 +580,7 @@ class CSVImportService:
         missing = [c for c in self.REQUIRED_COLUMNS if c not in reader.fieldnames]
         if missing:
             print(f'[CSV 导入] 缺少必要列: {missing}')
-            return {'error': f'缺少必要列：{", ".join(missing)}', 'inserted': 0, 'updated': 0, 'skipped': 0}
+            return [], {}, f'缺少必要列：{", ".join(missing)}'
 
         rows = []
         parse_errors = {'no_name': 0, 'no_time': 0, 'bad_duration': 0, 'bad_date': 0}
@@ -311,6 +614,7 @@ class CSVImportService:
                 continue
 
             rows.append({
+                'row_no': i,
                 'name': name,
                 'start_dt': start_dt,
                 'date': start_dt.date(),
@@ -322,8 +626,135 @@ class CSVImportService:
             })
 
         print(f'[CSV 导入] 解析结果: 有效 {len(rows)} 行, 跳过详情: {parse_errors}')
-        if rows:
-            print(f'[CSV 导入] 首行样例: {rows[0]}')
+        return rows, parse_errors, ''
+
+    def preview_from_csv(self, file) -> dict:
+        """只读预演：解析 + 与库对账，**一个字都不写库**（不建 TaskMeta、不刷周缓存）。
+
+        回答一个问题：**这份 CSV 落进去，会和库里已有什么东西撞上？**
+        两个维度正交，别混：
+
+        - **出路**（`already_exists`）：库里已有同一条 ⇒ 落库时跳过或更新。这是
+          `find_duplicate_task` 的事（同任务名 + 比值 ≥0.8），预演只数不判。
+        - **关系**（`contained/edge/review/likely_dup`）：与库里**其它**记录的时段
+          关系（不限任务名），由 `classify_overlap` 分四类。
+
+        一条 CSV 行只归一类，所以 `total = already_exists + clean + Σ四类`。
+        只把**需要人看**的行放进 `rows`（clean 只有计数）——
+        100 行里 96 行干净，不该占满屏幕。
+        """
+        from collections import Counter
+
+        rows, parse_errors, error = self._read_rows(file)
+        if error:
+            return {'error': error}
+
+        # CSV 内部重复（同一次导出里同任务名 + 同开始时刻）—— 与落库同一个键
+        seen = Counter(_dedup_key(r['name'], r['start_dt']) for r in rows)
+        inner_dup = sum(n - 1 for n in seen.values() if n > 1)
+
+        verdict_counts = {k: 0 for k in CONFLICT_KEYS}
+        already_exists = 0
+        detail_rows = []
+        seen_once = set()
+        for r in rows:
+            key = _dedup_key(r['name'], r['start_dt'])
+            if seen_once.__contains__(key):
+                continue          # CSV 内重复行：落库时会被丢弃，不让它二次占位
+            seen_once.add(key)
+
+            start_aware = timezone.make_aware(r['start_dt'])
+            end_dt = self._parse_datetime(r['end_time_str'])
+            end_aware = timezone.make_aware(end_dt) if end_dt else None
+            duration = float(r['duration'])
+
+            if find_duplicate_task(r['name'], start_aware, end_aware, duration):
+                already_exists += 1
+                continue
+
+            conflicts = find_overlaps(
+                start_aware, end_aware, duration, task_name=r['name'],
+            )
+            if not conflicts:
+                continue
+            verdict = max(
+                (c.get('relation') or CONFLICT_REVIEW for c in conflicts),
+                key=lambda k: CONFLICT_SEVERITY.get(k, 0),
+            )
+            verdict_counts[verdict] += 1
+            if verdict not in (CONFLICT_REVIEW, CONFLICT_LIKELY_DUP):
+                # `contained` / `edge` 只计数、不进清单：本库 214 对包含关系是常态，
+                # 列出来就是噪音，而**「有没有列出来」和「要不要人看」必须是同一件事** ——
+                # 否则前端写着「下面 3 行需要你判断」，表格里却混着 3 行合法的细分。
+                continue
+            detail_rows.append({
+                'row_no': r['row_no'],
+                'task_name': r['name'],
+                'start_time': timezone.localtime(start_aware).strftime('%Y-%m-%d %H:%M'),
+                'end_time': (timezone.localtime(end_aware).strftime('%H:%M')
+                             if end_aware else ''),
+                'hours': round(duration, 2),
+                'verdict': verdict,
+                'conflict_total': len(conflicts),
+                # 只带最严重的两条：清单是让人「认出来」，不是全文比对
+                'conflicts': [
+                    {k: c[k] for k in ('id', 'task_name', 'start_time', 'end_time',
+                                       'overlap_minutes', 'relation')}
+                    for c in sorted(
+                        conflicts,
+                        key=lambda c: -CONFLICT_SEVERITY.get(c.get('relation'), 0),
+                    )[:2]
+                ],
+            })
+
+        counted = already_exists + sum(verdict_counts.values())
+        return {
+            'total_parsed': len(rows),
+            'parse_errors': parse_errors,
+            'inner_duplicate': inner_dup,
+            'summary': {
+                'total': len(rows),
+                'already_exists': already_exists,
+                'clean': len(rows) - inner_dup - counted,
+                'contained': verdict_counts[CONFLICT_CONTAINED],
+                'edge': verdict_counts[CONFLICT_EDGE],
+                'review': verdict_counts[CONFLICT_REVIEW],
+                'likely_dup': verdict_counts[CONFLICT_LIKELY_DUP],
+                'needs_review': (verdict_counts[CONFLICT_REVIEW]
+                                 + verdict_counts[CONFLICT_LIKELY_DUP]),
+            },
+            'rows': detail_rows,
+        }
+
+    @transaction.atomic
+    def import_from_csv(self, file, batch_id: str, skip_rows=None) -> dict:
+        """落库。`skip_rows` = 预演里被勾掉的 CSV 行号集合（物理行号，同 `row_no`）。
+
+        🔴 行号对不上就**报错不写库**，不静默忽略：`skip_rows` 传成 0-based、
+           或文件被换过，否则会「跳了不该跳的行」而界面显示成功。
+        """
+        rows, parse_errors, error = self._read_rows(file)
+        if error:
+            return {'error': error, 'inserted': 0, 'updated': 0, 'skipped': 0}
+
+        parsed_total = len(rows)      # 解析成功总数（在扣掉用户勾掉的那些**之前**）
+        skipped_by_user = 0
+        if skip_rows:
+            try:
+                skip = {int(n) for n in skip_rows}
+            except (TypeError, ValueError):
+                return {'error': 'skip_rows 必须是行号列表', 'inserted': 0,
+                        'updated': 0, 'skipped': 0}
+            unknown = sorted(skip - {r['row_no'] for r in rows})
+            if unknown:
+                return {
+                    'error': (f'第 {",".join(map(str, unknown))} 行不在本次解析结果里，'
+                              '可能文件换了 —— 请重新检查一次再导入'),
+                    'inserted': 0, 'updated': 0, 'skipped': 0,
+                }
+            kept = [r for r in rows if r['row_no'] not in skip]
+            skipped_by_user = len(rows) - len(kept)
+            rows = kept
 
         # ── v3.58.5：按 ATracker 原始记录逐条导入（不再按「任务名称 + 日期」合并）──
         # 一条 CSV 记录 → 一行 DB：start_time = 该条开始时刻、end_time = 该条结束时刻、
@@ -333,7 +764,7 @@ class CSVImportService:
         deduped: dict[tuple[str, datetime], dict] = {}
         duplicated = 0
         for r in rows:
-            key = (r['name'], r['start_dt'])
+            key = _dedup_key(r['name'], r['start_dt'])
             if key in deduped:
                 duplicated += 1
                 continue
@@ -346,7 +777,10 @@ class CSVImportService:
         # 分类改走独立 managed 表 temporal_task_meta（由 migrate_temporal_categories 或下方自动建）。
         # protected = 命中但「起止被工作日志校准过」⇒ 保留校准值、不用源数据覆盖的条数
         stats = {'inserted': 0, 'updated': 0, 'skipped': 0, 'protected': 0,
-                 'deduplicated': duplicated, 'total_parsed': len(rows)}
+                 'deduplicated': duplicated, 'total_parsed': parsed_total,
+                 # 用户在预演里自己勾掉的，与「库已有故跳过」分开报：
+                 # 合成一个数就说不清「这 5 条是我不要的，还是系统吞的」。
+                 'skipped_by_user': skipped_by_user}
         for (name, start_dt), r in deduped.items():
             duration = float(r['duration'])
             start_aware = timezone.make_aware(start_dt)
@@ -694,6 +1128,61 @@ class TemporalStatsService:
         return out
 
     @staticmethod
+    def get_frequent_names(months: int = 3, limit: int = 10) -> dict:
+        """最近 N 个月最频繁的任务名（手工新增记录的快捷候选）
+
+        口径**只在这一处**（前端不判、不复刻）：
+
+        - 窗口：`[今天往前 N 个自然月, 现在)` 半开区间。
+          用自然月而不是「N×30 天」——「最近 3 个月」按日历月理解更贴近直觉。
+          月末对齐照 `apps/health/views.py` 的既有写法（1/31 往前 1 月 → 2/28 或 2/29）。
+        - 排序：记录次数 ↓ → 累计时长 ↓ → 最近使用 ↓ → 任务名 ↑（末位兜底保证稳定）。
+          **「频繁」按次数算**；时长只用来给同频次的任务分先后（做了 5 次 4 小时
+          比做了 5 次 5 分钟更该排在前面）。
+        - 排除空任务名：历史数据里可能有空串，它不是可选的任务。
+
+        🔴 外部表 `Meta.ordering = ['-start_time']`：末尾必须给**显式排序** ——
+           它同时覆盖默认排序，`start_time` 不会进聚合的 GROUP BY。
+           若换成 `values_list().distinct()` 那类写法、又不显式清序，同一任务名会被
+           按开始时刻拆成多行、`record_count` 恒为 1，排行变成「哪个时刻最忙」而不是
+           「哪个任务最常做」，而且**不报错**（`test_meta_ledger` 里踩过同款）。
+        """
+        now = timezone.localtime()
+        y, m = now.year, now.month - months
+        while m <= 0:
+            m += 12
+            y -= 1
+        window_start = now.replace(
+            year=y, month=m, day=min(now.day, calendar.monthrange(y, m)[1]),
+        )
+
+        rows = list(
+            TemporalTask.objects
+            .filter(start_time__gte=window_start, start_time__lt=now)
+            .exclude(task_name='')
+            .values('task_name')
+            .annotate(
+                record_count=Count('id'),
+                total_hours=Sum('duration_hours'),
+                last_used=Max('start_time'),
+            )
+            .order_by('-record_count', '-total_hours', '-last_used', 'task_name')[:limit]
+        )
+        return {
+            'months': months,
+            'limit': limit,
+            'window_start': window_start.date().isoformat(),
+            'items': [
+                {
+                    'task_name': r['task_name'],
+                    'record_count': int(r['record_count']),
+                    'total_hours': round(float(r['total_hours'] or 0), 2),
+                }
+                for r in rows
+            ],
+        }
+
+    @staticmethod
     def get_distribution(year: int | None = None) -> dict:
         qs = TemporalTask.objects.all()
         if year:
@@ -829,3 +1318,185 @@ class DailyLogAutoService:
             years=str(today.year),
         )
         return log
+
+
+# ══════════════════════════════════════════════════════════════
+# 日常护栏：「今天的三条线」（v3.64.12）
+# ══════════════════════════════════════════════════════════════
+
+def contrib_excluded_names() -> set[str]:
+    """贡献图要排除的任务名 = 常量名单 ∪ 角色为睡眠类的任务名。
+
+    🔴 取**并集**而不是替换：库里的角色是异步补上的（要人跑 migrate、要人在编辑器里点），
+       只认库会让「还没标」的那几天贡献图口径突然变宽（睡眠重新变成主导归因）。
+       并集保证：老名字永远排除，新标的睡眠分类也能跟着进。
+    """
+    sleep_names = set(
+        TaskMeta.objects.filter(daily_role__in=('sleep_night', 'nap'))
+        .values_list('task_name', flat=True),
+    )
+    return set(CONTRIB_EXCLUDED_TASK_NAMES) | sleep_names
+
+
+def _local_day_bounds(target_date: date):
+    """本地日 [00:00, 次日 00:00) 半开区间（USE_TZ 下不碰 `__date`）。"""
+    tz = timezone.get_current_timezone()
+    start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=tz)
+    return start, start + timedelta(days=1)
+
+
+def _attribution_hours_and_count(target_date: date, attribution_value: str):
+    """按 L1 归因取当日时长：`(小时数, 记录条数)`；当天没有命中归因的记录 ⇒ `(None, 0)`。
+
+    🔴 用 `resolve_attribution`，**跟贡献图 / 时间统计页同一把尺子**
+       （规则覆盖 > TaskMeta 默认 > 兜底）。若另写一套「直接读 default_attribution」，
+       图上说流失 4.8h、护栏说 2.3h —— 同一屏两个数，且两边都「看着合理」。
+    🔴 归因是**按任务名**解析的，所以取全天任务名一次解析，不逐条查库。
+    """
+    day_start, day_end = _local_day_bounds(target_date)
+    rows = list(TemporalTask.objects.filter(
+        start_time__gte=day_start, start_time__lt=day_end,
+    ).values_list('task_name', 'duration_hours'))
+    if not rows:
+        return None, 0
+
+    attr = resolve_attribution(sorted({tn for tn, _ in rows}))
+    total, count = 0.0, 0
+    for task_name, hours in rows:
+        if not hours or attr.get(task_name) != attribution_value:
+            continue
+        total += float(hours)
+        count += 1
+    return (round(total, 2) if count else None), count
+
+
+def _guard_value_and_count(spec: dict, names: list[str], target_date: date):
+    """返回 `(小时数, 记录条数)`。没记录 ⇒ `(None, 0)` —— 与「0 小时」严格区分。"""
+    # 归因口径的线（流失）不看角色：没有角色可漏标，也就不存在「没标」这一态
+    if spec.get('role') is None:
+        return _attribution_hours_and_count(target_date, spec['attribution_value'])
+
+    if not names:
+        return None, 0
+
+    if spec['day_bucket'] == 'wakeup_day':
+        # 夜间睡眠：按**醒来那一刻**归属。23:40 睡 8h ⇒ 归到次日。
+        # 🔴 这是全链路最容易做错的一处：若按 start_time 的日期归属，
+        #    上午打开页面会永远显示「今天还没有睡眠记录」—— 且不报错。
+        # 取数窗口往前放宽 36h：跨零点前入睡的那一觉也要捞到。
+        day_start, _ = _local_day_bounds(target_date)
+        qs = TemporalTask.objects.filter(
+            task_name__in=names,
+            start_time__gte=day_start - timedelta(hours=36),
+            start_time__lt=day_start + timedelta(hours=36),
+        ).values_list('start_time', 'duration_hours')
+        total, count = 0.0, 0
+        tz = timezone.get_current_timezone()
+        for start_time, hours in qs:
+            if not start_time or not hours:
+                continue
+            wake = start_time + timedelta(hours=float(hours))
+            # 外部表理论上都带时区；万一读出 naive（历史导入数据），按本地时区补上，
+            # 不能让 `astimezone` 去猜系统时区 —— 那会得到差 8 小时的「合法结果」。
+            if timezone.is_naive(wake):
+                wake = timezone.make_aware(wake, tz)
+            if wake.astimezone(tz).date() != target_date:
+                continue
+            total += float(hours)
+            count += 1
+        return (round(total, 2) if count else None), count
+
+    # 午睡：按开始时刻归属（不跨日，用当日半开区间就够）
+    day_start, day_end = _local_day_bounds(target_date)
+    agg = TemporalTask.objects.filter(
+        task_name__in=names,
+        start_time__gte=day_start,
+        start_time__lt=day_end,
+    ).aggregate(total=Sum('duration_hours'), n=Count('id'))
+    count = int(agg['n'] or 0)
+    if not count:
+        return None, 0
+    return round(float(agg['total'] or 0), 2), count
+
+
+def _line_configured(spec: dict, names: list[str]) -> bool:
+    """这条线「有没有落地的依据」—— 决定空值那天说「没记录」还是说「还没配」。
+
+    · 角色线：有没有任务名标了这个角色；
+    · 归因线（流失）：有没有任务名的**默认归因**是它。
+      ⚠️ 没有把赎回期覆盖规则算进来：它只影响个别任务的临时口径，
+         若靠规则才凑出走失、且当天又恰好没记录，这里会误说「还没有任务名归到流失」。
+         代价仅是文案，不影响数值判定（有记录时根本走不到这个分支）。
+    """
+    if spec.get('role') is None:
+        return TaskMeta.objects.filter(default_attribution=spec['attribution_value']).exists()
+    return bool(names)
+
+
+def compute_daily_guards(target_date: date | None = None) -> dict:
+    """「今天的三条线」：每条线给实测值 / 阈值 / 状态（睡眠 / 午睡 / 流失）。
+
+    🔴 三档状态，没有兜底桶：
+       · `ok`         在线的内侧
+       · `off`        越线（下限是「没睡够」，上限是「超了」）
+       · `unrecorded` 没有任何记录 —— **绝不当成 `ok`**（`unrecorded ≠ 达标`）
+    🔴 文案与阈值全由后端给，前端只按 `status` 上色。
+    """
+    target_date = target_date or timezone.localdate()
+
+    roles = defaultdict(list)
+    for role, name in TaskMeta.objects.exclude(daily_role='').values_list('daily_role', 'task_name'):
+        roles[role].append(name)
+
+    lines = []
+    for spec in DAILY_GUARD_LINES:
+        names = roles.get(spec['role'], []) if spec.get('role') else []
+        configured = _line_configured(spec, names)
+        value, count = _guard_value_and_count(spec, names, target_date)
+        threshold = float(spec['threshold_hours'])
+        at_least = spec['direction'] == 'at_least'
+
+        if value is None:
+            status = 'unrecorded'
+            gap = None
+        else:
+            status = 'ok' if ((value >= threshold) if at_least else (value <= threshold)) else 'off'
+            gap = abs(round(value - threshold, 1))
+
+        if status == 'unrecorded':
+            gap_text = ''
+            # 🔴 两种「没有」要分开说：还没配（配置问题）≠ 配了但今天没记（事实）。
+            #    混成一句话，用户会去翻记录找「为什么没记」，其实只是没配。
+            detail_text = spec['unrecorded_text'] if configured else spec['unconfigured_text']
+        elif status == 'ok':
+            gap_text = ''
+            detail_text = f'线 {threshold:g} 小时'
+        else:
+            gap_text = f'{"差" if at_least else "超"} {gap:g} 小时'
+            detail_text = gap_text
+
+        lines.append({
+            'key': spec['key'],
+            'label': spec['label'],
+            'direction': spec['direction'],
+            'configured': configured,
+            'threshold_hours': threshold,
+            'threshold_text': f'{"≥" if at_least else "≤"} {threshold:g} 小时',
+            'value_hours': value,
+            'value_text': f'{value:g} 小时' if value is not None else '—',
+            'status': status,
+            'status_text': DAILY_GUARD_STATUS_TEXT[
+                (spec['direction'], status) if status != 'unrecorded' else ('any', 'unrecorded')
+            ],
+            'gap_text': gap_text,
+            'detail_text': detail_text,
+            'record_count': count,
+        })
+
+    return {
+        'date': target_date.isoformat(),
+        'lines': lines,
+        # 一眼看出「三条线是否都已落地」。按**算出来的** configured 汇总，
+        # 不再用 `roles.get(...)` 另算一遍 —— 否则加了归因线之后这里会少算一条。
+        'configured_lines': sum(1 for line in lines if line['configured']),
+    }

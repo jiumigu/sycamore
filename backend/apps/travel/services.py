@@ -345,6 +345,22 @@ def heat_level(count: int) -> str:
     return '偶尔'
 
 
+# 气泡直径（px）。上限被地图卡的高度（500px、几十座城挤在东部）硬约束：
+# 旧的 10~50 线性放大里 `总花费/25 + 次数×5`，一趟 1125 元以上的行程就顶到 50，
+# 于是去过的城几乎一律 50px——又大又分不出谁大。这里改成开方压缩 + 更窄的区间。
+BUBBLE_SIZE_MIN = 8
+BUBBLE_SIZE_MAX = 20
+BUBBLE_COST_UNIT = 1000.0  # 花费按 1000 元折算一个单位，再开方
+
+
+def bubble_size(total_cost: float, count: int) -> int:
+    """气泡直径：主看访问次数，花费做次级加权（唯一实现，前端不再算第二套）"""
+    count_part = max(count, 1) ** 0.5
+    cost_part = (total_cost / BUBBLE_COST_UNIT) ** 0.5 if total_cost and total_cost > 0 else 0.0
+    size = round(BUBBLE_SIZE_MIN + count_part * 3.2 + cost_part * 2.6)
+    return max(BUBBLE_SIZE_MIN, min(BUBBLE_SIZE_MAX, int(size)))
+
+
 # ── 地图数据聚合 ──────────────────────────────────────────────
 
 
@@ -429,10 +445,8 @@ class MapDataService:
         bubbles = []
         for city, entry in city_agg.items():
             avg_rating = round(sum(entry['ratings']) / len(entry['ratings']), 1) if entry['ratings'] else None
-            # 气泡大小：根据花费 + 访问次数综合
-            cost_factor = entry['total_cost'] / 500 if entry['total_cost'] and entry['total_cost'] > 0 else 0
-            count_factor = entry['count'] * 5
-            size = max(10, min(50, int(cost_factor * 20 + count_factor)))
+            # 气泡大小：根据花费 + 访问次数综合（刻度唯一实现见 bubble_size）
+            size = bubble_size(entry['total_cost'], entry['count'])
             bubbles.append({
                 'city': entry['city'],
                 'province': entry['province'],

@@ -12,6 +12,8 @@ from rest_framework import serializers
 # ⚠️ 复用自我运转的周期实现，**不另写一份** —— 期标识全项目只有一把尺子。
 #    （反向依赖是安全的：`selfrun.readers` 只在函数内部 import 本 app 的模型。）
 from apps.selfrun.readers import period_range
+# 🔴 media 结构校验唯一实现（works / showroom 共用）
+from apps.core.media import validate_media_items
 
 from .constants import (
     CAPTURE_SOURCE_CHOICES,
@@ -71,7 +73,7 @@ class WorkSerializer(serializers.ModelSerializer):
         model = Work
         fields = (
             'id', 'name', 'summary', 'kind', 'kind_display',
-            'status', 'status_display', 'channel', 'note',
+            'status', 'status_display', 'channel', 'note', 'media',
             'created_at', 'updated_at', 'origin', 'period_key', 'in_current_period',
         )
 
@@ -107,15 +109,22 @@ class WorkSerializer(serializers.ModelSerializer):
 class WorkInputSerializer(serializers.ModelSerializer):
     """作品的新建 / 编辑（**不含来源** —— 来源由「合成」建立）。"""
 
+    media = serializers.ListField(
+        child=serializers.DictField(), required=False, default=list,
+    )
+
     class Meta:
         model = Work
-        fields = ('name', 'summary', 'kind', 'status', 'channel', 'note')
+        fields = ('name', 'summary', 'kind', 'status', 'channel', 'note', 'media')
 
     def validate_name(self, value):
         v = (value or '').strip()
         if not v:
             raise serializers.ValidationError('给它起个名字')
         return v[:120]
+
+    def validate_media(self, value):
+        return validate_media_items(value)
 
 
 class CaptureInputSerializer(serializers.Serializer):

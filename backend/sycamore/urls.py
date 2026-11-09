@@ -26,4 +26,5 @@ urlpatterns = [
     path('api/treasure/', include('apps.treasure.urls')),
     path('api/selfrun/', include('apps.selfrun.urls')),
     path('api/works/', include('apps.works.urls')),
+    path('api/showroom/', include('apps.showroom.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

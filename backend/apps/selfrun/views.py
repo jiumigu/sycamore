@@ -10,6 +10,7 @@
 🔴 列表端点一律 `pagination_class = None` 返回**裸数组**
 （DRF 全局分页会把它包成 `{count, results}` ⇒ 前端按数组取用即「假 0」）。
 """
+from django.db.utils import OperationalError, ProgrammingError
 from django.shortcuts import get_object_or_404
 from rest_framework import status as http
 from rest_framework.pagination import PageNumberPagination
@@ -19,7 +20,8 @@ from rest_framework.views import APIView
 
 from . import services
 from .constants import (
-    DIRECTION_CHOICES, PERIOD_STATUS_CHOICES, PERIOD_TYPE_CHOICES,
+    DIRECTION_CHOICES, MONTHLY_QUESTION_COUNT, PERIOD_STATUS_CHOICES,
+    PERIOD_STATUS_LABEL, PERIOD_TYPE_CHOICES, PERIOD_TYPE_PREFIX,
     PERIOD_VERDICT_BANDS, PLAN_SCOPE_CHOICES, SOURCE_KIND_CHOICES,
     VERDICT_COLORS, PERIOD_STATUS_COLORS, AGG_CHOICES,
     MODULE_VALUE_WHITELIST, READER_KEYS, READER_WHERE_KEYS, STALE_RULES,
@@ -63,21 +65,83 @@ def _written(**kw):
     return {k: v for k, v in kw.items() if v}
 
 
-def _status_explain(stage, readings, period_type, answer_sheet=None):
+def _status_explain(stage, readings, period_type, answer_sheet=None, closed_status=None):
     """判定的**分子分母念出来**（Δ：不许只给一个状态词）。
 
     🔴 `unknown` / `skipped` **不进分母** —— 把它们算进去会得出「你这周不行」，
        而真相是「系统不知道」或「你说了这周不算」。
+
+    🔴 月度**只有一把尺子**（v3.64.6）：三问。三问一个没答 ⇒ `value=''` +
+       `basis='pending'` + 「待答三问」，**绝不拿 KPI 达标率顶上去**。
+       旧行为下同一期会先后出现两个档位（归档前 4/4=100% ⇒ 我超棒，
+       答完三问 2/3=67% ⇒ 合格），用户看到的就是「归档把我降档了」。
+
+    🔴 已归档的期用**落库的 `status`**（`closed_status`），不用三问重算 ——
+       归档即定格；归档后补答三问只留记录、不改档（要改走重开）。
     """
     counted = [r for r in readings if r['verdict'] != 'unknown' and not r.get('skipped')]
     ok = sum(1 for r in counted if r['verdict'] in ('goal', 'floor'))
+
+    # ── 判定依据：周恒为 KPI；月只看三问（没答 = 未判定）──
+    basis = 'kpi'
+    yes = 0
+    answered = 0
     live_status = ''
     if period_type == 'monthly':
-        live_status = services.compute_monthly_status(answer_sheet)
-    if not live_status:
+        live_status = closed_status or services.compute_monthly_status(answer_sheet)
+        yes, answered = services.monthly_answer_stats(answer_sheet)
+        if live_status:
+            basis = 'questions'
+        else:
+            basis = 'pending'
+    else:
         live_status = services.compute_period_status(stage, readings)
+
+    prefix = PERIOD_TYPE_PREFIX.get(period_type, '')
+    # 整句在这里拼，不留给前端 —— 「几比几」「哪套尺子」只有后端知道
+    if basis == 'questions':
+        ratio = round(yes / MONTHLY_QUESTION_COUNT * 100)
+        if period_type == 'monthly' and closed_status:
+            # 已归档：说明是定格值，别让人以为还能靠改三问翻盘
+            basis_text = (
+                f'本月判定看三问：答「是」{yes}/{MONTHLY_QUESTION_COUNT}（{ratio}%）'
+                f'⇒ {prefix}{PERIOD_STATUS_LABEL.get(live_status, live_status)}'
+                '（归档时定格，补答三问不改档；要改请重开这一期）'
+            )
+        else:
+            basis_text = (
+                f'本月判定看三问：答「是」{yes}/{MONTHLY_QUESTION_COUNT}'
+                f'（{ratio}%）⇒ {prefix}{PERIOD_STATUS_LABEL.get(live_status, live_status)}'
+            )
+    elif basis == 'pending':
+        basis_text = (
+            f'本月判定只看三问，现在还没答（0/{MONTHLY_QUESTION_COUNT}）—— 这一期还没有结论；'
+            f'下面那条 {ok}/{len(counted)} 是 KPI 参考，不参与判定。'
+        )
+    else:
+        basis_text = (
+            '判定线：' + ' · '.join(
+                f'≥{round(lower * 100)}% {PERIOD_TYPE_PREFIX.get(period_type, "")}'
+                f'{PERIOD_STATUS_LABEL.get(k, k)}'
+                for k, lower in sorted(PERIOD_VERDICT_BANDS, key=lambda x: -x[1])
+            )
+        )
+
+    # 档位本名（含「本周 / 本月」前缀）也在这里拼：月度未判定时前端要显示
+    # 「待答三问」—— 让前端自己写这个词，等于中文表又多一份。
+    if live_status:
+        label_text = f'{prefix}{PERIOD_STATUS_LABEL.get(live_status, live_status)}'
+    else:
+        label_text = '待答三问'
+
     return {
         'value': live_status,
+        'label_text': label_text,
+        'basis': basis,
+        'basis_text': basis_text,
+        'yes': yes,
+        'answered': answered,
+        'awaiting_answers': basis == 'pending',
         'ok': ok,
         'counted': len(counted),
         'total': len(readings),
@@ -86,6 +150,10 @@ def _status_explain(stage, readings, period_type, answer_sheet=None):
         'empty': sum(1 for r in readings if r['verdict'] == 'empty'),
         # 🔴 阈值只在后端一份，前端只上色不判
         'thresholds': dict(PERIOD_VERDICT_BANDS),
+        # 档位本名 + 本期前缀（前端拼 `本周合格` / `本月合格`，不再各写一份中文表）
+        'labels': dict(PERIOD_STATUS_LABEL),
+        'prefix': prefix,
+        'monthly_question_count': MONTHLY_QUESTION_COUNT,
     }
 
 
@@ -101,6 +169,10 @@ class TemplateListView(SelfRunBaseView):
     """
 
     def get(self, request):
+        # 延迟 import：`works` 与 `selfrun` 互相引用（作品的序列化要用 `period_range`），
+        # 模块级 import 会把「先加载谁」变成一件必须小心的事。
+        from apps.works.constants import WORK_KIND_CHOICES
+
         data = services.list_templates(request.query_params.get('period_type'))
         return Response({
             'templates': data,
@@ -125,6 +197,12 @@ class TemplateListView(SelfRunBaseView):
                 # `l2` 的候选值来自**库**（`temporal_task_meta.activity_type`），
                 # 不是常量表 —— 常量表只是「出生证」，库里那行才是真源。
                 'l2_options': services.list_l2_options(),
+                # 作品类型：`works_count` 的 `work_kind` 候选值。
+                # 🔴 从 `works.constants` 的唯一真源取，**不在这里抄一份** ——
+                #    抄了以后加类型会漏，而漏的表现只是下拉里少一项（看着像没做）。
+                'work_kind_options': [
+                    {'value': v, 'label': l} for v, l in WORK_KIND_CHOICES
+                ],
             },
         })
 
@@ -291,6 +369,22 @@ class StageListCreateView(SelfRunBaseView):
         st = request.query_params.get('status')
         if st:
             qs = qs.filter(status=st)
+        # 🔴 `shape`：分层之后 `status=active` **不止一行**（长阶段与它的小阶段同时 open），
+        #    前端「取第一条」就会拿到长阶段 —— 页头于是显示「0 条 KPI」，
+        #    周/月状态读一个永不判定的阶段，而且**不报错**。
+        #    判据与 `get_open_stage()` 同一把尺子：叶子 = 有 active KPI。
+        shape = request.query_params.get('shape')
+        if shape == 'leaf':
+            qs = qs.filter(metrics__status='active').distinct()
+        elif shape == 'long':
+            # 与 `get_open_long_stage()` 同源：**顶级 + 零 KPI**。
+            # 只判 `metrics__isnull` 会把「KPI 全退役的小阶段」也算成长阶段。
+            qs = qs.filter(parent__isnull=True, metrics__isnull=True)
+        elif shape:
+            return Response(
+                {'detail': f'shape 只能是 leaf / long，收到 {shape!r}'},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
         return Response(SelfRunStageSerializer(qs, many=True).data)
 
     def post(self, request):
@@ -328,6 +422,8 @@ class StageDetailView(SelfRunBaseView):
                 SelfRunMetricLog.objects.filter(metric__stage=stage).order_by('-at')[:50], many=True,
             ).data,
             'summary': services.compute_stage_summary(stage),
+            # 模板 vs 库里的行：只读差异（§114.1）。空列表 = 两处口径一致。
+            'template_drift': services.template_drift(stage),
             'written': {},
         })
 
@@ -370,6 +466,9 @@ class CurrentPeriodView(SelfRunBaseView):
                 'stage': None, 'period': None, 'live': True,
                 'period_key': key, 'period_start': start, 'period_end': end,
                 'hint': '还没有进行中的阶段 —— 先去「制定配置」开启一个。',
+                # 🔴 与下面那个分支**同形**：没有阶段时也要有这个键，否则前端
+                #    `undefined` ⇒ 两块复盘内容静默消失（不报错）。
+                'extras': None,
                 'written': {},
             })
         readings = period.readings or []
@@ -382,8 +481,14 @@ class CurrentPeriodView(SelfRunBaseView):
             'period_end': meta['end'],
             'status_explain': _status_explain(
                 period.stage, readings, period_type, period.answer_sheet,
+                # 已归档 ⇒ 用落库的档位（定格），不拿三问重算
+                closed_status=period.status if period.closed_at else None,
             ),
             'heartbeat': services.heartbeat_state(period.stage),
+            # 复盘的两块补充：本期到期里程碑 + 本期时间流失（只读派生，不落库）
+            'extras': services.compute_period_extras(
+                period_type, meta['start'], meta['end'],
+            ),
             'colors': {'verdict': VERDICT_COLORS, 'period': PERIOD_STATUS_COLORS},
             'written': {},      # 🔴 GET 从不写库
         })
@@ -584,6 +689,13 @@ class PeriodDetailView(SelfRunBaseView):
         period = get_object_or_404(SelfRunPeriod, pk=pk)
         return Response({
             'period': SelfRunPeriodSerializer(period).data,
+            # 复盘两块补充（本期到期里程碑 + 本期时间流失）。
+            # ⚠️ 这两块是**按窗口现算**的：窗口是死的（period_start/end），
+            #    所以重算结果稳定；但它不属于 `readings` 那份冻结快照，
+            #    补记数据后会有变化 —— 这是有意的（冻结的是 KPI 结论，不是时间轴）。
+            'extras': services.compute_period_extras(
+                period.period_type, period.period_start, period.period_end,
+            ),
             'written': {},
         })
 
@@ -648,6 +760,122 @@ class StageSummaryView(SelfRunBaseView):
             'stage': SelfRunStageSerializer(stage).data,
             'summary_snapshot': snapshot,
             'written': _written(selfrun_stage=1),
+        })
+
+
+class StageLedgerView(SelfRunBaseView):
+    """`GET` 阶段账本：区间 / 时间 / 钱 / 作品 / 子阶段。
+
+    🔴 **只读现算，零写库** —— 数字全部由现有表推出来（不落任何快照），
+       所以改口径后它立刻跟着变，不存在「页面上是旧数」的可能。
+    ⚠️ 对叶子阶段同样可用（只看钱与时间两块），不设「只给长阶段」的闸门：
+       闸门会让「这个阶段花了多少」变成一个只有长阶段才答得出的问题。
+    """
+
+    def get(self, request, pk):
+        stage = get_object_or_404(SelfRunStage, pk=pk)
+        try:
+            ledger = services.stage_ledger(stage)
+        except (OperationalError, ProgrammingError) as exc:
+            # 🔴 「表不存在」只在**上线顺序**上出现：代码已经是新版，而 `migrate` 还没跑。
+            #    不兜成「注入算 0」——那会让余额凭空少一块，而且静默；
+            #    也不留一个 500 堆栈 —— 它长得和「代码坏了」一模一样。
+            if 'selfrun_pool_inject' in str(exc):
+                return Response(
+                    {'detail': '阶段账本依赖 selfrun_pool_inject 表，请先执行数据库迁移（manage.py migrate）'},
+                    status=http.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            raise
+        return Response({
+            'stage': SelfRunStageSerializer(stage).data,
+            'ledger': ledger,
+            'written': {},
+        })
+
+
+class StageLedgerConfigView(SelfRunBaseView):
+    """`PATCH` 账本参数（目前只有 `pool_principal`）。
+
+    🔴 单独一个端点，**不并进 `StagePatchSerializer`**：
+       本金是「这段路带多少钱」的**输入**，改它不该牵连阶段身份与终点；
+       混在一个 PATCH 里，一次「只改本金」的请求会顺带把没传的字段
+       落回默认值（项目踩过的「没传 = 传默认」）。
+    """
+
+    ALLOWED = {'pool_principal'}
+
+    def patch(self, request, pk):
+        stage = get_object_or_404(SelfRunStage, pk=pk)
+        extra = set(request.data.keys()) - self.ALLOWED
+        if extra:
+            return Response(
+                {'detail': f'本端点只收 pool_principal，多了：{sorted(extra)}'},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        raw = request.data.get('pool_principal')
+        if raw is None:
+            return Response(
+                {'detail': '要传 pool_principal（本金，可为 0）'},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            principal = float(raw)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': '本金必须是数字'}, status=http.HTTP_400_BAD_REQUEST,
+            )
+        if principal < 0:
+            return Response(
+                {'detail': '本金不能为负'}, status=http.HTTP_400_BAD_REQUEST,
+            )
+        cfg = dict(stage.ledger_config or {})
+        cfg['pool_principal'] = round(principal, 2)
+        stage.ledger_config = cfg
+        stage.save(update_fields=['ledger_config', 'updated_at'])
+        return Response({
+            'stage': SelfRunStageSerializer(stage).data,
+            'ledger': services.stage_ledger(stage),
+            'written': _written(selfrun_stage=1),
+        })
+
+
+class PoolInjectView(SelfRunBaseView):
+    """池注入标记：`GET` 出已标记的账单 id；`POST {bill_id, marked}` 标记 / 取消。
+
+    🔴 单独一个端点，**不并进账本 `GET`**：这个布尔值的消费者是**账单明细页**
+       （在收入那笔账单上开关），不是账本页。混进账本能省一个请求，但会让
+       账单页为了一个标记去拉整本账（时间块 + 六类归因 + 子阶段全算一遍）。
+    🔴 业务规则（只允许收入、金额不落库、两个方向都幂等）全在
+       `services.set_pool_inject` —— 视图只搬参数，不自己判。
+    """
+
+    def get(self, request):
+        try:
+            ids = services.list_pool_inject_bill_ids()
+        except (OperationalError, ProgrammingError) as exc:
+            # 「列不存在」只在**上线顺序**上出现：代码已是新版，而 `migrate` 还没跑。
+            # 不兜成空列表 —— 那会让页面显示「一笔都没标」，用户以为自己标丢了。
+            if 'selfrun_pool_inject' in str(exc):
+                return Response(
+                    {'detail': '池注入标记依赖 selfrun_pool_inject.bill_id，请先执行数据库迁移（manage.py migrate）'},
+                    status=http.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            raise
+        return Response({'bill_ids': ids})
+
+    def post(self, request):
+        if 'bill_id' not in request.data:
+            return Response(
+                {'detail': '要传 bill_id'}, status=http.HTTP_400_BAD_REQUEST,
+            )
+        marked = request.data.get('marked', True)
+        bill_id, marked = services.set_pool_inject(
+            request.data.get('bill_id'), bool(marked),
+        )
+        return Response({
+            'bill_id': bill_id,
+            'marked': marked,
+            'written': _written(selfrun_pool_inject=1),
         })
 
 

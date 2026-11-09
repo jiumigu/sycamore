@@ -26,6 +26,7 @@ from .wealth_views import (
     SnapshotListView,
     SnapshotView,
     CopySnapshotView,
+    NetworthBridgeView,
     RegularStatsView,
     RegularExpiringView,
     RegularListView,

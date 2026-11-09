@@ -1,5 +1,6 @@
 """goals 服务包（由 services.py 拆分，对外接口不变）"""
 
+from .goal_checkup import build_checkup
 from .goal_clone import GoalCloneService
 from .goal_progress import GoalProgressService
 from .milestone_reward import MilestoneRewardService
@@ -11,5 +12,6 @@ __all__ = [
     'GoalProgressService',
     'MilestoneRewardService',
     'QuickGoalService',
+    'build_checkup',
     'calculate_streak',
 ]

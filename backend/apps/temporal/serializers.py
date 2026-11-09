@@ -1,10 +1,11 @@
 import os
 
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.core.models import UserProfile
-from .models import OneDayPage, TaskMeta, TemporalTask
+from .models import OneDayPage, TaskMeta, TemporalTask, TimerSession
 
 
 class TaskMetaSerializer(serializers.ModelSerializer):
@@ -28,6 +29,10 @@ class TemporalTaskSerializer(serializers.ModelSerializer):
     activity_type = serializers.SerializerMethodField()
     attribution = serializers.SerializerMethodField()
     is_unclassified = serializers.SerializerMethodField()
+    # v3.64.33「来源可见」：`import_batch` 是哈希批次号，前端读不懂也分不出来源类型。
+    # 分类只在后端一份（`services.classify_source`），前端只显示 `source_label`。
+    source_kind = serializers.SerializerMethodField()
+    source_label = serializers.SerializerMethodField()
 
     class Meta:
         model = TemporalTask
@@ -39,11 +44,13 @@ class TemporalTaskSerializer(serializers.ModelSerializer):
             'import_batch', 'updated_at',
             'category_icon', 'duration_display', 'date',
             'activity_type', 'attribution', 'is_unclassified',
+            'source_kind', 'source_label',
         ]
         read_only_fields = ['id', 'year', 'mon', 'day', 'week', 'quarter',
                             'category_level1', 'category_level2', 'category_color',
                             'import_batch', 'updated_at',
-                            'activity_type', 'attribution', 'is_unclassified']
+                            'activity_type', 'attribution', 'is_unclassified',
+                            'source_kind', 'source_label']
 
     def get_category_icon(self, obj):
         from .constants import CATEGORY_ICONS
@@ -74,6 +81,14 @@ class TemporalTaskSerializer(serializers.ModelSerializer):
         from .services import resolve_task_meta
         m = resolve_task_meta([obj.task_name]).get(obj.task_name)
         return bool(m and m['is_unclassified'])
+
+    def get_source_kind(self, obj):
+        from .services import classify_source
+        return classify_source(obj.import_batch)['kind']
+
+    def get_source_label(self, obj):
+        from .services import classify_source
+        return classify_source(obj.import_batch)['label']
 
     def validate(self, attrs):
         """v3.58.6 手工新增/编辑的口径：时长不再由调用方指定，一律由起止时间算。
@@ -169,3 +184,26 @@ class OneDayPageSerializer(serializers.ModelSerializer):
         if value is not None and value < 0:
             raise serializers.ValidationError('字数不能为负数')
         return value
+
+
+class TimerSessionSerializer(serializers.ModelSerializer):
+    """实时计时会话（只读出口）。
+
+    🔴 `elapsed_seconds` **由后端算**：前端拿它当锚点，再用「本地流逝」累加。
+       若前端自己 `Date.now() − start_time`，本地与服务端差几十秒时，
+       计时器一打开就会显示错值（甚至负数），而没有任何报错。
+    """
+
+    elapsed_seconds = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TimerSession
+        fields = (
+            'id', 'task_name', 'start_time', 'end_time', 'notes',
+            'status', 'task_id', 'elapsed_seconds', 'created_at',
+        )
+        read_only_fields = fields
+
+    def get_elapsed_seconds(self, obj):
+        end = obj.end_time or timezone.now()
+        return max(0, int((end - obj.start_time).total_seconds()))

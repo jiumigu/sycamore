@@ -1,14 +1,9 @@
-from django.urls import path
+"""赎回期 · 路由（2026-11-02 起**空表**）
 
-from . import views
+`urlpatterns` 刻意留成空列表而不是删掉 `include`：
+- 工程级 `config/urls.py` 不必为「某个 app 退休」再改一次；
+- 六条旧端点自然变成 404 —— 前端已无人调用，旧书签不会打到半死的接口上。
 
-urlpatterns = [
-    path('', views.RedemptionConfigView.as_view(), name='redemption-config'),
-    path('pause/', views.RedemptionPauseView.as_view(), name='redemption-pause'),
-    path('resume/', views.RedemptionResumeView.as_view(), name='redemption-resume'),
-    path('injects/', views.InjectListCreateView.as_view(), name='redemption-injects'),
-    path('attr-rules/', views.AttrRuleListCreateView.as_view(), name='redemption-attr-rules'),
-    path('attr-rules/<int:pk>/', views.AttrRuleDetailView.as_view(), name='redemption-attr-rule-detail'),
-    path('stats/', views.RedemptionStatsView.as_view(), name='redemption-stats'),
-    path('sync-scenario/', views.RedemptionSyncScenarioView.as_view(), name='redemption-sync-scenario'),
-]
+旧接口的去向见 `views.py` 文件头那张表。
+"""
+urlpatterns = []

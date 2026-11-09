@@ -6,6 +6,7 @@ from .views import (
     ChannelsView,
     ComposeView,
     OverviewView,
+    WorkMediaUploadView,
     WorkMetaView,
     WorkViewSet,
 )
@@ -19,5 +20,6 @@ urlpatterns = [
     path('meta/', WorkMetaView.as_view(), name='works-meta'),
     path('compose/', ComposeView.as_view(), name='works-compose'),
     path('channels/', ChannelsView.as_view(), name='works-channels'),
+    path('media/', WorkMediaUploadView.as_view(), name='works-media'),
     path('', include(router.urls)),
 ]

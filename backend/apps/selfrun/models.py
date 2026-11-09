@@ -82,10 +82,26 @@ class SelfRunStage(models.Model):
     """阶段 —— 生命周期容器。
 
     状态机：`draft → active ⇄ paused → closed ──[复制]──> 新 draft`
-    🔴 约束：**同一时间只允许一个 `active`/`paused`**（服务层事务保证，不在 DB 层）。
+
+    🔴 约束（v3.65.0 起分两层）：
+    1. **最多两层**：长阶段（`parent IS NULL`）挂小阶段，小阶段不能再挂。
+    2. **同一 `parent` 下只允许一个 `active`/`paused`** —— 不是全局唯一
+       （否则长阶段一开，小阶段就开不了）。
+    3. **KPI 只挂叶子**：长阶段零 `Metric` ⇒ 天然不产生 `SelfRunPeriod`。
+
+    ⚠️ 为什么要 3：`Period` 的唯一键是 `(stage, period_type, period_key)`。
+       长阶段若也配 KPI，**同一周会同时属于长阶段和小阶段两个 Period**，
+       判定打两遍，而「本周活着 0/5」到底算谁的就说不清了 ——
+       又一把「同一事实两把尺子」。所以长阶段只做**账本 + 汇总**。
     """
 
     name = models.CharField(max_length=100, verbose_name='阶段名称')
+    # 🔴 长阶段（parent 为空）只汇总；小阶段才是真正跑 KPI 的那一层。
+    #    `PROTECT`：删长阶段不许连带删小阶段（与全模块 FK 纪律一致）。
+    parent = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='children', verbose_name='上级阶段',
+    )
     start_date = models.DateField(verbose_name='起点')
     # 🔴 生效后 `start_date` **不可改**（改它会让已完成周期「掉出」阶段）⇒ 序列化器只读。
     end_date = models.DateField(null=True, blank=True, verbose_name='终点')
@@ -107,6 +123,10 @@ class SelfRunStage(models.Model):
     summary_snapshot = models.JSONField(null=True, blank=True, verbose_name='总结时的数字')
     summary_at = models.DateTimeField(null=True, blank=True, verbose_name='总结写于')
     note = models.CharField(max_length=200, blank=True, default='', verbose_name='备注')
+    # 账本参数（目前只有 `pool_principal`）。**只长阶段用**，小阶段留空 dict。
+    # 🔴 刻意不做成 FK、不单开一张表：它是一段配置不是流水
+    #    （流水在 `redemption_pool_inject`，一行一笔，那个才需要表）。
+    ledger_config = models.JSONField(default=dict, blank=True, verbose_name='账本参数')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -124,6 +144,10 @@ class SelfRunStage(models.Model):
     def clean(self):
         if self.end_date and self.start_date and self.end_date < self.start_date:
             raise ValidationError({'end_date': '终点不能早于起点。'})
+        # 🔴 两层封顶。⚠️ `clean()` 挡不住 `objects.create()` ——
+        #    服务层 `create_stage()` 里必须**再判一次**，两处都判才有意义。
+        if self.parent_id and self.parent.parent_id:
+            raise ValidationError({'parent': '只支持两层：上级阶段不能再有上级。'})
 
 
 class SelfRunMetric(models.Model):
@@ -342,6 +366,42 @@ class SelfRunPeriod(models.Model):
     @property
     def is_closed(self) -> bool:
         return self.closed_at is not None
+
+
+class SelfRunPoolInject(models.Model):
+    """账单上的**「中途注入」标记**（v3.64.26 起改为标记，不再自己记金额）。
+
+    为什么从「自记金额」改成「标账单」：
+    - 这笔钱在财富账单里**本来就录过一次**。再自记一份金额 = 同一笔钱两个入口，
+      迟早出现「账单改了、注入没改」的分叉，而且分叉是静默的（余额看着合理）。
+    - `wealth_bill_list` 是 `managed=False` 外部表，**禁止加列**（项目铁律），
+      所以标记只能落在 selfrun 自己的表里，靠 `bill_id` 指向那笔账单。
+
+    🔴 **不带 `stage` 外键**（v3.64.26 特意去掉）：标记是**账单的属性**，
+       金额与日期都从账单来；注入额按阶段区间夹窗口算，与本金、消耗**同一把尺子**。
+       若再挂一个 stage FK，就会出现「stage 说属于 A、账单日期落在 B」的双源。
+
+    🔴 **只允许标收入**（`transaction_type='收入'`）：注入是钱进来。
+       标了注入的收入会从「为自己净消耗」里排除，只算进注入 —— 否则同一笔钱
+       既加进注入、又减少净消耗，余额凭空多出一倍。
+
+    ⚠️ 标记本身不含金额，所以**撤销 = 删标记**（不像流水要写负值冲销：
+       那条铁律针对的是「账目」，标记只是一个标签）。
+    """
+
+    bill_id = models.IntegerField(unique=True, verbose_name='账单ID')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='标记时间')
+
+    class Meta:
+        managed = True
+        db_table = 'selfrun_pool_inject'
+        db_table_comment = '池注入标记：被标为「中途注入」的账单 id（金额从账单读）'
+        verbose_name = '自我运转·池注入标记'
+        verbose_name_plural = '自我运转·池注入标记'
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f'注入标记 bill={self.bill_id}'
 
 
 class SelfRunCheckin(models.Model):

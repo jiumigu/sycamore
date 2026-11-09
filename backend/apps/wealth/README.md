@@ -1,5 +1,7 @@
 # Wealth — 财务管理
 
+> 文档对齐 v3.64.34 ｜ 最后核对 2026-11-07
+
 ## Models
 
 | Model | Table | 用途 |
@@ -128,6 +130,7 @@
 | `services/review_service.py` | 月度复盘（趋势/分类排行/月度清单/**月度对比**/生成盈亏；「存款余额」由 `_deposit_payload()` 从资产快照取数并**连同来源一起下发**） |
 | `services/regular_service.py` | 定期存款完整业务逻辑 |
 | `services/cashflow_service.py` | 现金盘点（资产全景/趋势/快照CRUD/复制上月；旧「对账」已于 v3.60.14 删除） |
+| `services/networth_bridge.py` | 净资产变动归因（v3.62.42）：把资产存量与账本流量勾稽起来，给出「未解释差额」；🔴 Δ负债 **只独立展示、禁减进差额** |
 | `services/debt_service.py` | 负债与应收逐笔台账（还款优先级/账龄分桶/逾期/快照对账） |
 | `services/asset_service.py` | 资产科目主数据与按科目的资产快照（roll-up 汇总/种子科目/回填/跨模块取数 `net_worth_by_yearmon`；旧表双跑校验已删） |
 | `services/classify_service.py` | 账单项分类（`match_classify_rule` **全项目唯一匹配实现** / 规则 CRUD / 三维度汇总与覆盖率 / 未归类候选 / 影响预览 / `get_bill_category_options` **快速记账候选值的唯一口径** —— 账本真实层级 ∪ 口径配置登记值，前端不许再写分类常量） |
@@ -143,6 +146,13 @@
 | `services/survival_flow.py` | 生存**库存流水**（v3.60.18）—— 🔴 **改库存的唯一写口 `record_flow()`**：建档 / 编辑 / 盘点三处都经它写并自动代记；`reverse_flow()` 撤销（补反向流水，**一条最多冲销一次**）；`summarize_flows()` 按月汇总**按单位分桶、跨单位不相加** |
 | `services/property_calc.py` | 物件资产算法**唯一真源**（整月取整 / 直线法折旧且残值 0 / **损坏 ⇒ 净值归 0** / 净值截断到 0 / 报废那刻定格 / `zero_reason` 与五项合计） |
 | `services/property_service.py` | 物件资产取数与 CRUD 编排（类别删除保护、状态离开报废时置空报废字段、保存前试算不写库） |
+
+### 净值变动归因（networth_bridge，v3.62.42）
+
+- 恒等式：`Δ净资产 = Δ总资产 − Δ负债`；`Δ总资产 = 账本净流量 + 未解释差额`（`账本净流量 = 收入 − 支出 + 余额变更`）。
+- 🔴 **「未解释差额」只算资产端，Δ负债 只作独立一行展示，绝不减进差额**：还款时「现金 −8500 / 负债 −8500」若已记账则资产端差额为 0；若漏记则为 −8500（报警）。把 Δ负债 减进去会把它算成 0、**静默放过**。
+- 区间 = `(上期盘点日, 本期盘点日]`，按日期整天划界、**不用 `__date`**（§55/§94.3）；盘点当天先后的边界噪声落在差额里。
+- 不连续盘点之间的缺口月份单独列出，不拿 0 补。
 
 ## API Endpoints
 
@@ -183,6 +193,7 @@
 | POST | /cashflow/snapshot/ | 创建/更新快照 |
 | GET | /cashflow/snapshot/list/ | 快照列表（?page=&page_size= 分页） |
 | POST | /cashflow/copy/ | 复制上月数据 |
+| GET | /cashflow/networth-bridge/ | 净值变动归因（`?limit=` 默认 12；非法值 **400**，不静默回退） |
 | GET/POST | /asset/accounts/ | 资产科目主数据（**裸数组**；?include_inactive=1） |
 | PATCH/DELETE | /asset/accounts/<pk>/ | 科目更新 / 删除（被快照引用时 400，引导改停用） |
 | GET | /asset/accounts/summary/ | 科目结构汇总（按类别的科目数/计表数/可取数） |
@@ -399,7 +410,7 @@ cd backend && ../.venv/bin/python manage.py migrate wealth
 | 取值分支 | `services/classify_service.py` → `match_classify_rule`（**全项目唯一匹配实现**） |
 | 前端下拉 | `frontend/src/modules/wealth/types/wealthTypes.ts` → `CLASSIFY_RULE_FIELDS` + `ClassifyRulePanel.vue` |
 
-**漏前端 = 选不到，漏后端 = 静默不生效。** 与 redemption 归因外挂同款坑。
+**漏前端 = 选不到，漏后端 = 静默不生效。** 两处必须同改。
 
 ### 种子规则与「刻意不种」的项
 
@@ -460,6 +471,18 @@ cd backend && ../.venv/bin/python manage.py migrate wealth
 六项新增比率（被动收入覆盖率、刚性支出覆盖率、DTI 等）**已于 v3.58.23 交付**，
 见 `services/ratio_service.py` / `ratio_grade.py` 与 `/ratios/*` 接口，
 判定线只在 `constants.RATIO_BANDS` 一份。
+
+**「不可知」与「0」是两件事，DTI 上最容易做错**（v3.64.6 修正）：
+
+| 负债台账 | 真实含义 | DTI |
+|---|---|---|
+| 一行都没录 | **不知道**有没有债 | 「数据不足」，不返回 0 |
+| 录过、全部「已结清」 | **确定没有债** | **0%，落「健康」档** |
+| 有「在还」的行 | 有月供 | 月供合计 ÷ 月均收入 |
+
+第三行以外，前两行以前被合并成一个出口 —— 用户把最后一笔债还清那天，
+界面从「有个数」变成「数据不可用」，还附一句催他去改状态，正好把最健康的一刻藏起来。
+🔴 「不可用不返回 0」这条纪律只管**不可知**，不管**结论本来就是 0**。
 
 **未做**：现金流量表的按月聚合（P2-B）—— 即按「收入流入 / 必需支出 / 品质支出 /
 投资支出 / 债务偿还」五类出的流量表。分类标签已具备（`cashflow_class`），缺的是聚合端点。
@@ -626,6 +649,11 @@ POST   /api/wealth/survival/essentials/seed/             写入基准清单（�
 （认知），一个是「实际有多少」（库存）；合并后「我漏了牙膏」会被读成「牙膏数量是 0」。
 
 列表端点均 `pagination_class = None`（裸数组）—— 六个：categories / units / items / recipes / essentials / combos。
+
+🔴 **生存覆盖率的分母窗口读自我运转长阶段**（v3.64.20）：`survival_service._stage_window()`
+只读 `selfrun.get_open_long_stage()` 的起止日（「三年赎回期」不再是独立模块，它就是那个长阶段），
+取不到返回 `(None, None)` ⇒ `coverage_pct` 输出「窗口未配置」。**不兜默认窗口** ——
+兜一个会让覆盖率凭空有个看起来合理的分母。旧名 `_redemption_window` 已改掉，留着会让人以为还有赎回期表。
 
 ### 删除保护
 
@@ -1373,7 +1401,7 @@ python manage.py wealth_seed_property_categories --overwrite  # 覆盖图标 / �
   前端不按日期自己数一份 —— 那是第二份口径，而且会随日历变化。
 - **类别图标**：`icon` 已落库（六个种子值），但界面**刻意不依赖它**。
   要用就一次做对（白名单 + 预览）：自由填图标名写错不报错，只会静默退化成默认图标。
-- **物件与「三年赎回期」/「里程碑」的关联**：一期明确不做，避免「一笔钱算两遍」。
+- **物件与自我运转（长阶段 / 里程碑）的关联**：一期明确不做，避免「一笔钱算两遍」。
 - **批量录入 / 导入**：一期只有逐件录入。
 - **自定义折旧方式**（双倍余额递减等）：刻意只保留直线法 + 残值 0，
   **不提供残值率之类的可调参数** —— 可调参数会让两台空调的净值不可比。

@@ -79,6 +79,8 @@ def _temporal_filtered(where: dict, start: dt.date, end: dt.date):
     🔴 维度映射以**库里的 `temporal_task_meta`** 为准（不是常量表）：
        L1 = `default_attribution`、L2 = `activity_type`、L3 = `task_name`。
        常量表只是「出生证」，库里那行才是真源。
+    🔴 `growth=True` 是**另一根轴**：读 `counts_growth`（成长计时的唯一依据），
+       不再看 L2 —— 用户 2026-11-01 拍板「开关说了算」，改分类不许暗改成长口径。
     """
     meta = {m.task_name: m for m in TaskMeta.objects.all()}
     names = set(meta.keys())
@@ -92,6 +94,10 @@ def _temporal_filtered(where: dict, start: dt.date, end: dt.date):
             if (not l1 or meta[n].default_attribution in l1)
             and (not l2 or meta[n].activity_type in l2)
         }
+    growth = where.get('growth')
+    if growth is not None:
+        want = bool(growth)
+        names = {n for n in names if bool(meta[n].counts_growth) is want}
     if l3:
         # `l3` 就是 task_name 白名单，与 l1/l2 取**并集**（设计稿要求：并集不是交集）
         names |= l3
@@ -99,14 +105,32 @@ def _temporal_filtered(where: dict, start: dt.date, end: dt.date):
     qs = TemporalTask.objects.filter(
         start_time__gte=_aware(start), start_time__lt=_aware(end),
     )
-    rows = [r for r in qs.only('task_name', 'duration_hours', 'start_time') if r.task_name in names]
+    # `end_time` 是为「这一周我做了什么」的时段轴取的（v3.64.35）：那张图要知道
+    # 每件事从几点到几点，只有 `duration_hours` 摆不出位置。
+    # 放 `.only()` 里而不是让调用方二次查库 —— 否则一条记录一次查询，一周几十次。
+    rows = [r for r in qs.only('task_name', 'duration_hours', 'start_time', 'end_time')
+            if r.task_name in names]
     return rows, meta
 
 
-def temporal_hours(metric, start: dt.date, end: dt.date):
-    """时长求和（小时）。breakdown 按 `task_name`（= L3）分行。"""
-    cfg = metric.source_config or {}
-    rows, meta = _temporal_filtered(cfg.get('where') or {}, start, end)
+def temporal_rows(where: dict, start: dt.date, end: dt.date):
+    """公开入口：按 `where`（l1/l2/l3）过滤出的原始时间行。
+
+    给**非 KPI 场景**复用（例如每周复盘里的「流失统计」）——
+    那些地方不需要 `run_reader` 的一整套 value/breakdown/freshness 结构，
+    但必须和 KPI **用同一套维度映射与半开区间**（`_temporal_filtered`）。
+    """
+    rows, _meta = _temporal_filtered(where or {}, start, end)
+    return rows
+
+
+def _hours_rollup(where: dict, start: dt.date, end: dt.date):
+    """时长合计 + 按 `task_name`（= L3）分行 —— `temporal_hours` / `growth_hours` 的唯一实现。
+
+    🔴 两个取数器只差「筛选条件从哪来」，**取数与分行那段不许各写一份**：
+       曾经同一件事写两遍，改了一处忘了另一处，两个数就悄悄不一样了。
+    """
+    rows, meta = _temporal_filtered(where, start, end)
     per = {}
     days = set()
     for r in rows:
@@ -133,6 +157,23 @@ def temporal_hours(metric, start: dt.date, end: dt.date):
         freshness_at=fresh,
         day_count=len(days),
     )
+
+
+def temporal_hours(metric, start: dt.date, end: dt.date):
+    """时长求和（小时）。`where` 由 KPI 配置给（l1 / l2 / l3）。"""
+    cfg = metric.source_config or {}
+    return _hours_rollup(cfg.get('where') or {}, start, end)
+
+
+def growth_hours(metric, start: dt.date, end: dt.date):
+    """成长计时（小时）：映射编辑器里勾了「成长计时」的任务名，时长合计。
+
+    🔴 口径**固定**、不读 `metric.source_config.where` —— 成长计时只有一根轴
+       （`task_meta.counts_growth`）。留一个可配的 where 就等于允许两处定义同一个量，
+       而「改 L2 顺便改了成长口径」正是这次要消灭的那种隐式规则。
+    ⚠️ `metric` 参数保留只为与其它取数器同签名（注册表统一调用）。
+    """
+    return _hours_rollup({'growth': True}, start, end)
 
 
 def temporal_days(metric, start: dt.date, end: dt.date):
@@ -396,17 +437,75 @@ def module_value(metric, start: dt.date, end: dt.date):
             freshness_at=fresh,
         )
 
-    # redemption.runway：**当前算不出来**（月结表「结余」自 2026-06 起为空）
-    # 🔴 返回 None（不是 0）—— 「算不出来」与「只能撑 0 个月」是两件相反的事。
-    latest = WealthBalanceList.objects.order_by('-yearmon').first()
-    reason = (
-        f'月结表「结余」自 2026-06 起没填'
-        + (f'（最新一期 {latest.yearmon}）' if latest else '')
+    # redemption.runway：现金池余额 ÷ 近 30 日日均净支出 ÷ 30 = **可支撑月数**
+    # 🔴 2026-11-02 起真算。此前这里写死 `value=None`，理由是「月结表『结余』
+    #    自 2026-06 起没填」—— 但赎回池的余额并不依赖那张表：它由
+    #    本金 + 注入 − 为自己净支出 直接算得出，速度由账单流水滚动 30 天给。
+    #    ⇒ 一个「算不出来的白名单项」挂了大半年，而它其实一直算得出来。
+    # 🔴 v3.64.20 起数据源从 `redemption_period` 换成**长阶段**：赎回期已是本模块
+    #    下的一个阶段，本金在 `ledger_config['pool_principal']`，窗口就是阶段起止。
+    #    白名单键名**保留** `redemption.runway`（它已经写进用户配好的 KPI 定义里，
+    #    改键名会让存量 KPI 静默失效 —— 那正是本模块最怕的长相）。
+    from apps.redemption import services as rs
+    from .services import get_open_long_stage
+
+    # 🔴 只读路径不许 `get_or_create`（铁律：GET 不写库）⇒ 取「正在跑的那个长阶段」，
+    #    没有就老实说「还没设」，不要顺手建一行。
+    stage = get_open_long_stage()
+    latest_bill = WealthBillList.objects.aggregate(d=Max('date'))['d']
+    fresh = _aware(latest_bill.date()) if latest_bill else None
+    if stage is None:
+        return _empty(
+            value=None, count=0,
+            issues=[{'code': 'no_long_stage', 'hint': '还没有进行中的长阶段（阶段账本想算余额，得先有一个带本金的长阶段）'}],
+            freshness_at=fresh,
+        )
+
+    principal = float((stage.ledger_config or {}).get('pool_principal') or 0)
+    end = stage.end_date or timezone.localdate()
+    injected, inject_ids = pool_inject_totals(stage.start_date, end)
+    pool = rs.compute_pool_balance(
+        principal, stage.start_date, end, injected, exclude_bill_ids=inject_ids,
     )
+    avg_daily = rs.compute_avg_daily_self_net(stage.start_date, end)
+    if avg_daily < 0:
+        # 🔴 `0` 与负数不是一件事（v3.64.26）：净流入时不存在「撑到哪个月」，
+        #    更不叫「没有为自己 的账」—— 同一屏的档位分布里可能明明有十几笔。
+        return _empty(
+            value=None, count=0,
+            issues=[{
+                'code': 'net_inflow',
+                'hint': '近 30 天是净流入（进来的比花的多），不存在「撑多久」这回事',
+            }],
+            freshness_at=fresh,
+        )
+    if avg_daily == 0:
+        # 🔴 `None` 而不是 0：没有速度可外推 ≠「只能再撑 0 个月」，两者结论相反
+        return _empty(
+            value=None, count=0,
+            issues=[{
+                'code': 'no_self_expense',
+                'hint': '窗口内还没有「为自己」的账，日均净支出为 0，撑多久外推不出来',
+            }],
+            freshness_at=fresh,
+        )
+
+    months = round(pool['balance'] / avg_daily / 30, 2)
     return _empty(
-        value=None, count=0,
-        issues=[{'code': 'uncomputable', 'hint': reason}],
-        freshness_at=_yearmon_to_date(latest.yearmon) if latest else None,
+        value=months,
+        # 派生标量没有「源记录」，用 1 表示「一条读数」——
+        # ⚠️ 不能用 0：`evaluate_verdict` 会把「count=0 且值=0」判成 `empty`（真的一条都没有），
+        #    而余额刚好归零是另一个结论。
+        count=1,
+        breakdown=[{
+            'label': '现金池 ÷ 日均净支出 ÷ 30',
+            'value': months, 'count': 1, 'l2': None,
+            'extra': {'note': '', 'facts': [
+                {'label': '现金池余额', 'value': pool['balance'], 'kind': 'amount'},
+                {'label': '日均净支出', 'value': avg_daily, 'kind': 'amount'},
+            ]},
+        }],
+        freshness_at=fresh,
     )
 
 
@@ -453,11 +552,25 @@ def works_count(metric, start: dt.date, end: dt.date):
     ⚠️ 延迟 import：`works` 的序列化器反向依赖本模块的 `period_range`，
        模块级 import 会让「先加载谁」变得要紧（能跑，但脆）。
     """
+    from apps.works.constants import WORK_KIND_CHOICES
     from apps.works.models import Work
 
-    rows = list(Work.objects.filter(
+    qs = Work.objects.filter(
         created_at__gte=_aware(start), created_at__lt=_aware(end),
-    ))
+    )
+
+    # 🔴 `where.work_kind`：按作品**类型**过滤（v3.64.30，为「这月画了几张」）。
+    #    配错 / 写错类型名**必须抛错**，不能静默返 0 ——「0 件」是「真的没画」
+    #    这个**事实**，而一个拼错的值换来的 0 会冒充同一条结论，页面上看不出来。
+    where = ((metric.source_config if metric else None) or {}).get('where') or {}
+    kind_filter = where.get('work_kind')
+    if kind_filter:
+        allowed = [v for v, _ in WORK_KIND_CHOICES]
+        if kind_filter not in allowed:
+            raise ValueError(f'未知的作品类型 {kind_filter!r}（允许：{allowed}）')
+        qs = qs.filter(kind=kind_filter)
+
+    rows = list(qs)
     breakdown = [
         {
             'label': r.name, 'value': 1, 'count': 1, 'l2': r.get_kind_display(),
@@ -466,6 +579,13 @@ def works_count(metric, start: dt.date, end: dt.date):
                 'status': r.get_status_display(),
                 'summary': r.summary or '',
                 'channel': r.channel or '',
+                # 🔴 「成形于」要精确到**时刻**，不能只给日期：阶段账本的明细弹窗
+                #    得让用户自己看出「11-05 21:40 合成」是不是落在阶段区间里
+                #    （区间是半开的，边界那天的最后一小时算不算进来，光看日期无法自证）。
+                # ⚠️ 必须 `localtime()`：从库里读出来的是 **UTC**，直接 `isoformat()`
+                #    会发 `...T13:40:00+00:00`，前端截前 16 位就成了
+                #    「差 8 小时、但看着完全合理」的错时间（最难发现的一种）。
+                'created_at': timezone.localtime(r.created_at).isoformat(),
             },
         }
         for r in sorted(rows, key=lambda x: x.created_at)
@@ -479,6 +599,7 @@ def works_count(metric, start: dt.date, end: dt.date):
 
 READERS = {
     'temporal_hours': temporal_hours,
+    'growth_hours': growth_hours,
     'temporal_days': temporal_days,
     'diary_migu_count': diary_migu_count,
     'step_days': step_days,
@@ -558,3 +679,38 @@ def fingerprint_of_metrics(stage_id, metrics) -> str:
             '' if m.get('floor_value') is None else str(m.get('floor_value')),
         ]))
     return hashlib.sha256('\n'.join(parts).encode('utf-8')).hexdigest()[:16]
+
+
+# ══════════════════════════════════════════════════════════════
+# 池注入（v3.64.26：标记账单，不自记金额）
+# ══════════════════════════════════════════════════════════════
+def pool_inject_totals(start, end):
+    """区间内**被标为「中途注入」的收入**合计，及这些账单的 id。
+
+    🔴 金额一律**从账单读**，不读标记表 —— 标记表只存 `bill_id`。
+       若另存一份金额，账单改了金额而标记没改，两个数就分叉，且两边各自都合理。
+    🔴 只认 `transaction_type='收入'`：注入是钱进来。支出被标了也当没标
+       （端点层会直接拒掉，这里再兜一层，免得脏数据把余额算歪）。
+    🔴 返回的 id 列表给 `compute_pool_balance(exclude_bill_ids=...)` 用：
+       被标注入的收入若同时是「为自己」，它已经会减少净消耗；这里必须把它排除，
+       否则同一笔钱**加进注入又减消耗**，余额凭空多出一倍。
+    ⚠️ 窗口口径与 `redemption.services._window_bounds` 一致（半开区间），
+       直接复用那个函数，不在这里再写一遍日期边界。
+    """
+    from apps.redemption import services as rs
+    from .models import SelfRunPoolInject
+
+    bill_ids = list(SelfRunPoolInject.objects.values_list('bill_id', flat=True))
+    if not bill_ids:
+        return 0.0, []
+    start_dt, end_dt = rs._window_bounds(start, end)
+    rows = WealthBillList.objects.filter(
+        id__in=bill_ids, transaction_type='收入',
+        date__gte=start_dt, date__lt=end_dt,
+    ).values_list('id', 'amount')
+    total = 0.0
+    kept = []
+    for bill_id, amount in rows:
+        kept.append(bill_id)
+        total += float(amount or 0)
+    return round(total, 2), kept

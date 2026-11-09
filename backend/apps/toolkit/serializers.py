@@ -29,7 +29,10 @@ class ToolInfoSerializer(serializers.Serializer):
 
 class ExecutionSerializer(serializers.Serializer):
     id = serializers.IntegerField()
-    tool_id = serializers.IntegerField(source='tool_id')
+    # 🔴 不能写 `source='tool_id'`：字段名本身就叫 tool_id，DRF 会抛
+    #    AssertionError("It is redundant to specify source=...")⇒ 整个列表接口 500，
+    #    而前端只把 records 留空、照常渲染「暂无执行记录」—— 看上去像「真没记录」。
+    tool_id = serializers.IntegerField()
     tool_name = serializers.SerializerMethodField()
     tool_icon = serializers.SerializerMethodField()
     task_id = serializers.CharField()
@@ -133,6 +136,41 @@ class DecisionTrackerSerializer(serializers.ModelSerializer):
         if len(cleaned) > 6:
             raise serializers.ValidationError('自定义倾向选项最多 6 项')
         return cleaned
+
+    def validate(self, attrs):
+        """把「结论取前几项」与倾向选项对齐 —— 这一层是唯一的写入闸门。
+
+        两条规则，都**报错**而不是静默夹紧：静默把 3 改成 1，用户会以为
+        自己设了「前 3 名」，实际只输出第一名，属于最难查的那种错。
+
+        1. 没有自定义选项（走默认三项 想继续/不想继续/不确定）时不能 > 1：
+           这三项互斥，取前 2 名会输出「想继续 40% · 不想继续 35%」，等于没说。
+        2. 不能超过选项个数：2 个选项要「前 3 名」，第 3 名只能是空位。
+        """
+        lean_options = (
+            attrs['lean_options'] if 'lean_options' in attrs
+            else getattr(self.instance, 'lean_options', None)
+        )
+        top_n = attrs.get(
+            'result_top_n',
+            getattr(self.instance, 'result_top_n', 1) if self.instance else 1,
+        ) or 1
+
+        if not lean_options:
+            if top_n > 1:
+                raise serializers.ValidationError({
+                    'result_top_n': '默认三项（想继续/不想继续/不确定）是互斥判断，只能取第一名；'
+                                    '要取前 N 名请先自定义倾向选项',
+                })
+            attrs['result_top_n'] = 1
+            return attrs
+
+        if top_n > len(lean_options):
+            raise serializers.ValidationError({
+                'result_top_n': f'只有 {len(lean_options)} 个倾向选项，结论最多取前 {len(lean_options)} 项',
+            })
+        attrs['result_top_n'] = top_n
+        return attrs
 
     def get_record_count(self, obj) -> int:
         return getattr(obj, 'record_count', None) or obj.records.count()
