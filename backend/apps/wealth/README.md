@@ -1512,7 +1512,8 @@ python manage.py wealth_seed_property_categories --overwrite  # 覆盖图标 / �
 
 ```bash
 cd backend
-mysqldump -h127.0.0.1 -uroot -p'Syca@2026..' --default-character-set=utf8mb4 sycamore > ../db_backups/sycamore_before_0028_$(date +%Y%m%d_%H%M).sql
+mysqldump -h127.0.0.1 -uroot -p --default-character-set=utf8mb4 sycamore > ../db_backups/sycamore_before_0028_$(date +%Y%m%d_%H%M).sql
+# `-p` 后留空 ⇒ 交互输入口令；**不要把口令写进命令**（本仓库是公开的）
 ../.venv/bin/python manage.py migrate wealth
 ```
 
