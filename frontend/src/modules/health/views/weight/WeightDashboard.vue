@@ -7,11 +7,20 @@
         <p class="page-subtitle">每月减{{ goal?.monthly_target_jin ?? 3 }}斤，持续跟进</p>
       </div>
       <div class="header-actions">
+        <!-- v3.63.12：本页不再占菜单项，入口在健康管理页头 ⇒ 必须有回程。
+             写死 `health`，不用 `router.back()`（刷新/直达/分享链接时没有上一页）。 -->
+        <el-button size="default" @click="$router.push('/health/dashboard')">
+          <el-icon><ArrowLeft /></el-icon> 健康管理
+        </el-button>
         <el-button v-if="!goal" type="primary" @click="showGoalModal = true">
           🎯 设定目标
         </el-button>
         <template v-else>
           <el-tag v-if="goal.status === 'completed'" type="success" size="large" effect="dark" class="goal-status-tag">✅ 目标已完成</el-tag>
+          <!-- 三块「不怎么变动」的内容已迁到独立子页面，入口紧挨「调整目标」 -->
+          <el-button size="small" class="nav-btn" @click="goSub('health-weight-monthly')">📅 月度进度</el-button>
+          <el-button size="small" class="nav-btn" @click="goSub('health-weight-bmi')">⚖️ BMI</el-button>
+          <el-button size="small" class="nav-btn" @click="goSub('health-weight-adjustments')">📝 调整记录</el-button>
           <el-button @click="showGoalModal = true">🎯 调整目标</el-button>
         </template>
         <el-button type="success" @click="openAddRecord">
@@ -29,54 +38,23 @@
       <!-- 统计卡片 -->
       <WeightStatsCards :stats="store.stats" />
 
-      <!-- 进度 + BMI -->
-      <el-row :gutter="16" class="section-row">
-        <el-col :span="store.stats?.bmi ? 16 : 24">
-          <MonthlyProgress
-            :stats="store.stats"
-            :milestones="store.milestones"
-            :current-month="store.goal?.current_month ?? 1"
-            :loading="store.loading"
-          />
-        </el-col>
-        <el-col :span="8" v-if="store.stats?.bmi">
-          <BMIStatus :stats="store.stats" />
-        </el-col>
-      </el-row>
-
       <!-- 趋势图 -->
       <WeightTrendChart :trend="store.trend" :stats="store.stats" :loading="store.loading" />
 
-      <!-- 目标调整记录 -->
-      <el-card v-if="store.adjustments.length" class="adjustment-card">
-        <template #header>
-          <div class="card-header">
-            <span>📝 目标调整记录</span>
-          </div>
-        </template>
-        <el-timeline>
-          <el-timeline-item
-            v-for="adj in store.adjustments"
-            :key="adj.id"
-            :timestamp="adj.adjusted_at"
-            :color="Number(adj.change_amount) > 0 ? '#f56c6c' : '#67c23a'"
-          >
-            {{ adj.before_value }}斤 → {{ adj.after_value }}斤
-            <el-tag :type="Number(adj.change_amount) > 0 ? 'danger' : 'success'" size="small">
-              {{ Number(adj.change_amount) > 0 ? '+' : '' }}{{ adj.change_amount }}斤
-            </el-tag>
-            <div v-if="adj.reason" class="adjust-reason">{{ adj.reason }}</div>
-          </el-timeline-item>
-        </el-timeline>
-      </el-card>
-
-      <!-- 今日记录 + 历史记录 -->
+      <!-- 历史记录（后端分页，默认 20 条/页）
+           ⚠️ 这里**不再有**「月度进度追踪 / BMI / 目标调整记录」——
+              三块变动很少，已迁到 `/health/weight/{monthly,bmi,adjustments}` 三个子页面。 -->
       <el-row :gutter="16" class="section-row">
         <el-col :span="24">
           <WeightRecordList
             :records="store.records"
-            :show-all="showAllRecords"
-            @toggle-show="showAllRecords = !showAllRecords"
+            :total="store.recordsTotal"
+            :page="currentPage"
+            :page-size="pageSize"
+            :page-sizes="PAGE_SIZE_OPTIONS"
+            :loading="store.loading"
+            @page-change="handlePageChange"
+            @size-change="handleSizeChange"
             @edit="handleEditRecord"
             @delete="handleDeleteRecord"
           />
@@ -105,27 +83,54 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, ArrowLeft } from '@element-plus/icons-vue'
 import { useWeightStore } from '../../stores/healthStore'
-import type { WeightGoalAdjustment, WeightRecord } from '../../types/healthTypes'
+import type { WeightRecord } from '../../types/healthTypes'
 import WeightStatsCards from '../../components/weight/WeightStatsCards.vue'
-import BMIStatus from '../../components/weight/BMIStatus.vue'
-import MonthlyProgress from '../../components/weight/MonthlyProgress.vue'
 import WeightTrendChart from '../../components/weight/WeightTrendChart.vue'
 import WeightRecordList from '../../components/weight/WeightRecordList.vue'
 import WeightForm from '../../components/weight/WeightForm.vue'
 import GoalSettingModal from '../../components/weight/GoalSettingModal.vue'
 
 const store = useWeightStore()
+const router = useRouter()
 const goal = computed(() => store.goal)
 
 const showForm = ref(false)
 const showGoalModal = ref(false)
-const showAllRecords = ref(false)
 const editingRecord = ref<WeightRecord | null>(null)
 const submitting = ref(false)
 const formRef = ref<{ loadRecord: (r: WeightRecord | null) => void }>()
+
+// ─── 历史记录分页（默认 20 条/页）───
+const currentPage = ref(1)
+const PAGE_SIZE_OPTIONS = [10, 20, 30, 50]
+const pageSize = ref(20)
+
+/**
+ * 🔴 `page` 与 `page_size` **必须显式发给后端**：
+ * 接口走 DRF 全局 `StandardPagination`（默认 `page_size = 10`），只取默认值的话
+ * 「总数 57、页面上只有 10 条」，而分页条按 57 渲染 —— 点第 2 页就错位。
+ */
+function recordParams(): Record<string, unknown> {
+  return { page: currentPage.value, page_size: pageSize.value }
+}
+
+async function loadRecords() {
+  await store.fetchRecords(recordParams())
+}
+
+/** 删掉一条后若本页已空，退到新的最后一页（留在原页 = 空表，页码却还在） */
+function clampPage(total: number) {
+  const lastPage = Math.max(1, Math.ceil(Math.max(0, total) / pageSize.value))
+  if (currentPage.value > lastPage) currentPage.value = lastPage
+}
+
+function goSub(name: string) {
+  router.push({ name })
+}
 
 function openAddRecord() {
   editingRecord.value = null
@@ -144,8 +149,9 @@ async function handleDeleteRecord(id: number) {
   try {
     await store.deleteRecord(id)
     ElMessage.success('已删除')
-    store.fetchStats()
-    store.fetchTrend()
+    // 删除前 `recordsTotal` 还是旧数：减 1 才是删完的总数
+    clampPage(store.recordsTotal - 1)
+    await Promise.all([loadRecords(), store.fetchStats(), store.fetchTrend()])
   } catch {
     ElMessage.error('删除失败')
   }
@@ -162,8 +168,10 @@ async function handleFormSubmit(data: Record<string, unknown>) {
       ElMessage.success('记录成功')
     }
     showForm.value = false
-    store.fetchStats()
-    store.fetchTrend()
+    // 增改都**不回第 1 页**（§93）：改动只影响当前页内容，不改变「我在看第几页」。
+    // 新增的记录按 `-record_date` 排在第 1 页顶部 —— 人在第 1 页时会立刻看到，
+    // 人在后页时由 toast + 统计卡变化告知，不把人拽走。
+    await Promise.all([loadRecords(), store.fetchStats(), store.fetchTrend()])
   } catch {
     ElMessage.error('操作失败')
   } finally {
@@ -190,7 +198,7 @@ async function handleGoalSubmit(data: Record<string, unknown>) {
     }
     showGoalModal.value = false
     ElMessage.success('目标设定成功！加油！💪')
-    await store.loadAll()
+    await store.loadAll(recordParams())
   } catch {
     ElMessage.error('操作失败')
   } finally {
@@ -198,8 +206,21 @@ async function handleGoalSubmit(data: Record<string, unknown>) {
   }
 }
 
+async function handlePageChange(page: number) {
+  // 改页码必须**重新取数**：分页时前端只有当前页那 20 条，光改数字 = 表里还是旧内容
+  const lastPage = Math.max(1, Math.ceil(store.recordsTotal / pageSize.value))
+  currentPage.value = Math.min(page, lastPage)
+  await loadRecords()
+}
+
+async function handleSizeChange() {
+  // 每页条数变了 ⇒「第几页」不再指向同一批数据 ⇒ 回第 1 页重取
+  currentPage.value = 1
+  await loadRecords()
+}
+
 onMounted(() => {
-  store.loadAll()
+  store.loadAll(recordParams())
 })
 </script>
 
@@ -209,13 +230,10 @@ onMounted(() => {
 .header-left { }
 .page-title { margin: 0; font-size: 24px; font-weight: 700; color: #1F2937; }
 .page-subtitle { margin: 4px 0 0; font-size: 14px; color: #6B7280; }
-.header-actions { display: flex; gap: 8px; }
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.nav-btn { color: #4B5563; }
 .loading-state { padding: 40px; }
 .section-row { margin: 16px 0 !important; display: flex; overflow: visible; }
 .section-row :deep(.el-col) { display: flex; overflow: visible; }
 .section-row .el-col > * { width: 100%; overflow: visible; }
-.adjustment-card { margin-top: 16px; }
-.adjustment-card :deep(.el-card__body) { padding: 16px 20px; }
-.adjustment-card :deep(.el-timeline) { padding-left: 0; }
-.adjust-reason { font-size: 12px; color: #999; margin-top: 4px; }
 </style>

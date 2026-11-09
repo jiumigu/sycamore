@@ -310,7 +310,14 @@ async function fetchEvents(date: Date) {
   try {
     const [inboxRes, milestoneRes] = await Promise.all([
       request({ url: `/inbox/items/calendar/?year=${year}&month=${month}`, method: 'get' }),
-      request({ url: `/goals/milestones/?target_date_year=${year}&target_date_month=${month}&page_size=100`, method: 'get' }),
+      // 🔴 `exclude_abandoned_goals=1`：**已放弃目标 + 还没完成**的里程碑不进日历（2026-10-26）
+      //    放弃目标时里程碑**不级联删**（项目铁律），所以它们的 pending 项会一直
+      //    留在日历上，看起来像一堆还没做的事。已完成的**要留** —— 翻历史日程
+      //    看「那天做了什么」不能少条目。过滤开关由后端解释，前端不自算。
+      request({
+        url: `/goals/milestones/?target_date_year=${year}&target_date_month=${month}&page_size=100&exclude_abandoned_goals=1`,
+        method: 'get',
+      }),
     ])
     inboxItems.value = inboxRes.data || []
     const raw = Array.isArray(milestoneRes.data) ? milestoneRes.data : (milestoneRes.data.results || [])

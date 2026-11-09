@@ -9,7 +9,6 @@ const routes: RouteRecordRaw[] = [
   // 仪表盘
   { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { title: '仪表盘' } },
   { path: '/summary', name: 'summary', component: () => import('@/modules/summary/views/SummaryDashboard.vue'), meta: { title: '汇总总览' } },
-  { path: '/summary/profile', name: 'summary-profile', component: () => import('@/modules/summary/views/PersonalProfile.vue'), meta: { title: '个人画像' } },
 
   // 收件箱
   { path: '/inbox', name: 'inbox', component: () => import('@/modules/inbox/views/InboxDashboard.vue'), meta: { title: '收件箱' } },
@@ -109,6 +108,26 @@ const routes: RouteRecordRaw[] = [
         name: 'health-weight',
         component: () => import('@/modules/health/views/weight/WeightDashboard.vue'),
         meta: { title: '体重管理' },
+      },
+      // 体重页里「不怎么变动」的三块收进独立子页面（v3.62.37）——
+      // 首页只留统计 / 趋势 / 可翻页的历史记录，入口在页头「调整目标」旁边。
+      {
+        path: 'weight/monthly',
+        name: 'health-weight-monthly',
+        component: () => import('@/modules/health/views/weight/WeightMonthlyPage.vue'),
+        meta: { title: '月度进度追踪' },
+      },
+      {
+        path: 'weight/bmi',
+        name: 'health-weight-bmi',
+        component: () => import('@/modules/health/views/weight/WeightBmiPage.vue'),
+        meta: { title: 'BMI' },
+      },
+      {
+        path: 'weight/adjustments',
+        name: 'health-weight-adjustments',
+        component: () => import('@/modules/health/views/weight/WeightAdjustmentsPage.vue'),
+        meta: { title: '目标调整记录' },
       },
       {
         path: 'menstrual',
@@ -216,26 +235,30 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '应收借出台账' },
   },
 
-  // 三年赎回期
-  {
-    path: '/redemption',
-    name: 'redemption',
-    component: () => import('@/modules/redemption/views/RedemptionHub.vue'),
-    meta: { title: '三年赎回期' },
-  },
+  // ⚠️ v3.64.20：`/redemption`（三年赎回期）不再是独立页面 —— 它现在是自我运转下的
+  //    一个**长阶段**，入口是页头下拉的「阶段账本」（`/selfrun/stage`）。
+  //    这里留一条**软着陆**（同 `health/milestones` 的先例）：旧书签直接跳到新家。
+  //    不给 redirect 的话，从历史记录点进来是**整块空白**（无匹配路由 = 什么都不渲染），
+  //    用户会以为系统坏了 —— 而这只是「换了住址」。
+  //    页面文件仍在磁盘上（`modules/redemption/views/*`）但不被任何地方 import，
+  //    ⇒ 文件删除可由用户安全执行（AI 不动删除）。
+  { path: '/redemption', redirect: '/selfrun/stage' },
   // 自我运转（v3.61.0，P5-A）—— 独立的**顶级分组**（不挂在「目标与项目」下：
   // 目标量「要到哪里去」，自我运转量「这一阶段里有没有在动」）。
-  // 🔴 子页面路由挂在父路径之下（§45）：侧边栏高亮用 `route.path.startsWith(...)`，
+  // 🔴 子页面路由挂在父路径之下（§45）：`route.path.startsWith(...)` 的高亮
   //    每一项各自精确命中、不会互相抢。
-  // 🔴 **每一格都是一个独立页面**（页签与路由同源）：从侧边栏点「本月状态」，
-  //    落在的是本月那一格 —— 不许三项都渲染成同一屏。
-  //    侧边栏只列生命周期里**常用的四项**（制定配置 / 本周 / 本月 / 历史复盘）；
-  //    「阶段总结」「设置」是模块内的深层页，只从页签进（刻意不占菜单项）。
+  // 🔴 **每一格都是一个独立页面**（页签与路由同源）：从页头入口点「本月状态」，
+  //    落在的是本月那一格 —— 不许各项都渲染成同一屏。
+  // 🔴 v3.63.23 起**不占侧边栏菜单项**（`menuConfig.ts` 已撤）：
+  //    入口是页头右上角那个下拉（`LayoutHeader.vue`，原「日/周/月/年视图」空壳改造），
+  //    四个直达项 = 制定配置 / 本周状态 / 本月状态 / 历史复盘，默认落在「本周状态」。
+  //    「阶段总结」仍是模块内的深层页，只从页内页签进。
+  // ⚠️ 所以这里的**路由一条都不能删**：下拉里每一项都指过来，删路由＝点开空白页。
   // 🔴 父路由**刻意不给 component**：父与子若指向同一个组件，
   //    组件内的 `<router-view>` 会递归渲染自己（栈溢出）。
   // 🔴 这 8 条子路由指向**同一个组件**：它是一个仪式，切子页只换面板，
   //    不该把页头那两把尺子和阶段信息重建一遍。
-  //    （侧边栏 4 条 = 生命周期的四段；「制定配置」下再挂 3 条页内子页面。）
+  //    （页头下拉 4 项 = 生命周期的四段；「制定配置」下再挂 3 条页内子页面。）
   // ⚠️ 没有进行中的阶段时，**只有「制定配置」渲染向导** ——
   //    其余各页各自说清「这一页为什么还是空的」，并给出「去制定配置」的出口。
   //    （曾经的写法是「无阶段时任一子页整页渲染向导」，结果是三个菜单点下去
@@ -298,6 +321,18 @@ const routes: RouteRecordRaw[] = [
         name: 'selfrun-summary',
         component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
         meta: { title: '阶段总结' },
+      },
+      // 阶段账本（v3.64.19）—— **长阶段**的详情页：钱 / 时间 / 作品 / 小阶段。
+      // 🔴 与上面 8 条不是并列关系：这一页**不渲染页签、不出两把尺子**。
+      //    长阶段按设计不产生 `SelfRunPeriod`，所以「本周 / 本月 / 按期修订 /
+      //    归档周期」在它身上一件都做不了 —— 摆出页签只会让人点进去看到空。
+      // ⚠️ `:id?` 可选：页头下拉那个入口拿不到 id（它只知道「去账本」），
+      //    不带 id 时页面自己取「正在跑的那个长阶段」（同一时间只有一个）。
+      {
+        path: 'stage/:id?',
+        name: 'selfrun-stage',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '阶段账本' },
       },
       // ⚠️ 原第 6 条 `settings`（「设置」）**已删** —— 它与「制定配置」页里的
       //    「本阶段 KPI（即时生效）」是同一张表、同一批按钮，纯重复入口。
@@ -471,6 +506,11 @@ const routes: RouteRecordRaw[] = [
   { path: '/analysis/progress', name: 'analysis-progress', component: () => import('@/core/analysis/views/ProgressAnalysis.vue'), meta: { title: '进度分析' } },
   { path: '/analysis/trend', name: 'analysis-trend', component: () => import('@/core/analysis/views/ProgressAnalysis.vue'), meta: { title: '趋势分析' } },
   { path: '/analysis/correlation', name: 'analysis-correlation', component: () => import('@/core/analysis/views/ProgressAnalysis.vue'), meta: { title: '关联分析' } },
+
+  // 展厅（对外输出端口）—— 可被潜在客户走进去看的策展空间。
+  // 预览是只读展示，策展编辑是「选什么、怎么写」的唯一出口。
+  { path: '/showroom/preview', name: 'showroom-preview', component: () => import('@/modules/showroom/views/ShowroomPreview.vue'), meta: { title: '展厅预览' } },
+  { path: '/showroom/edit', name: 'showroom-edit', component: () => import('@/modules/showroom/views/ShowroomEdit.vue'), meta: { title: '策展编辑' } },
 
   // 认证
   { path: '/login', name: 'login', component: () => import('@/core/auth/views/LoginPage.vue'), meta: { title: '登录' } },

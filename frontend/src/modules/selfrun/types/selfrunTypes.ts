@@ -20,7 +20,7 @@
 export type StageStatus = 'draft' | 'active' | 'paused' | 'closed'
 export type PauseReason = 'trip' | 'sick' | 'fallow' | 'other'
 export type PeriodType = 'weekly' | 'monthly'
-export type PeriodStatus = 'on_track' | 'slipping' | 'slid' | 'no_record' | 'fallow'
+export type PeriodStatus = 'great' | 'on_track' | 'slipping' | 'slid' | 'no_record' | 'fallow'
 /** 🔴 刻意只有两个值：三种「暂停」作用域不同，混进来必成兜底桶 */
 export type MetricStatus = 'active' | 'retired'
 export type Verdict = 'goal' | 'floor' | 'miss' | 'empty' | 'unknown'
@@ -53,12 +53,41 @@ export const VERDICT_LABEL: Record<string, string> = {
   unknown: '取不到',
 }
 
+/**
+ * 周期档位 —— **只放本名，不带「本周 / 本月」**（v3.62.45）。
+ *
+ * 🔴 原来这里写死「本周合格」，于是「本月状态」页也在说「本周」——
+ *    用户读到的第一反应是「走错页了」。前缀现在由 `periodStatusLabel()`
+ *    按 `periodType` 拼；页面知道自己开的是哪把尺子。
+ */
 export const PERIOD_STATUS_LABEL: Record<string, string> = {
-  on_track: '本周合格',
-  slipping: '本周及格',
-  slid: '本周活着',
-  no_record: '这周没有记录',
+  great: '我超棒',
+  on_track: '合格',
+  slipping: '及格',
+  slid: '活着',
+  no_record: '这期没有记录',
   fallow: '休耕中',
+}
+
+/** 「本周」/「本月」——与后端 `PERIOD_TYPE_PREFIX` 同一份语义 */
+export const PERIOD_PREFIX: Record<string, string> = {
+  weekly: '本周',
+  monthly: '本月',
+}
+
+/** 月度三问的题数（后端 `MONTHLY_QUESTION_COUNT`）—— 判定分母恒为它 */
+export const MONTHLY_QUESTION_COUNT = 3
+
+/**
+ * 拼出完整档位名：`periodStatusLabel('great', 'monthly')` ⇒ `本月我超棒`。
+ *
+ * `periodType` 省略时只返回本名（阶段汇总页把周与月混在一起统计，不能带前缀）。
+ */
+export function periodStatusLabel(status: string, periodType?: string | null): string {
+  const core = PERIOD_STATUS_LABEL[status]
+  if (!core) return status || '—'
+  const prefix = periodType ? PERIOD_PREFIX[periodType] ?? '' : ''
+  return prefix + core
 }
 
 export const STAGE_STATUS_LABEL: Record<string, string> = {
@@ -186,10 +215,35 @@ export interface SelfRunStage {
   note: string
   created_at: string
   updated_at: string
+  /** 上级阶段 id（顶级阶段为 `null`）。⚠️ **两层封顶**：有 `parent` 的一定是叶子 */
+  parent: number | null
+  /** 上级阶段名（由后端拼，前端不拿 id 去列表里反查 —— 列表可能没拉全） */
+  parent_name: string | null
+  /** 现算不落库：挂了多少个小阶段 */
+  children_count: number
+  /**
+   * 长阶段 = **顶级 + 一条 KPI 都没有**（后端判，前端不自己推）。
+   *
+   * 🔴 长阶段只汇总（钱 / 时间 / 作品），**不产生周月判定** ——
+   *    `SelfRunPeriod` 只挂在叶子阶段上，长阶段给它配 KPI 后端直接 400。
+   * ⚠️ 判据是「有没有 KPI」而不是「有没有孩子」：长阶段可以先建、后挂小阶段，
+   *    那段空窗期它同样是长阶段。
+   */
+  is_long_stage: boolean
+  /** 账本配置（目前只有 `pool_principal` 本金）。**不是**派生值，是输入 */
+  ledger_config: { pool_principal?: number } & Record<string, unknown>
   /** 现算不落库：生效中的 KPI 条数 */
   metric_count: number
-  /** 现算不落库：已进行天数 */
+  /** 现算不落库：今天在阶段里是第几天；0 = 还没开始 */
   elapsed_days: number
+  /** 现算不落库：天数的显示词（「第 12 天」/「共 61 天」/「还有 1 天开始」）。
+   *  🔴 三种态的词只由后端定一份，模板直接印，别在页里各写一遍三元表达式。
+   *  ⚠️ 它**不含起止日期** —— 区间在 `range_label`，两处都写会看着像两个值。 */
+  days_label: string
+  /** 现算不落库：阶段区间（「2026-11-01 ~ 2026-12-31（61 天）」/
+   *  「2026-11-01 起（不设终点，手动收尾）」）。
+   *  🔴 起止日期只此一份：页头、仪表盘卡、阶段总结都印它，谁都不许自己拼 str。 */
+  range_label: string
 }
 
 export interface SelfRunMetric {
@@ -317,7 +371,29 @@ export interface Reading {
 
 export interface PeriodStatusExplain {
   value: PeriodStatus | ''
-  /** 分子：达目标或达底线的条数 */
+  /**
+   * 档位全名（含「本周 / 本月」前缀），**后端拼好下发**。
+   * 🔴 月度还没答三问时是「待答三问」（`value` 为空串）——
+   *    这个词也放后端，前端自己写一遍就等于中文表又多一份。
+   */
+  label_text?: string
+  /**
+   * 判定依据：`kpi` = 周达标条数比；`questions` = 月度三问（唯一）；
+   * `pending` = 月度三问还没答 ⇒ **未判定**（`value` 为空），
+   * 此时 `ok/counted` 只是 KPI 参考，不参与判定。
+   * 🔴 v3.64.6 起月度只有三问这一把尺子：不许再拿 KPI 档位顶上去
+   *    （否则同一期会先「我超棒 4/4」后「合格 2/3」，读起来像归档给降了档）。
+   */
+  basis?: 'kpi' | 'questions' | 'pending'
+  /** 整句判定说明（后端拼好：「判定线：…」或「三问答是 2/3 ⇒ 本月合格」） */
+  basis_text?: string
+  /** 月度：答「是」的个数 */
+  yes?: number
+  /** 月度：已答个数（「否」也算答过） */
+  answered?: number
+  /** 月度三问一个都没答 ⇒ true（此时 `value` 为空串） */
+  awaiting_answers?: boolean
+  /** 分子：达目标或达底线的条数（月度未判定时仅作参考） */
   ok: number
   /** 分母：**剔掉 unknown 与 skipped 之后**的条数 */
   counted: number
@@ -327,6 +403,11 @@ export interface PeriodStatusExplain {
   empty: number
   /** 🔴 阈值由后端下发，前端只上色不判 */
   thresholds: Record<string, number>
+  /** 档位本名（后端只有一份；前端 `PERIOD_STATUS_LABEL` 只是兜底） */
+  labels?: Record<string, string>
+  /** 本期前缀：`本周` / `本月` */
+  prefix?: string
+  monthly_question_count?: number
 }
 
 export interface Heartbeat {
@@ -436,6 +517,8 @@ export interface TemplateEnum {
   module_value_keys: string[]
   /** `temporal_*` 的 `l2` 候选（取自库里的 `activity_type`，不是常量表） */
   l2_options: string[]
+  /** `works_count` 的 `work_kind` 候选（后端 `works.constants.WORK_KIND_CHOICES` 直发） */
+  work_kind_options: SelfRunEnumOption[]
 }
 
 /** 某一条 KPI 在**某一期**的目标（`selfrun_metric_plan` 一行）。 */
@@ -543,7 +626,12 @@ export interface StageMetricStat {
   avg: number | null
   hit: number
   total: number
-  best: { value: number; period_key: string } | null
+  /**
+   * 最好的一期。`period_label` = 「2026-W42（10-12 ~ 10-18）」。
+   * 🔴 **显示只用 `period_label`**：单独一个 `2026-W42` 读不出是几号到几号，
+   *    ISO 周号跨年时心算必错。`period_key` 留给比对/取数，不要印。
+   */
+  best: { value: number; period_key: string; period_label: string } | null
 }
 
 export interface StageSummary {
@@ -614,7 +702,170 @@ export interface OverviewResponse {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 七、归一化小工具
+// 七、阶段账本（`GET /stages/<pk>/ledger/`）
+// ══════════════════════════════════════════════════════════════
+
+/** 账本区间。**半开区间在数据层**；这里给的是「第几天 / 共几天 / 还剩几天」、
+ *  以及 `range_label`（区间的人话，后端拼）—— 前端一个日期都别自己减。 */
+export interface LedgerRange {
+  start: string
+  end: string
+  total_days: number
+  elapsed_days: number
+  remaining_days: number
+}
+
+/** 时间块：与阶段总结、周 KPI「成长小时数」**同源**（都读映射表 L1 那列） */
+export interface LedgerTime {
+  /** 六类小时。键集由后端 `ATTRIBUTION_CHOICES_LIST` 派生 —— 加词自动多一格 */
+  hours: Record<string, number>
+  /** 已记录小时 = **六类之和**（红线：两者必须相等，不等就是漏数）。**不含睡眠** */
+  covered_hours: number
+  /** 被剔除的睡眠小时（夜间 + 午睡）。只是报出来，不进六类、不进分子。
+   *  🔴 `covered_hours + excluded_sleep_hours` == 区间内全部记录时长 */
+  excluded_sleep_hours: number
+  /** 其中「没设默认归因、按兜底计入」的小时。**不排除在六类之外**，只单列 */
+  fallback_hours: number
+  /** 天数 × 每天可支配小时（**已扣生存时间、不含睡眠**） */
+  theoretical_hours: number
+  /** 分母的「每天几小时」—— 页面文案用它，**不许写死 12 / 14**（改口径只动后端常量） */
+  theoretical_daily_hours: number
+  /** 分子分母都不含睡眠。可支配按每天 14h 估、醒着 16h ⇒ 记录极全时仍可能略 > 1。
+   *  别夹到 100%（照实显示，进度条自己封顶） */
+  coverage_rate: number
+  coverage_warn: boolean
+  /** 成长小时 ÷ 已记录小时（分母不含睡眠） */
+  toward_ratio: number
+}
+
+export interface LedgerPool {
+  principal: number
+  injected: number
+  self_expense: number
+  self_income: number
+  balance: number
+  /** 滚动 30 天日均净消耗。⚠️ 分母固定 30 —— 阶段刚开几天时偏低 */
+  avg_daily: number
+  /** 按当前速度能撑到哪天；`null` 时**必看** `support_zero_reason` */
+  support_until: string | null
+  /** 🔴 查表用，**不许**自己判 `support_until === null` 想当然（0 不是 ∞） */
+  support_zero_reason: string | null
+}
+
+/** 赎回归属一档（`period_tag` 四档 + `unmarked`） */
+export interface LedgerTier {
+  period_tag: string
+  /** 🔴 真实**笔数**（后端 `Count`）。旧的 `Sum('id')` 会把 2 笔显示成 14 笔 */
+  count: number
+  /** 发生额（支出与收入直接相加），**不是**净额 */
+  total: number
+}
+
+export interface LedgerMoney {
+  pool: LedgerPool
+  tier: LedgerTier[]
+  /** 允许日均 = 剩余余额 ÷ 剩余天数；与 `pool.avg_daily` **同量纲**（每天多少钱），
+   *  可直接比大小。`null` 时看 `daily_allowance_zero_reason`。 */
+  daily_allowance: number | null
+  /** `no_principal` = 没设本金；`no_day_left` = 阶段已到最后一天 */
+  daily_allowance_zero_reason: string | null
+  /** 预算占用 = 日均 ÷ 允许日均；`null` 时看 `daily_use_rate_zero_reason` */
+  daily_use_rate: number | null
+  /** `no_allowance` = 允许值缺失或 ≤0；`net_inflow` = 日均是负的（钱在变多），比值无意义 */
+  daily_use_rate_zero_reason: string | null
+  /** 日均窗口的实际覆盖天数（阶段刚开时远小于 30） */
+  avg_daily_sample_days: number
+  /** 该窗口内的**真实**日均 —— 样本不足时它远大于被稀释的 `pool.avg_daily` */
+  avg_daily_sample_net_per_day: number
+  /** `avg_daily_sample_days < 30` ⇒ 均值偏低、「撑到哪天」偏乐观，必须在页面上说出来 */
+  avg_daily_sample_thin: boolean
+}
+
+/** 子阶段行。**达标率是那个小阶段的**，不是长阶段的判定结果 ——
+ *  长阶段只汇总、不判定（它没有 `SelfRunPeriod`）。 */
+export interface LedgerChild {
+  id: number
+  name: string
+  range_label: string
+  status_display: string
+  /** 命中次数（达目标或达底线） */
+  hit: number
+  /** 有判定的次数 */
+  judged: number
+  /** `hit / judged`；`null` = 还没有任何一期被判定过（**不是 0%**） */
+  reach_rate: number | null
+}
+
+/** 账本「作品」格里的一件 —— 就是这一格里那个数字的**依据**。
+ *
+ * 🔴 `created_at` 是**成形那一刻**（合成时的本地时间），不是那件事发生的日期；
+ *    弹窗里要显示到分钟，用户才能自己看出它落在阶段区间的哪一刻。
+ */
+export interface LedgerWorkItem {
+  id: number
+  name: string
+  /** 类型显示词（后端 `get_kind_display()`） */
+  kind: string
+  /** 出口状态显示词（后端 `get_status_display()`） */
+  status: string
+  summary: string
+  /** 空串 = 「要发但还没定发到哪」，与「只给自己」不是一回事 */
+  channel: string
+  created_at: string
+}
+
+export interface StageLedger {
+  stage_id: number
+  range: LedgerRange
+  time: LedgerTime
+  money: LedgerMoney
+  /**
+   * `count` 与 `items` **出自同一次取数**，所以 `items.length` 只会因为
+   * `truncated` 而小于 `count` —— 绝不会出现「写着 2 件、列出 3 条」。
+   */
+  works: {
+    count: number
+    items: LedgerWorkItem[]
+    /** 明细最多列几条（后端下发，前端不写死第二套上限） */
+    limit: number
+    /** 超出上限 ⇒ 弹窗必须说「还有 N 件」，不能让人以为就这些 */
+    truncated: boolean
+  }
+  children: LedgerChild[]
+}
+
+/**
+ * `support_zero_reason` 的显示词 —— **只查表，不猜语义**。
+ *
+ * 后端把原因码给出来，前端只负责翻译；以后多一种「算不出来」的原因时，
+ * 这里漏加只会显示 `—`，而不会像 `|| '永不耗尽'` 那样**静默说反话**。
+ */
+export const SUPPORT_ZERO_LABEL: Record<string, string> = {
+  no_self_expense: '算不出来',
+  // 🔴 净流入不是「算不出来」，是一个结论：钱在变多，没有耗尽日
+  net_inflow: '钱在变多',
+}
+
+/** 每个原因码配一句人话（解释为什么算不出来，并指出去哪补） */
+export const SUPPORT_ZERO_HINT: Record<string, string> = {
+  no_self_expense: '这段路还没有一条「为自己」的账，没有每天的消耗速度可外推 —— 撑多久算不出来。',
+  net_inflow: '近 30 天是净流入：进来的比花的多，池子在涨，不存在「撑到哪天」。',
+}
+
+/** `daily_use_rate_zero_reason` 的显示词 —— 两种「没有比值」也要分开说 */
+export const USE_RATE_ZERO_LABEL: Record<string, string> = {
+  no_allowance: '—',
+  net_inflow: '净流入',
+}
+
+/** `daily_allowance_zero_reason` 的显示词 —— 两种「空」，别都说成算不出来 */
+export const ALLOWANCE_ZERO_LABEL: Record<string, string> = {
+  no_principal: '未设本金',
+  no_day_left: '已到最后一天',
+}
+
+// ══════════════════════════════════════════════════════════════
+// 八、归一化小工具
 // ══════════════════════════════════════════════════════════════
 
 /**
@@ -659,4 +910,157 @@ export function targetSourceText(r: { target_source?: TargetSource }): string {
   const s = r.target_source
   if (!s || s === 'metric') return ''
   return TARGET_SOURCE_LABEL[s] ?? s
+}
+
+/** 复盘补充：本期到期里程碑 + 本期时间流失（后端现算，不落库） */
+export interface PeriodGoalItem {
+  id: number
+  title: string
+  goal: string
+  target_date: string | null
+  status: string
+}
+
+/** 一期内「具体做过的事」的一条（L3 任务名 + 时长 + 归因） */
+export interface WhatHappenedItem {
+  task_name: string
+  hours: number
+  /** 六词归因；空串 = 没解析出来（不是「未归类」，那种情况后端会给 `未归类`） */
+  attribution: string
+}
+
+export interface WhatHappenedDay {
+  date: string
+  /** `10/26` —— 后端给，前端不拼（同一份日期格式只留一处） */
+  md: string
+  /** `周一` —— 周历表只在后端一份 */
+  weekday: string
+  total_hours: number
+  items: WhatHappenedItem[]
+  /** 没列出来的还有几件 —— 让「3 件」看起来是节选，不像「这周只做了 3 件」 */
+  more: number
+}
+
+/** 时段轴的一块：某人某天从第几分钟到第几分钟做了什么事。
+ *
+ * 🔴 只有**分钟**，没有时间串 —— 拿到 `'09:00'` 就会有人 `new Date()`，
+ *    而 `USE_TZ` 下那会差 8 小时，且结果看起来完全合法（块还是在个合理位置）。
+ */
+export interface WhatHappenedBlock {
+  /** 本地日期 `2026-10-26` —— 只用来找列，不当时间解析 */
+  date: string
+  /** 当天第几分钟（0–1440） */
+  from: number
+  to: number
+  minutes: number
+  task_name: string
+  /** 六词归因；空串 = 没解析出来（配色查 `ATTRIBUTION_COLOR_MAP`） */
+  attribution: string
+  /** `null` = 完整；`head`/`tail` = 被午夜切出来的前/后段；`mid` = 中间整天 */
+  split: 'head' | 'tail' | 'mid' | null
+}
+
+/** 时间轴的一列 = 一天。没记录的天也在，否则「周三空着」看不出来 */
+export interface WhatHappenedColumn {
+  date: string
+  /** `10/26` */
+  md: string
+  /** `周一` */
+  weekday: string
+}
+
+export interface WhatHappened {
+  days: WhatHappenedDay[]
+  /** 有记录的天数（≠ 周期天数） */
+  day_count: number
+  /** 各归因的小时合计，按价值序（后端给顺序，前端不排） */
+  attr_totals: { label: string; hours: number }[]
+  /** 周期内**每一天** —— 时间轴的列 */
+  columns: WhatHappenedColumn[]
+  /** 原始区间：一条记录一块，跨天切成多块（与 `days` 不合并的口径不同） */
+  blocks: WhatHappenedBlock[]
+  /** 块覆盖的分钟范围；`null` = 本期一块都没有 */
+  span: { from: number; to: number } | null
+  /** 因上限被丢掉的块数（0 = 没丢）。非 0 必须显式告诉用户 */
+  truncated: number
+}
+
+/** 成果卡的一行：三栏共用「有名字 + 哪一天 + 从哪来」这套骨架。
+ *
+ * 🔴 日期只有后端给的 `date` / `md` / `weekday` 三件套 —— 拿到时间串就有人
+ *    `new Date()`，`USE_TZ` 下会差 8 小时且结果看着完全合法。
+ */
+export interface OutcomeRow {
+  id: number
+  /** 成品 = 作品名；里程碑 = 里程碑标题；办完的事 = 小确幸标题或收件箱内容 */
+  title: string
+  /** 只成品有：作品类型显示词（文章 / 绘画作品 …） */
+  kind?: string
+  /** 只成品有：出口状态显示词（只给自己 / 已发 …） */
+  status?: string
+  /** 只里程碑有：属于哪个目标 */
+  goal?: string
+  date: string
+  md: string
+  weekday: string
+  /** 只「办完的事」有：这一条从哪来（`both` = 两处都记过，只出一行） */
+  source?: 'sugar' | 'inbox' | 'both'
+  /** 只「办完的事」有：小确幸档位词/色，后端从 `SUGAR_HAPPINESS_BANDS` 给 */
+  happiness_label?: string | null
+  happiness_color?: string | null
+}
+
+/** 一栏：`count` 是全量、`items` 可能被截断（截断时 `truncated=true`） */
+export interface OutcomeColumn {
+  count: number
+  items: OutcomeRow[]
+  limit: number
+  truncated: boolean
+}
+
+/** 「这一期干成了什么」—— **三栏各报各的数，没有跨源总数**。
+ *
+ * 同一件事可能既是作品又在小确幸里记过（10-18 那篇文章两处都有），
+ * 合并成一个数就是重复计数，而且没法回头去重。
+ */
+export interface PeriodOutcomes {
+  /** 出了成品（作品库，按「成形于」） */
+  works: OutcomeColumn
+  /** 完成了里程碑（与复盘「缺口」卡同源，不另查一次） */
+  milestones: OutcomeColumn
+  /** 办完的事 = 小确幸（只 `秩序型`）+ 收件箱 `done`，按标题归一去重 */
+  finished: OutcomeColumn & {
+    /** 本期**没标快乐类型**的小确幸条数 —— 不是「没完成」，是「没分类」 */
+    untyped_count: number
+  }
+  /** 三栏全 0 ⇒ 整卡不渲染（不是渲染三行 0） */
+  empty: boolean
+}
+
+export interface PeriodExtras {
+  period_type: PeriodType
+  /** 这一周我做了什么 —— 按天分组的具体任务（勾回忆用） */
+  what_happened: WhatHappened
+  goals: {
+    /** 本期到期（target_date 落在本期）的里程碑数 */
+    due: number
+    /** 其中已完成的 */
+    done: number
+    /** 该交没交的（`due - done`）——「本期新增逾期」，这才是本周的账 */
+    missed: number
+    /** 本期之前到期、至今仍未完成的（历史积压）—— 跨周恒定，只做背景说明 */
+    overdue: number
+    items: PeriodGoalItem[]
+  }
+  time_loss: {
+    loss_hours: number
+    total_hours: number
+    /** 流失占全部记录小时的比例；`null` = 本期没有任何时间记录（≠ 0%） */
+    ratio: number | null
+    per_day: number
+    days: number
+    top: { task_name: string; hours: number }[]
+  }
+  /** 这一期干成了什么 —— 投入之外的**产出**视角（三栏，不给跨源总数） */
+  outcomes: PeriodOutcomes
 }

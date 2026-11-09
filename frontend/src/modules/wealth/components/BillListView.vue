@@ -203,6 +203,23 @@
             <el-option v-for="t in PERIOD_TAGS" :key="t" :label="t" :value="t" />
           </el-select>
         </el-form-item>
+        <!-- 中途注入只对收入有意义：注入是「钱进来」。
+             🔴 它和「赎回归属」是**两把正交的尺子**：归属管「这笔钱算不算自己的生活支出」，
+                注入管「这笔钱有没有补进赎回池」。所以不塞进归属枚举（那会让归属多一个
+                兜底桶），而是单独一维。 -->
+        <el-form-item v-if="form.transaction_type === '收入'" label="中途注入">
+          <el-switch v-model="form.pool_inject" :disabled="!injectReady" />
+          <span class="inject-hint">
+            <template v-if="injectReady">
+              补进赎回池的「中途注入」；标了会从「为自己」净消耗里排除，不重复计算
+            </template>
+            <template v-else>
+              <!-- 🔴 开关留着但禁用：直接隐藏会让「刚建好的一列」凭空消失，
+                   用户以为功能没做；禁用它才说得清「现在不能用、为什么不能用」 -->
+              暂不可用 —— 后端缺 selfrun_pool_inject 表，先执行数据库迁移
+            </template>
+          </span>
+        </el-form-item>
         <el-row :gutter="10">
           <el-col :span="12">
             <el-form-item label="日期">
@@ -240,11 +257,13 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, DataAnalysis, Collection } from '@element-plus/icons-vue'
 import * as wealthApi from '../api/wealthApi'
 import { PERIOD_TAGS, PERIOD_TAG_META, PERIOD_TAG_FILTER_OPTIONS } from '../types/wealthTypes'
+import { listPoolInjects, setPoolInject } from '@/modules/selfrun/api/selfrunApi'
 import { formatAmount, formatSignedAmount } from '@/shared/utils/format'
 
 /** 外部（月度日历）联动年月：默认按该月筛选 */
@@ -499,8 +518,28 @@ const saving = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive({
   transaction_type: '支出', amount: 0, date: '', category: '', subcategory: '',
-  merchant: '', notes: '', necessity: '', period_tag: '',
+  merchant: '', notes: '', necessity: '', period_tag: '', pool_inject: false,
 })
+
+/** 已标为「中途注入」的账单 id。**只用来预填表单开关**，不参与列表渲染。 */
+const poolInjectIds = ref<Set<number>>(new Set())
+/** 注入标记能不能用（后端 503 = 表没建）。`false` 时开关禁用并写明原因 */
+const injectReady = ref(true)
+
+async function loadPoolInjects() {
+  try {
+    const res = await listPoolInjects()
+    poolInjectIds.value = new Set(res.data.bill_ids)
+    injectReady.value = true
+  } catch {
+    // 后端还没跑 selfrun 0010 迁移时这里是 503。**不弹错**：
+    // 记账页本身能正常用，只是这个开关不起作用；弹红框会把「没迁移」说成「记账坏了」。
+    // 🔴 但也不能假装一切都好 —— 开关禁用并在旁边写明原因（`injectReady`），
+    //    否则用户点它没反应，还以为是浏览器卡了。
+    poolInjectIds.value = new Set()
+    injectReady.value = false
+  }
+}
 
 function openForm(row?: any) {
   editingId.value = row?.id ?? null
@@ -513,11 +552,15 @@ function openForm(row?: any) {
   form.notes = row?.notes || ''
   form.necessity = row?.transaction_type === '支出' ? (row?.necessity || '') : ''
   form.period_tag = row?.period_tag || ''
+  form.pool_inject = row?.id != null && poolInjectIds.value.has(row.id)
   formVisible.value = true
 }
 
 function onTypeChange(t: string) {
   if (t === '收入') form.necessity = ''
+  // 支出不能标注入（后端也会拒），切回支出时把开关连同状态一起归零 ——
+  // 否则「切到支出再切回收入」会让一个看不见的 `true` 留在这里
+  if (t !== '收入') form.pool_inject = false
 }
 
 async function saveBill() {
@@ -527,20 +570,42 @@ async function saveBill() {
   }
   saving.value = true
   try {
+    // 🔴 `pool_inject` 不在这张表里（wealth_bill_list 是外部表，禁加列），
+    //    必须从账单 payload 里摘掉，否则会被账单接口当成未知字段
     const payload: Record<string, unknown> = { ...form }
+    delete payload.pool_inject
     if (form.transaction_type === '收入') payload.necessity = ''
     payload.date = form.date || new Date().toISOString().slice(0, 19).replace('T', ' ')
-    if (editingId.value) {
-      await wealthApi.updateBill(editingId.value, payload)
+
+    let billId = editingId.value
+    if (billId) {
+      await wealthApi.updateBill(billId, payload)
     } else {
-      await wealthApi.createBillRecord(payload)
+      const res: any = await wealthApi.createBillRecord(payload)
+      billId = res?.data?.id ?? res?.data?.bill_id ?? null
     }
+
+    // 标记单独一次请求：账单保存成功不该被标记失败拖回滚（钱已经记进去了）
+    if (billId) {
+      const want = form.transaction_type === '收入' && form.pool_inject
+      const had = poolInjectIds.value.has(billId)
+      if (want !== had) {
+        try {
+          await setPoolInject(billId, want)
+          if (want) poolInjectIds.value.add(billId)
+          else poolInjectIds.value.delete(billId)
+        } catch (err) {
+          ElMessage.warning(`账单已保存，但「中途注入」没标上：${apiErrorText(err, '标记失败')}`)
+        }
+      }
+    }
+
     ElMessage.success('保存成功')
     formVisible.value = false
     loadBills()
     loadStats()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -563,12 +628,21 @@ onMounted(() => {
   billDateRange.value = defaultMonthRange.value
   loadBills()
   loadStats()
+  loadPoolInjects()
 })
 </script>
 
 <style scoped>
 .bill-list-view {
   /* 默认无外层内边距，由父卡片容器控制 */
+}
+
+/* 开关右边那句解释：它是「口径说明」，不是报错 —— 用次级色，别抢眼 */
+.inject-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
 }
 
 .necessity-summary {

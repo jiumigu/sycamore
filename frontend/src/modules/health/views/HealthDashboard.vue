@@ -7,6 +7,15 @@
         <el-tag type="success" class="module-tag">身心健康</el-tag>
       </div>
       <div class="header-actions">
+        <!-- v3.63.12：体重 / 好朋友两条记录原本各占一行菜单，现收回本页页头 ——
+             它们和步数记录是同一份身体账本，日常动作都是「进来记一笔」。
+             ⚠️ 放在最左、也放在「添加记录」之前：先选「记哪本账」，再记。 -->
+        <el-button size="default" @click="$router.push('/health/weight')">
+          ⚖️ 体重管理
+        </el-button>
+        <el-button size="default" @click="$router.push('/health/menstrual')">
+          🩷 好朋友跟踪
+        </el-button>
         <el-button type="primary" @click="openCreate">
           <el-icon><Plus /></el-icon> 添加记录
         </el-button>

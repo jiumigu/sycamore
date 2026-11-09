@@ -42,6 +42,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { savePresetByType } from '@/shared/api/coreApi'
@@ -98,8 +99,8 @@ async function handleSave() {
     ElMessage.success('已保存')
     emit('saved')
     emit('update:visible', false)
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     saving.value = false
   }

@@ -116,6 +116,10 @@ export interface Goal {
   status: GoalStatus
   status_display?: string
   progress_percentage: number
+  /** 进度来源：当前恒为 `'manual'`（手填输入，接口可改） */
+  progress_source?: 'manual'
+  /** 账本口径进度（只读）：有子目标取平均，否则里程碑完成率；`null` = 没有账本，**不是 0%** */
+  progress_ledger?: number | null
   start_date: string | null
   deadline: string | null
   year: number | null

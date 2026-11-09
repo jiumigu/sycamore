@@ -4,8 +4,8 @@
       <div class="tl-head">
         <span class="tl-title">KPI 模板库</span>
         <span class="tl-hint">
-          这里是**起点库** —— 挑一条进阶段时，值会被**抄进**那个阶段；
-          以后改这里（或删这里）都**不会回头改已建的阶段**。增删改都落库，刷新页面还在。
+          这里是<b>起点库</b> —— 挑一条进阶段时，值会被<b>抄进</b>那个阶段；
+          以后改这里（或删这里）都<b>不会回头改已建的阶段</b>。增删改都落库，刷新页面还在。
         </span>
         <span class="tl-spacer" />
         <el-button size="small" type="primary" @click="openCreate">+ 新建模板</el-button>
@@ -57,8 +57,8 @@
     </el-table>
 
     <div class="tl-foot">
-      「被引用」= 有几条**已建 KPI** 的来源指向这条模板。删掉模板**不会动它们** ——
-      来源只是展示用的标记（`template_key` 是字符不是外键），不参与取数。
+      「被引用」= 有几条<b>已建 KPI</b> 的来源指向这条模板。删掉模板<b>不会动它们</b> ——
+      来源只是展示用的标记（template_key 是字符不是外键），不参与取数。
     </div>
 
     <!-- ── 新建 / 改 ─────────────────────────────────────── -->
@@ -142,77 +142,19 @@
 
         <el-divider content-position="left">取数方式</el-divider>
 
-        <el-form-item label="方式">
-          <el-radio-group v-model="form.source_kind">
-            <el-radio-button value="manual">手工登记</el-radio-button>
-            <el-radio-button value="auto">自动取数</el-radio-button>
-            <el-radio-button value="auto_plus_manual">自动 + 手工补记</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-
-        <template v-if="form.source_kind === 'manual'">
-          <el-alert
-            type="info" :closable="false" show-icon
-            title="手工项不需要取数器"
-            description="系统里没有对应模块的东西（比如宣纸、画）只能手工记 —— 每周/每月自己去「本周状态」里补一笔。"
-          />
-        </template>
-        <template v-else>
-          <el-form-item label="取数器">
-            <el-select v-model="form.reader_kind" style="width: 100%">
-              <el-option
-                v-for="r in readerChoices" :key="r.value"
-                :label="readerLabel(r)" :value="r.value"
-              />
-            </el-select>
-          </el-form-item>
-
-          <!-- `where_key === 'l2'`：按活动类型过滤（候选值取自库里，不是常量表） -->
-          <el-form-item v-if="currentReader?.where_key === 'l2'" label="活动类型">
-            <el-select
-              v-model="form.where_value" multiple filterable allow-create
-              placeholder="留空 = 不过滤（全部活动类型都算）" style="width: 100%"
-            >
-              <el-option v-for="v in l2Options" :key="v" :label="v" :value="v" />
-            </el-select>
-            <div class="tl-hint">
-              候选值来自**库里的 `activity_type`**（不是常量表）—— 这就是「深度工作」那一层。
-            </div>
-          </el-form-item>
-
-          <!-- `where_key === 'key'`：白名单键（写错会直接报错，所以给你选、不给你填） -->
-          <el-form-item v-else-if="currentReader?.where_key === 'key'" label="取值键">
-            <el-select v-model="form.where_value" style="width: 100%">
-              <el-option v-for="k in mvKeys" :key="k" :label="k" :value="k" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item v-else label="附加条件">
-            <div class="tl-muted">
-              这个取数器自带固定口径，没有需要你填的条件。
-            </div>
-          </el-form-item>
-
-          <el-alert
-            v-if="form.source_kind === 'auto_plus_manual'"
-            type="warning" :closable="false" show-icon
-            title="「自动 + 手工补记」= 自动取的 + 你补的，两者相加"
-            description="线下发生的事自动源覆盖不到，所以留一个补记口。只有真的两边都会有时才选它。"
-          />
-        </template>
-
-        <el-alert
-          v-if="form.source_kind !== 'manual' && !readerChoices.length"
-          type="error" :closable="false" show-icon
-          title="拿不到取数器清单"
-          description="枚举是随模板列表一起下发的 —— 先点「刷新」把列表拉回来，再回来改这条。"
+        <!-- 🔴 这块与「改这条 KPI」共用同一个组件：取数器 → 条件字段的分流只此一份 -->
+        <SourceConfigFields
+          v-model:source-kind="form.source_kind"
+          v-model:reader-kind="form.reader_kind"
+          v-model:where-value="form.where_value"
+          @reader-switch="onReaderSwitch"
         />
       </el-form>
 
       <el-alert
         type="info" :closable="false" show-icon class="tl-dlg-note"
         title="模板只是起点，不是活引用"
-        description="把这条挑进阶段时，上面这些值会被**抄进**那个阶段的 KPI；此后你再改模板，已建阶段一个字都不会变。"
+        description="把这条挑进阶段时，上面这些值会被抄进那个阶段的 KPI；此后你再改模板，已建阶段一个字都不会变。"
       />
 
       <template #footer>
@@ -226,9 +168,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import SourceConfigFields from './SourceConfigFields.vue'
 import { useSelfRunStore } from '../stores/selfrunStore'
+import { buildSourceConfig, toFormValue } from '../utils/sourceConfig'
 import {
   AGG_LABEL, DIRECTION_LABEL, PERIOD_TYPE_LABEL, SOURCE_KIND_LABEL,
   fmt, num,
@@ -296,39 +240,18 @@ function isCustom(row: KpiTemplate): boolean {
 }
 
 const readerChoices = computed<ReaderOption[]>(() => store.templateEnum?.readers ?? [])
-const l2Options = computed<string[]>(() => store.templateEnum?.l2_options ?? [])
-const mvKeys = computed<string[]>(() => store.templateEnum?.module_value_keys ?? [])
 
-const currentReader = computed<ReaderOption | null>(
-  () => readerChoices.value.find(r => r.value === form.value.reader_kind) ?? null,
-)
-
-/** 「时间统计 · 按时长求和」这种念法 —— 让人知道数据要去哪个模块补 */
-function readerLabel(r: ReaderOption): string {
-  return r.hint ? `${r.value}（来源：${r.hint}）` : r.value
-}
-
-// 换取数器 ⇒ 丢掉上一条的 `where`（两个取数器的条件键往往不同，留着就是串味）
-watch(() => form.value.reader_kind, (v, old) => {
-  if (old && v !== old) {
-    baseWhere = {}
-    form.value.where_value = isListReader() ? [] : ''
-  }
-})
-
-/** 当前取数器的条件字段是不是「多选」 */
-function isListReader(): boolean {
-  return currentReader.value?.where_key === 'l2'
-}
-
-/** 把 `where` 里那个键的原始值，翻成界面上的形态（多选 ⇒ 数组，单选 ⇒ 字符串） */
-function toFormValue(raw: unknown, list: boolean): string | string[] {
-  if (list) {
-    if (Array.isArray(raw)) return raw.map(String)
-    return raw ? [String(raw)] : []
-  }
-  if (Array.isArray(raw)) return raw.length ? String(raw[0]) : ''
-  return raw ? String(raw) : ''
+/**
+ * 换了取数器 ⇒ 丢掉上一条的 `where`（两个取数器的条件键往往不同，留着就是串味）。
+ *
+ * 🔴 用事件带来的**新 kind** 去查 `where_key`，不读 `form.reader_kind` ——
+ *    事件先于 `update:readerKind` 到达，此刻表单里还是旧值；靠「谁先赋值」
+ *    这种隐式顺序，哪天调一下就会把多选清成空串（`el-select multiple` 会报类型错）。
+ */
+function onReaderSwitch(nextKind: string) {
+  baseWhere = {}
+  const wk = readerChoices.value.find(r => r.value === nextKind)?.where_key
+  form.value.where_value = wk === 'l2' ? [] : ''
 }
 
 // ── 开弹窗 ───────────────────────────────────────────────────
@@ -368,27 +291,13 @@ function openEdit(row: KpiTemplate) {
 
 // ── 组装 / 保存 ──────────────────────────────────────────────
 
-/**
- * `source_kind` + `where` 组装成 `source_config`。
- *
- * 🔴 **编辑时不能整包替换 `where`** —— 内置模板的 `bill_income` 带着
- *    `transaction_type` / `category` 两个固定条件，它们不在界面上；
- *    整包替换会把它们**静默抹掉**（表现是「改了个名字，收入验证的数就变了」）。
- *    所以：在**原始 where 上叠加**，只动界面上真的有的那个键。
- */
-function buildSourceConfig(): Record<string, unknown> {
-  if (form.value.source_kind === 'manual') {
-    return { kind: 'manual_sum' }
-  }
-  const where: Record<string, unknown> = { ...baseWhere }
-  const wk = currentReader.value?.where_key
-  if (wk) {
-    const v = form.value.where_value
-    const empty = Array.isArray(v) ? v.length === 0 : v === ''
-    if (empty) delete where[wk]
-    else where[wk] = v
-  }
-  return { kind: form.value.reader_kind, where }
+/** 当前表单 → `source_config`（拼法在 `utils/sourceConfig`，与「改这条 KPI」同一份） */
+function buildCfg(): Record<string, unknown> {
+  const wk = readerChoices.value.find(r => r.value === form.value.reader_kind)?.where_key
+  return buildSourceConfig(
+    form.value.source_kind, form.value.reader_kind, wk ?? undefined,
+    form.value.where_value, baseWhere,
+  )
 }
 
 async function save() {
@@ -411,7 +320,7 @@ async function save() {
     floor_why: form.value.floor_why,
     agg: form.value.agg,
     source_kind: form.value.source_kind,
-    source_config: buildSourceConfig(),
+    source_config: buildCfg(),
   }
   saving.value = true
   try {
@@ -441,7 +350,7 @@ async function doDelete(row: KpiTemplate) {
   const used = row.used_count ?? 0
   const body = used
     ? `有 ${used} 条已建 KPI 的来源指向它 —— 删掉之后那些 KPI、它们的读数、往期结论`
-      + `**一个字都不会变**，只是「来源」不再指向任何模板。`
+      + `一个字都不会变，只是「来源」不再指向任何模板。`
     : '还没有任何 KPI 用过它，删掉不影响任何东西。'
   try {
     await ElMessageBox.confirm(body, `删掉模板「${row.name}」？`, {

@@ -9,6 +9,7 @@
  *    返回里的 `period_key` / `in_current_period` 直接用，前端不自己算 ISO 周。
  */
 import request from '@/shared/utils/request'
+import type { MediaItem } from '@/shared/types/media'
 import type {
   PeriodType, Work, WorkCapture, WorkMeta, WorksOverview, Written,
 } from '../types/workTypes'
@@ -71,6 +72,22 @@ export function uncapture(id: number) {
 export function compose(data: Record<string, unknown>) {
   return request<{ work: Work; written: Written }>({
     url: '/works/compose/', method: 'post', data,
+  })
+}
+
+// ══════════════════════════════════════════════════════════════
+// 媒体上传
+// ══════════════════════════════════════════════════════════════
+
+/** 上传作品媒体（图片 / 视频），multipart 字段 file；type 由后端按扩展名判定 */
+export function uploadWorkMedia(file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return request<{ url: string; type: MediaItem['type'] }>({
+    url: '/works/media/',
+    method: 'post',
+    data: fd,
+    timeout: 120000,
   })
 }
 

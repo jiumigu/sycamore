@@ -7,6 +7,8 @@
         <p class="header-desc">走过的每一座城市，都值得被记住</p>
       </div>
       <div class="header-actions">
+        <!-- v3.63.8：「美食地图」不再占菜单项，改成这一页的页内入口（子页留了「← 旅行足迹」） -->
+        <el-button @click="$router.push('/food')">🍜 美食地图</el-button>
         <el-radio-group v-model="viewMode">
           <el-radio-button value="map">🗺️ 足迹地图</el-radio-button>
           <el-radio-button value="log">📔 行程日志</el-radio-button>
@@ -321,8 +323,16 @@ async function loadTripLog() {
 }
 
 function formatDay(date: string): string {
-  const [, m, d] = date.split('-')
-  return `${Number(m)}月${Number(d)}日`
+  // 🔴 必须带年：行程日志是**跨年**列表（实测同一屏里同时有 2025-11-08 与 2024-10-18），
+  //    只显示「11月8日」时，2024-10-18 排到 2025-10-02 后面会被读成**排序错了**，
+  //    而其实后端 `order_by('-visited_at')` 一直是对的 —— 缺的是年份这条线索。
+  const [y, m, d] = (date || '').split('-')
+  const month = Number(m)
+  // `d` 只取前两位：万一上游给了带时间的 `2025-11-08T00:00:00`，
+  // 直接 Number(d) 会得到 NaN，页面上就冒出「2025年11月NaN日」。
+  const day = Number(String(d ?? '').slice(0, 2))
+  if (!y || Number.isNaN(month) || Number.isNaN(day)) return date || '—'
+  return `${y}年${month}月${day}日`
 }
 
 function openConsolidate(day: TripLogDay) {

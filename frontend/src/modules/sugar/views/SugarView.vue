@@ -83,6 +83,28 @@
           <el-select v-model="filterCategory" placeholder="分类" clearable @change="fetchData" class="filter-select">
             <el-option v-for="c in CATEGORY_OPTIONS" :key="c.value" :label="`${c.icon} ${c.label}`" :value="c.value" />
           </el-select>
+          <el-select
+            v-model="filterJoyType"
+            placeholder="快乐类型"
+            clearable
+            popper-class="joy-type-popper"
+            class="filter-select filter-select-joy"
+            @change="fetchData"
+          >
+            <el-option
+              v-for="o in joyTypeOptions"
+              :key="o.value"
+              :label="o.label"
+              :value="o.value"
+            >
+              <!-- 条数用 flex 摆在行尾：它说明「这个类型这期有几条」，
+                   0 也照常显示 —— 藏起来会变成「这个选项是不是没数据」的猜测 -->
+              <span style="display:flex;justify-content:space-between;gap:12px;width:100%">
+                <span>{{ o.label }}</span>
+                <span style="color:#9CA3AF;font-size:12px">{{ o.count }}</span>
+              </span>
+            </el-option>
+          </el-select>
         </div>
         <div class="filter-right">
           <span class="total-reward">累计奖励+¥{{ formatAmount(stats.totalReward) }}</span>
@@ -101,7 +123,7 @@
           @delete="handleDelete"
         />
       </template>
-      <el-empty v-else description="暂无小确幸，记录你的快乐时刻吧！" :image-size="100" />
+      <el-empty v-else :description="emptyText" :image-size="100" />
     </div>
 
     <!-- 分页 -->
@@ -131,10 +153,7 @@
         <el-row :gutter="16">
           <el-col :span="16">
             <el-form-item label="快乐程度">
-              <div class="happiness-slider">
-                <el-slider v-model="form.level_of_happiness" :min="happinessMin" :max="happinessMax" show-stops />
-                <span class="happiness-label">{{ happinessPreview }}</span>
-              </div>
+              <HappinessScale v-model="form.level_of_happiness" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -224,9 +243,11 @@ import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { Plus, Refresh, DataAnalysis } from '@element-plus/icons-vue'
 import { useSugarStore } from '../stores/sugarStore'
-import { CATEGORY_OPTIONS, JOY_TYPE_OPTIONS, happinessLabelOf } from '../types/sugarTypes'
+import { CATEGORY_OPTIONS, JOY_TYPE_OPTIONS } from '../types/sugarTypes'
 import type { SugarRecord } from '../types/sugarTypes'
 import SugarCard from '../components/SugarCard.vue'
+// 快乐程度输入的唯一实现（收件箱完成弹窗共用同一个组件，避免两套刻度）
+import HappinessScale from '../components/HappinessScale.vue'
 import { getRewardPool } from '@/modules/reward/api/rewardApi'
 import { getPresetByType } from '@/shared/api/coreApi'
 import { formatAmount } from '@/shared/utils/format'
@@ -251,6 +272,21 @@ const categoryCount = computed(() => {
 const filterYear = ref<number | undefined>()
 const filterMonth = ref<number | undefined>()
 const filterCategory = ref<string>()
+const filterJoyType = ref<string>()
+
+// 筛选项来自后端（含旧词表残留与「未标注」），前端不自己拼一份 ——
+// 一旦在前端 v-for `JOY_TYPE_OPTIONS`，那 4 条旧值 + 36 条未标注就筛不出来。
+const joyTypeOptions = computed(() => store.joyTypeOptions?.options ?? [])
+
+const hasFilter = computed(() => Boolean(
+  filterYear.value || filterMonth.value || filterCategory.value || filterJoyType.value,
+))
+
+// 「没有记录」和「筛选后没结果」是两件事：前者是没记，后者是条件太窄 ——
+// 用同一句话会让人以为记录丢了。
+const emptyText = computed(() => (
+  hasFilter.value ? '当前筛选下没有记录，换个条件试试' : '暂无小确幸，记录你的快乐时刻吧！'
+))
 
 const yearOptions = computed(() => {
   const y = new Date().getFullYear()
@@ -310,19 +346,10 @@ async function loadPresetTags() {
 //
 // 这里曾经有一张 16 个词的 `happinessTexts`（12 → 「非常开心」），
 // 而列表卡片显示的是后端 `reward_label`（12 → 「很高兴」）——
-// 同一个分数在弹窗与列表说两个词。现在两处都读 `happiness_bands`。
+// 同一个分数在弹窗与列表说两个词。现在两处都读 `happiness_bands`，
+// 且滑块本身已抽成 `HappinessScale`（收件箱完成弹窗共用，见该组件文件头）。
 //
-// ⚠️ 下面两个 `?? 5 / ?? 20` 只是「表还没到」时的占位（挂载即拉，毫秒级）；
-//    真正的区间由后端下发，以后改区间不必动前端。
-const happinessMin = computed(() => store.happinessBands?.min ?? 5)
-const happinessMax = computed(() => store.happinessBands?.max ?? 20)
-
-const happinessPreview = computed(() => {
-  const level = form.level_of_happiness
-  const label = happinessLabelOf(store.happinessBands, level)
-  return label ? `${level} — ${label}` : String(level)
-})
-
+// ⚠️ 金额 = 分数（1 分 = 1 元）—— 这是全模块唯一口径，别再引入系数。
 const rewardAmount = computed(() => form.level_of_happiness)
 
 const SUGGESTED_TAGS = ['惊喜', '感动', '成就', '小确幸', '美食', '友情', '家庭', '自然', '成长', '放松']
@@ -430,13 +457,34 @@ function getFilters(): Record<string, unknown> {
   if (filterYear.value) params.year = filterYear.value
   if (filterMonth.value) params.month = filterMonth.value
   if (filterCategory.value) params.category = filterCategory.value
+  // 「未标注」也是一个非空值（后端下发的哨兵），所以这里只需判空 ——
+  // 若用 `if (filterJoyType.value !== '')` 之类的写法，清空筛选会被当成「只看未标注」。
+  if (filterJoyType.value) params.joy_type = filterJoyType.value
+  return params
+}
+
+/**
+ * 只给「快乐类型选项条数」用的筛选 —— 去掉 `joy_type` 自身。
+ *
+ * 选完某个类型如果再拿它去统计，其它类型的条数会一起变成 0，
+ * 下拉框就再也指不出「别处还有多少条」。
+ */
+function getOptionFilters(): Record<string, unknown> {
+  const params = getFilters()
+  delete params.joy_type
   return params
 }
 
 async function fetchData() {
   store.currentPage = 1
   const params = getFilters()
-  await store.fetchSugarList(params)
+  // 三件事同一批记录：列表、顶部统计、下拉条数。
+  // 只刷列表会让顶部「累计获得」停在筛选前的总数，同屏两个数互相矛盾。
+  await Promise.all([
+    store.fetchSugarList(params),
+    store.fetchCategories(params),
+    store.fetchJoyTypeOptions(getOptionFilters()),
+  ])
 }
 
 async function refreshAll() {
@@ -448,6 +496,7 @@ async function refreshAll() {
   await Promise.all([
     store.fetchSugarList(filters),
     store.fetchCategories(filters),
+    store.fetchJoyTypeOptions(getOptionFilters()),
   ])
 }
 
@@ -532,6 +581,8 @@ onMounted(() => {
 
     .filter-left { display: flex; gap: 10px; flex-wrap: wrap; }
     .filter-select { width: 130px; }
+    // 快乐类型带 emoji，还可能出现「社交（旧词表）」—— 130px 会把词截断
+    .filter-select-joy { width: 158px; }
 
     .filter-right {
       .total-reward {
@@ -568,16 +619,6 @@ onMounted(() => {
     color: #6B7280;
     margin-bottom: 6px;
     font-weight: 500;
-  }
-}
-
-.happiness-slider {
-  width: 100%;
-  .happiness-label {
-    display: block;
-    font-size: 13px;
-    color: #666;
-    margin-top: 4px;
   }
 }
 

@@ -4,7 +4,9 @@
   <el-card v-if="card && stage" shadow="never" class="selfrun-card">
     <div class="sr-head">
       <span class="sr-title">🌱 自我运转</span>
-      <span class="sr-sub">{{ stage.name }} · 第 {{ stage.elapsed_days }} 天</span>
+      <!-- 🔴 区间跟着阶段名一起出现：仪表盘上只有「第 N 天」时，你没法知道
+           这个阶段跑到哪天结束（也就没法判断「现在该不该收尾」）。 -->
+      <span class="sr-sub">{{ stage.name }} · {{ stage.range_label }} · {{ stage.days_label }}</span>
       <el-button size="small" text type="primary" class="sr-more" @click="go">去看看 →</el-button>
     </div>
     <div class="sr-body">
@@ -32,6 +34,9 @@ const stage = ref<SelfRunStage | null>(null)
  *  所以这里用一张只含「档位 → 色」的**本地兜底**；
  *  它是兜底不是第二份真源：`/selfrun` 页面仍以后端 `colors` 为准。 */
 const FALLBACK_PERIOD_COLOR: Record<string, string> = {
+  // ⚠️ `great` 必须在这里 —— 漏了它，「我超棒」那一周在仪表盘上会掉成灰色兜底色，
+  //    而页面里明明是深绿（同一个档位两种颜色，看着像两个状态）。
+  great: '#059669',
   on_track: '#10B981', slipping: '#F59E0B', slid: '#94A3B8',
   no_record: '#CBD5E1', fallow: '#E5E7EB',
 }

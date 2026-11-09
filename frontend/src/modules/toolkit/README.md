@@ -1,5 +1,7 @@
 # Toolkit — 工具集前端
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 ## Views
 
 | 文件 | 职责 |
@@ -7,7 +9,9 @@
 | `ToolkitDashboard.vue` | 首页（搜索 + 分类标签 + 工具卡片网格，含「执行历史」入口） |
 | `ToolDetail.vue` | 工具详情壳（返回栏 + 渲染独立组件或通用执行表单；路由 `/toolkit/:toolKey` 兜底） |
 | `TaskHistory.vue` | 执行历史页（分页列表 + 工具/状态筛选 + 错误详情弹窗） |
-| `QuoteManager.vue` | 摘录馆（统计卡讲清「几条会进金句池 / 几条超长不上卡」；每条带池状态标签与字数；筛选区可按池内外筛 —— 池外条目必须筛得出来，否则等于没有出口） |
+| `QuoteManager.vue` | 摘录馆（统计卡讲清「几条会进金句池 / 几条超长不上卡」；每条带**录入时间**（`created_at`，走 `shared/utils/datetime.ts` 唯一实现）、池状态标签与字数；筛选区可按池内外筛 —— 池外条目必须筛得出来，否则等于没有出口） |
+
+> **执行历史入口（v3.63.12 起）**：`/toolkit/history` 不再占菜单项；从工具箱首页页头与执行型工具详情页的「执行历史」进入，路由保留。
 
 ## 独立工具组件（`views/tools/`）
 
@@ -24,6 +28,7 @@
 | `HourlyWage.vue` | 时薪计算器 |
 | `FreeSpending.vue` | 自由支配额度 |
 | `HealthSelfCheck.vue` | 身体健康自查 |
+| `DecisionTracker.vue` | 决策追踪器（v3.63.20）：结论可取票数前 N 名；**N 是决策属性不是查询参数**；默认三项互斥题不开放多选；越界报 400、不静默夹紧；0 次记录的选项不占名次 |
 
 > `TravelRoute.vue`（旅行路线推演）已于 2026-09-11 **迁出工具箱** → `modules/travel/views/TravelRouteView.vue`（路由 `/travel/route`）。它本质是旅行计划的编排器，与 `TravelPlan` 强耦合，放在通用工具箱里用户找不到。工具箱侧保留工具卡片，进入 `/toolkit/travel-route` 时由 `ToolDetail.vue` 渲染一张「已迁入旅行模块」的跳转卡片（后端 `toolkit_travel_route_preset` 表与 `/api/toolkit/travel-routes/` 接口未动）。
 

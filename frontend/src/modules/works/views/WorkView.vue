@@ -14,6 +14,9 @@ import { ArrowRight } from '@element-plus/icons-vue'
 import { useWorkStore } from '../stores/workStore'
 import ComposeDialog from '../components/ComposeDialog.vue'
 import PendingDialog from '../components/PendingDialog.vue'
+import { uploadWorkMedia } from '../api/workApi'
+import MediaPicker from '@/shared/components/MediaPicker.vue'
+import type { MediaItem } from '@/shared/types/media'
 import { STATUS_TAG } from '../types/workTypes'
 import type { Work } from '../types/workTypes'
 
@@ -27,6 +30,7 @@ const saving = ref(false)
 
 const form = ref({
   name: '', summary: '', kind: 'article', status: 'private', channel: '', note: '',
+  media: [] as MediaItem[],
 })
 
 /** 🔴 可用性判据**不用「列表非空」** —— 一件都没有时汇总是个全 0 的对象（正确），
@@ -105,7 +109,10 @@ onMounted(async () => {
 
 function openCreate() {
   editingId.value = null
-  form.value = { name: '', summary: '', kind: 'article', status: 'private', channel: '', note: '' }
+  form.value = {
+    name: '', summary: '', kind: 'article', status: 'private', channel: '', note: '',
+    media: [],
+  }
   editVisible.value = true
 }
 
@@ -114,8 +121,14 @@ function openEdit(w: Work) {
   form.value = {
     name: w.name, summary: w.summary, kind: w.kind,
     status: w.status, channel: w.channel, note: w.note,
+    media: [...(w.media ?? [])],
   }
   editVisible.value = true
+}
+
+async function uploadMedia(file: File) {
+  const res = await uploadWorkMedia(file)
+  return res.data
 }
 
 async function submitEdit() {
@@ -125,11 +138,12 @@ async function submitEdit() {
   }
   saving.value = true
   try {
+    const payload = { ...form.value, media: [...form.value.media] }
     if (editingId.value === null) {
-      await store.createWork({ ...form.value })
+      await store.createWork(payload)
       ElMessage.success('记下了')
     } else {
-      await store.updateWork(editingId.value, { ...form.value })
+      await store.updateWork(editingId.value, payload)
       ElMessage.success('已更新')
     }
     editVisible.value = false
@@ -321,6 +335,21 @@ function downloadAll() {
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="媒体" width="88">
+          <template #default="{ row }">
+            <span v-if="!row.media?.length" class="wv-muted">—</span>
+            <div v-else class="wv-media">
+              <img
+                v-if="row.media[0]?.type === 'image'"
+                :src="row.media[0].url"
+                class="wv-media-thumb"
+                alt=""
+              >
+              <video v-else :src="row.media[0].url" class="wv-media-thumb" muted />
+              <span v-if="row.media.length > 1" class="wv-media-count">+{{ row.media.length - 1 }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="成形于" width="100">
           <template #default="{ row }">{{ (row.created_at ?? '').slice(0, 10) }}</template>
         </el-table-column>
@@ -367,6 +396,9 @@ function downloadAll() {
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.note" maxlength="200" show-word-limit placeholder="可选" />
+        </el-form-item>
+        <el-form-item label="配图 / 视频">
+          <MediaPicker v-model="form.media" :upload="uploadMedia" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -454,4 +486,14 @@ function downloadAll() {
   white-space: nowrap;
 }
 .wv-out { display: flex; gap: 8px; width: 100%; }
+.wv-media { position: relative; display: inline-flex; }
+.wv-media-thumb {
+  width: 40px; height: 40px; object-fit: cover; border-radius: 6px; display: block;
+  border: 1px solid var(--el-border-color-lighter);
+}
+.wv-media-count {
+  position: absolute; right: -8px; bottom: -6px;
+  background: var(--el-color-primary); color: #fff;
+  font-size: 10px; line-height: 1; padding: 2px 5px; border-radius: 8px;
+}
 </style>

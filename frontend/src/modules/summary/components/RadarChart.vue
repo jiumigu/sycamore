@@ -12,7 +12,8 @@
       :style="{ left: tip.x + 'px', top: tip.y + 'px' }"
     >
       <div class="radar-tip-title">{{ tip.name }}</div>
-      <div>{{ tip.value }} / {{ tip.max }} 点</div>
+      <div class="radar-tip-line">{{ tip.headline }}</div>
+      <div v-if="tip.sub" class="radar-tip-sub">{{ tip.sub }}</div>
     </div>
   </div>
 </template>
@@ -21,13 +22,30 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { useSummaryStore } from '../stores/summaryStore'
+import { formatSignedAmount } from '@/shared/utils/format'
+import type { RadarAxis, RadarBasis } from '../types/summaryTypes'
+
+/**
+ * 七维雷达
+ *
+ * 🔴 两种镜片，同一份数据：
+ *   coverage    = 覆盖率（默认）—— 无量纲、不依赖任何封顶，"哪根轴塌了"最准
+ *   achievement = 对目标达成率 —— 保留封顶配置的意义（否则那个配置就是死开关）
+ *
+ * 两种口径都按 **0–100%** 画，轴的 max 恒为 100：
+ * 之前把「点数」直接当值、把封顶当 max，时间投入 98 点 > 封顶 80 ⇒
+ * 顶点画到了圈外。现在只在展示层截到 100，真实值在 tooltip 里如实写。
+ */
+const props = withDefaults(defineProps<{ basis?: RadarBasis }>(), {
+  basis: 'coverage',
+})
 
 interface TipInfo {
   x: number
   y: number
   name: string
-  value: number
-  max: number
+  headline: string
+  sub: string
 }
 
 const store = useSummaryStore()
@@ -36,47 +54,48 @@ const tip = ref<TipInfo | null>(null)
 let chart: echarts.ECharts | null = null
 let resizeTimer: number | undefined
 
+function axisValue(a: RadarAxis): number {
+  const v = props.basis === 'coverage' ? a.coverage : a.achievement
+  return v === null ? 0 : Math.min(Math.max(v, 0), 100)
+}
+
 function render() {
   const el = chartRef.value
   if (!el || !store.radarData) return
-  // DOM 已脱离文档（组件被卸载瞬间）——直接放弃，避免操作空容器
   if (!el.isConnected) return
 
   try {
-    // 实例缺失，或 DOM 元素已被 Vue 重建（实例与元素失联）→ 重建
     if (!chart || echarts.getInstanceByDom(el) !== chart) {
       try { chart?.dispose() } catch { /* noop */ }
       chart = echarts.init(el)
     }
-    const { indicators, values } = store.radarData
+    const axes = store.radarData.axes
     chart.setOption({
-      // 关闭 ECharts 自带 tooltip（radar 不支持 axis trigger，会崩），改用自定义几何提示
       tooltip: { show: false },
       radar: {
-        indicator: indicators.map(i => ({ name: i.name, max: i.max })),
+        indicator: axes.map(a => ({ name: a.name, max: 100 })),
         center: ['50%', '50%'],
         radius: '65%',
         shape: 'circle',
         name: { textStyle: { fontSize: 11, color: '#4B5563' } },
         splitArea: {
           areaStyle: {
-            color: ['rgba(16,185,129,0.03)', 'rgba(16,185,129,0.06)']
-          }
+            color: ['rgba(16,185,129,0.03)', 'rgba(16,185,129,0.06)'],
+          },
         },
         axisLine: { lineStyle: { color: 'rgba(0,0,0,0.1)' } },
       },
       series: [{
         type: 'radar',
         data: [{
-          value: values,
+          value: axes.map(axisValue),
           name: `${store.radarData.year}年`,
           areaStyle: { color: 'rgba(16,185,129,0.15)' },
           lineStyle: { color: '#10B981', width: 2 },
           itemStyle: { color: '#10B981' },
         }],
       }],
-    })
-    // 容器可能刚从 display:none 恢复（v-show），同步尺寸
+    }, true)
     chart.resize()
   } catch (e) {
     console.warn('[RadarChart] render 失败，已重建实例:', e)
@@ -85,10 +104,43 @@ function render() {
   }
 }
 
+function money(value: number | null): string {
+  return value === null ? '—' : formatSignedAmount(value, 2)
+}
+
+function tipFor(a: RadarAxis): { headline: string; sub: string } {
+  if (props.basis === 'coverage') {
+    const pct = a.coverage === null ? '—' : `${a.coverage}%`
+    const intensity = a.intensity === null
+      ? '—'
+      : `${a.module === 'wealth' ? money(a.intensity) : a.intensity} ${a.intensity_unit}`
+    return {
+      headline: `${a.coverage_label}：${a.covered}/${a.periods} ${a.period_word}（${pct}）`,
+      sub: `${a.intensity_label} ${intensity} · 总量 ${a.module === 'wealth' ? money(a.total_display) : `${a.total_display ?? '—'} ${a.total_unit}`}`,
+    }
+  }
+  const ach = a.achievement === null ? '—' : `${a.achievement}%`
+  // 财富是「净额 ÷ 目标」：负达成率必须连同分子分母一起给，否则只是一个看不懂的负数
+  if (a.module === 'wealth') {
+    const target = a.achievement_target === null ? '—' : money(a.achievement_target)
+    const net = a.net_amount === null ? '—' : money(a.net_amount)
+    return {
+      headline: `净额 ${net} ÷ 目标 ${target} = ${ach}`,
+      sub: a.achievement_negative
+        ? '净流出：雷达只能画 0–100%，这一轴被压到圆心'
+        : '净额对目标达成率',
+    }
+  }
+  return {
+    headline: `对目标达成 ${ach}（封顶 ${a.axis_max ?? '—'} 点）`,
+    sub: `总量 ${a.module === 'wealth' ? money(a.total_display) : `${a.total_display ?? '—'} ${a.total_unit}`}`,
+  }
+}
+
 function onMouseMove(e: MouseEvent) {
   const el = chartRef.value
   if (!el || !el.isConnected || !store.radarData) return
-  const { indicators, values } = store.radarData
+  const axes = store.radarData.axes
   const w = el.clientWidth
   const h = el.clientHeight
   if (!w || !h) return
@@ -101,29 +153,20 @@ function onMouseMove(e: MouseEvent) {
   const y = e.offsetY
   const dist = Math.hypot(x - cx, y - cy)
 
-  // 只在顶点附近（半径 0.55~1.15 环形带）显示提示；中心/外部不显示
   if (dist < r * 0.55 || dist > r * 1.15) {
     tip.value = null
     return
   }
 
-  // 角度 → 最近顶点 index
-  // 我的公式（atan2 + 90）在屏幕坐标系是顺时针；ECharts 顶点为逆时针排列（startAngle=90 顶部起）
-  // 所以取反：(n - idx) % n
   let angle = (Math.atan2(y - cy, x - cx) * 180) / Math.PI + 90
   if (angle < 0) angle += 360
   if (angle >= 360) angle -= 360
-  const n = indicators.length
+  const n = axes.length
   const idx = (n - Math.round((angle / 360) * n)) % n
-  const indicator = indicators[idx]
+  const axis = axes[idx]
+  const { headline, sub } = tipFor(axis)
 
-  tip.value = {
-    x: x,
-    y: y,
-    name: indicator.name,
-    value: values[idx],
-    max: indicator.max,
-  }
+  tip.value = { x, y, name: axis.name, headline, sub }
 }
 
 function onMouseLeave() {
@@ -137,8 +180,11 @@ function onResize() {
   }, 150)
 }
 
-// 组件常驻（父组件 v-show），radarData 变化/年份切换时刷新
-watch([() => store.radarData, () => store.currentYear], () => nextTick(render))
+// radarData 变化 / 年份切换 / 换镜片时重画
+watch(
+  [() => store.radarData, () => store.currentYear, () => props.basis],
+  () => nextTick(render),
+)
 
 onMounted(() => {
   nextTick(render)
@@ -180,5 +226,13 @@ onBeforeUnmount(() => {
 .radar-tip-title {
   font-weight: 600;
   margin-bottom: 2px;
+}
+.radar-tip-line {
+  font-variant-numeric: tabular-nums;
+}
+.radar-tip-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #6B7280;
 }
 </style>

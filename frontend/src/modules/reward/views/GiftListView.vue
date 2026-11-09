@@ -3,6 +3,12 @@
     <!-- ========== 页面标题 ========== -->
     <div class="page-header">
       <div class="header-left">
+        <!-- v3.63.11：不再占菜单项，是「快乐银行」的页内子页 ⇒ 必须留一条回程，
+             否则从菜单撤掉之后这一页只能靠侧边栏/后退离开。 -->
+        <el-button @click="$router.push('/reward')">
+          <el-icon><ArrowLeft /></el-icon>
+          快乐银行
+        </el-button>
         <h1 class="page-title">礼物清单</h1>
         <el-tag type="success" class="module-tag">奖励兑换</el-tag>
       </div>
@@ -117,7 +123,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Refresh, Plus } from '@element-plus/icons-vue'
+import { ArrowLeft, Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getGiftList, getGiftStats, getRewardPool,
@@ -156,11 +162,13 @@ async function loadGifts() {
     if (statusFilter.value) params.status = statusFilter.value
     if (categoryFilter.value) params.category = categoryFilter.value
     const res = await getGiftList(params)
-    giftList.value = (res.data || []).map((g: GiftList) => ({
-      ...g,
-      progress: Number(g.progress) || 0,
-      needed: Number(g.needed) || 0,
-    }))
+    // 🔴 不要再在这里逐个 `Number(x) || 0` 兜底：`GiftList` 类型声明里
+    //    progress / needed / expected_reward / actual_reward **都是 number**，
+    //    后端已按这个口径下发（v3.63.16 之前 expected_reward 出的是 `"800.00"`
+    //    字符串，`formatAmount` 只认 number ⇒ 每张卡片价格都画成 `¥—`，
+    //    而这里只兜了 progress / needed 两个，正好漏掉价格）。
+    //    谁出字符串谁就是 bug，在这里补类型转换只会把 bug 藏起来。
+    giftList.value = res.data || []
   } catch {
     giftList.value = []
   }

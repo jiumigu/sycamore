@@ -130,6 +130,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, reactive, ref, computed } from 'vue'
 import { useReaderStore } from '../../stores/readerStore'
@@ -240,8 +241,8 @@ async function saveSummary() {
     editingId.value = null
     resetForm()
     ElMessage.success(isEdit ? '已更新' : '已保存')
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   }
 }
 

@@ -18,3 +18,20 @@ body {
     height: 1em;
   }
 }
+
+/* 小确幸「快乐类型」筛选下拉（popper-class="joy-type-popper"）
+ *
+ * Element Plus 给下拉列表的滚动区写死 `max-height: 274px`（约 8 行）。
+ * 这里一共 9 项 —— 5 个标准型 + 3 个旧词表残留 + 「未标注」，
+ * 最后那一项（未标注 36 条）恰好被裁在滚动区之外：打开下拉只能看到前 8 项，
+ * 而「未标注」正是那批待补标记录唯一的入口（2026-11-08 实测：
+ * wrap 高 274 / 内容 318，需滚动 44px 才露头）。
+ *
+ * 下拉是 teleport 到 body 的，scoped 样式够不着（父级选择器不匹配），
+ * 所以这条必须落在全局 —— 用 popper-class 挂类，别写成
+ * `body > div > .el-select-dropdown` 那种猜 DOM 层级的写法。
+ * ⚠️ 340px ≈ 10 行：旧词表里的脏值再多几个还要往上调。
+ */
+.joy-type-popper .el-scrollbar__wrap {
+  max-height: 340px;
+}

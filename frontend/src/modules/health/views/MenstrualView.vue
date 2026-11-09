@@ -6,6 +6,11 @@
         <el-tag size="small" type="danger" effect="plain">周期管理 · 趋势分析 · 预测</el-tag>
       </div>
       <div class="header-actions">
+        <!-- v3.63.12：本页不再占菜单项，入口在健康管理页头 ⇒ 必须有回程。
+             写死 `health/dashboard`，不用 `router.back()`（刷新/直达/分享链接时没有上一页）。 -->
+        <el-button size="small" @click="$router.push('/health/dashboard')">
+          <el-icon><ArrowLeft /></el-icon> 健康管理
+        </el-button>
         <el-button size="small" @click="store.fetchData">刷新</el-button>
         <el-button type="primary" size="small" @click="openForm()">+ 新增记录</el-button>
       </div>
@@ -115,7 +120,7 @@
     </el-card>
 
     <!-- 新增/编辑弹窗 -->
-    <el-dialog v-model="formVisible" :title="editingId ? '编辑记录' : '新增记录'" width="420px" @closed="handleFormClose">
+    <el-dialog v-model="formVisible" :title="editingId ? '编辑记录' : '新增记录'" width="420px" @closed="resetForm">
       <el-form :model="form" label-width="80px" size="small">
         <el-form-item label="开始日期" required>
           <el-date-picker v-model="form.start_date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
@@ -147,6 +152,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import {
   getMenstrualRecords,
@@ -157,6 +163,7 @@ import {
   deleteMenstrualRecord,
 } from '../api/healthApi'
 import type { MenstrualRecord, MenstrualStats, MenstrualTrendItem } from '../types/healthTypes'
+import { apiErrorText } from '@/shared/utils/apiError'
 
 const store = reactive({
   records: [] as MenstrualRecord[],
@@ -281,6 +288,22 @@ const form = reactive({
   notes: '',
 })
 
+/** 表单重置 —— 唯一实现：新建入口与弹窗关闭都调它。
+ *
+ *  ⚠️ 之前这两处各写一份重置，且都漏了 `end_date` / `duration_days`：
+ *     编辑过一条带结束日期的记录 → 关窗 → 再点「新增」，上一条的结束日期
+ *     和持续天数会留在表单里。界面上看着是「新增」，提交的却是旧值。
+ */
+function resetForm() {
+  editingId.value = null
+  form.start_date = ''
+  form.end_date = ''
+  form.duration_days = null
+  form.offset = 0
+  form.cycle_days = 30
+  form.notes = ''
+}
+
 function openForm(row?: MenstrualRecord) {
   if (row) {
     editingId.value = row.id
@@ -291,11 +314,7 @@ function openForm(row?: MenstrualRecord) {
     form.cycle_days = row.cycle_days
     form.notes = row.notes
   } else {
-    editingId.value = null
-    form.start_date = ''
-    form.offset = 0
-    form.cycle_days = store.records.length ? 30 : 30
-    form.notes = ''
+    resetForm()
   }
   formVisible.value = true
 }
@@ -316,14 +335,6 @@ watch(() => form.start_date, (date) => {
   }
 })
 
-function handleFormClose() {
-  form.start_date = ''
-  form.offset = 0
-  form.cycle_days = 30
-  form.notes = ''
-  editingId.value = null
-}
-
 async function handleSave() {
   if (!form.start_date) {
     ElMessage.warning('请选择开始日期')
@@ -333,6 +344,11 @@ async function handleSave() {
   const d = new Date(form.start_date)
   const payload = {
     ...form,
+    // 🔴 结束日期可空，但**不能把 `''` 原样发出去**：
+    //    DRF 的 DateField 收到空串回的是 `Date has wrong format`，
+    //    于是「不填结束日期」这个正常用法变成整条记录存不进去。
+    //    空串必须转 null —— 模型侧本来就是 `null=True`。
+    end_date: form.end_date || null,
     year: d.getFullYear(),
     month: `${d.getMonth() + 1}月`,
     user_id: 1,
@@ -347,8 +363,10 @@ async function handleSave() {
     }
     formVisible.value = false
     loadRecords()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    // 后端 4xx 的字段级原因必须原样透出（会带字段名，如「end_date：…」）；
+    // 只说「保存失败」等于让用户盲猜自己哪一格填错了。
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     saving.value = false
   }

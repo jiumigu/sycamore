@@ -1,5 +1,14 @@
 <template>
   <div class="wish-page">
+    <!-- v3.63.8：不再是菜单项，是「旅行计划」的页内子页 ⇒ 必须有回程；
+         原来这页没有标题（靠侧边栏菜单项自报家门），菜单撤了就得自己写一个 -->
+    <div class="page-header">
+      <el-button size="small" @click="$router.push('/travel/plans')">
+        <el-icon><ArrowLeft /></el-icon> 旅行计划
+      </el-button>
+      <h2 class="page-title">⭐ 旅行心愿单</h2>
+    </div>
+
     <!-- 顶部统计 -->
     <div class="stats-row">
       <div class="stat-chip">
@@ -253,9 +262,11 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import betterEchartsMaps from 'better-echarts-maps/dist/china.js'
 import {
   getWishes, createWish, updateWish, deleteWish,
@@ -584,8 +595,8 @@ async function saveWish() {
     editVisible.value = false
     await refresh()
     ElMessage.success('已保存')
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -682,6 +693,22 @@ onUnmounted(() => {
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
+}
+
+/* 回程 + 标题（撤掉菜单项后这页必须自己交代「这是哪、怎么回去」）
+   注意：本文件的 style 块是原生 CSS，注释只认 C 风格 —— 写双斜杠会让整块样式
+   编译 500，页面直接白屏（不是样式没生效，是组件整个加载不出来） */
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.page-header .page-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .stats-row {

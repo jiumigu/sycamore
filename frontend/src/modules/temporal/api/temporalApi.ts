@@ -1,6 +1,7 @@
 import request from '@/shared/utils/request'
 import type {
-  CompletenessData, MetaLedgerData, SunburstData, WeeklyStructure,
+  CompletenessData, DailyGuardData, FrequentNamesData, ImportPreview, MetaLedgerData,
+  OverlapCheckData, SourceOverview, SunburstData, WeeklyStructure,
 } from '../types/temporalTypes'
 
 // ─── 每日记录 (OneDay) ───
@@ -58,6 +59,18 @@ export function getTaskList(params?: Record<string, unknown>) {
   return request({ url: '/temporal/tasks/', method: 'get', params })
 }
 
+/**
+ * 记录来源总览：全库按批次 + 按来源类型汇总（v3.64.33）。
+ *
+ * 🔴 必须走接口取，**不要**从前端列表自己数 —— 任务列表是分页的，
+ *    数出来的只是当前页，「41 条未标注」会变成「这页有 3 条」。
+ * 分类口径（哪些批次算 CSV 导入 / 未标注 / 其它来源）全在后端
+ * `services.classify_source`，前端只显示下发的 `label`。
+ */
+export function getTaskSources() {
+  return request<SourceOverview>({ url: '/temporal/tasks/sources/', method: 'get' })
+}
+
 export function getTaskDetail(id: number) {
   return request({ url: `/temporal/tasks/${id}/`, method: 'get' })
 }
@@ -66,8 +79,57 @@ export function getTaskNames() {
   return request({ url: '/temporal/tasks/task_names/', method: 'get' })
 }
 
+/**
+ * 最近 N 个月最频繁的任务名（手工新增弹窗的快捷候选）。
+ *
+ * 排序口径（按次数 → 时长 → 最近使用）与窗口（自然月）都在后端，
+ * 前端只传参数、只读结果 —— 别在这儿再算一遍「最近 3 个月」。
+ */
+export function getFrequentTaskNames(params: { months?: number; limit?: number } = {}) {
+  return request<FrequentNamesData>({
+    url: '/temporal/tasks/frequent_names/',
+    method: 'get',
+    params,
+  })
+}
+
 export function importTaskCsv(data: FormData) {
   return request({ url: '/temporal/tasks/import_csv/', method: 'post', data, headers: { 'Content-Type': undefined } })
+}
+
+/**
+ * CSV 导入**预演**（只读）：先看这份文件会撞上什么，再决定要不要落。
+ *
+ * 与 `importTaskCsv` 收同一个 `file`，但**不写库**（不建 TaskMeta、不刷周缓存）。
+ * 返回按 `contained/edge/review/likely_dup` 分好类的清单，口径在
+ * `services.classify_overlap`。
+ */
+export function previewImportCsv(data: FormData) {
+  return request<ImportPreview>({
+    url: '/temporal/tasks/preview_import/',
+    method: 'post',
+    data,
+    headers: { 'Content-Type': undefined },
+  })
+}
+
+/**
+ * 查「这段时间有没有别的记录」—— 新增/编辑保存**之前**调，只读不写库。
+ *
+ * 🔴 后端只回答「撞了哪些」，不阻断保存：本库里重叠是合法形态
+ *    （大段「牛马工作」内再细分「代码编程」）。是否继续由用户看着清单决定。
+ */
+export function checkTaskOverlap(params: {
+  start_time: string
+  end_time: string
+  exclude_id?: number
+  task_name?: string
+}) {
+  return request<OverlapCheckData>({
+    url: '/temporal/tasks/check_overlap/',
+    method: 'get',
+    params,
+  })
 }
 
 export function getTaskStats(params?: Record<string, unknown>) {
@@ -151,6 +213,16 @@ export function getUnclassified(params?: Record<string, unknown>) {
 
 export function batchSetMeta(data: Record<string, unknown>) {
   return request({ url: '/temporal/tasks/batch_set_meta/', method: 'post', data })
+}
+
+/**
+ * 今天的三条线（睡眠 / 午睡 / 流失）。
+ *
+ * 🔴 阈值与「达标」判定全在后端 `constants.DAILY_GUARD_LINES`；
+ *    这里只负责把结果取回来，**不要在前端再算一遍**（会得到两个口径）。
+ */
+export function getDailyGuards(params: { date?: string } = {}) {
+  return request<DailyGuardData>({ url: '/temporal/tasks/daily_guards/', method: 'get', params })
 }
 
 export function getSunburst(params?: Record<string, unknown>) {

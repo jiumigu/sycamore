@@ -1,3 +1,4 @@
+import { apiErrorText } from '@/shared/utils/apiError'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -105,7 +106,7 @@ export const useInboxStore = defineStore('inbox', () => {
       await Promise.all([fetchItems(), fetchStats()])
       ElMessage.success('保存成功')
     } catch (e) {
-      ElMessage.error('保存失败，请重试')
+      ElMessage.error(apiErrorText(e, '保存失败，请重试'))
       console.error('更新失败:', e)
     } finally {
       saving.value = false

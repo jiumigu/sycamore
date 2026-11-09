@@ -13,8 +13,8 @@
 import request from '@/shared/utils/request'
 import type {
   CurrentPeriodResponse, KpiTemplate, OverviewResponse, PeriodOption, PeriodType,
-  PlanScope, PreviewResult, SelfRunCheckin, SelfRunMetric, SelfRunMetricLog,
-  SelfRunMetricPlan, SelfRunPeriod, SelfRunStage, StageSummary, TargetsResponse,
+  PeriodExtras, PlanScope, PreviewResult, SelfRunCheckin, SelfRunMetric, SelfRunMetricLog,
+  SelfRunMetricPlan, SelfRunPeriod, SelfRunStage, StageLedger, StageSummary, TargetsResponse,
   TemplateEnum, Written,
 } from '../types/selfrunTypes'
 
@@ -79,7 +79,10 @@ export function copyStage(data: { from_stage_id: number; name: string; start_dat
   }>({ url: '/selfrun/stages/copy/', method: 'post', data })
 }
 
-export function listStages(params?: { status?: string }) {
+/** `shape`：`leaf` = 有 active KPI 的（真正在跑的那一层）/ `long` = 零 KPI 的长阶段。
+ *  🔴 分层之后 `status=active` 会有两行（长阶段 + 小阶段），
+ *     想拿「当前在跑的那个」必须带 `shape=leaf`，不能靠「取第一条」。 */
+export function listStages(params?: { status?: string; shape?: 'leaf' | 'long' }) {
   return request<SelfRunStage[]>({ url: '/selfrun/stages/', method: 'get', params })
 }
 
@@ -239,6 +242,13 @@ export function heartbeat(seen = true) {
 // T3 · 复盘
 // ══════════════════════════════════════════════════════════════
 
+/** 单期详情（含复盘两块补充 `extras`）。 */
+export function getPeriodDetail(id: number) {
+  return request<{ period: SelfRunPeriod; extras: PeriodExtras | null; written: Written }>({
+    url: `/selfrun/periods/${id}/`, method: 'get',
+  })
+}
+
 export function listPeriods(params?: { period_type?: PeriodType; stage_id?: number; limit?: number }) {
   return request<SelfRunPeriod[]>({ url: '/selfrun/periods/', method: 'get', params })
 }
@@ -302,9 +312,54 @@ export function closeStage(id: number, data?: { text?: string; end_date?: string
 }
 
 // ══════════════════════════════════════════════════════════════
+// T5 · 阶段账本（钱 / 时间 / 作品 / 子阶段）
+// ══════════════════════════════════════════════════════════════
+
+/** 阶段账本 —— **只读现算，零写库**（可以放心刷）。
+ *
+ * 🔴 任何阶段都能调，不是「只给长阶段」：闸门会让「这个阶段花了多少」
+ *    变成只有长阶段才答得出来的问题。
+ * ⚠️ 数字全部由现有表推出来、不落快照 ⇒ 改口径后它立刻跟着变，
+ *    不存在「页面上是旧数」的可能，也**没有**「上次算的那份」可看。
+ */
+export function getStageLedger(id: number) {
+  return request<{ stage: SelfRunStage; ledger: StageLedger; written: Written }>({
+    url: `/selfrun/stages/${id}/ledger/`, method: 'get',
+  })
+}
+
+/** 改账本参数（**目前只有本金** `pool_principal`）。
+ *
+ * 🔴 单独一个端点、不并进 `patchStage`：本金是「这段路带多少钱」的**输入**，
+ *    混进阶段 PATCH 里，一次「只改本金」的请求会顺带把没传的字段落回默认值。
+ * ⚠️ 后端只收这一个键，多传直接 400（不静默忽略）。
+ */
+export function patchLedgerConfig(id: number, data: { pool_principal: number }) {
+  return request<{ stage: SelfRunStage; ledger: StageLedger; written: Written }>({
+    url: `/selfrun/stages/${id}/ledger-config/`, method: 'patch', data,
+  })
+}
+
+// ══════════════════════════════════════════════════════════════
 // 跨模块（仪表盘小卡）
 // ══════════════════════════════════════════════════════════════
 
 export function getSelfRunOverview() {
   return request<OverviewResponse>({ url: '/selfrun/overview/', method: 'get' })
+}
+
+// ══════════════════════════════════════════════════════════════
+// 池注入标记（v3.64.26）—— 消费者是**账单明细页**，不是账本页
+// ══════════════════════════════════════════════════════════════
+
+/** 已标为「中途注入」的账单 id（账单页打开时拉一次，用来预填表单开关）。 */
+export function listPoolInjects() {
+  return request<{ bill_ids: number[] }>({ url: '/selfrun/pool-injects/', method: 'get' })
+}
+
+/** 标记 / 取消标记。两个方向都幂等；只允许收入，支出会被后端 400 拒掉。 */
+export function setPoolInject(billId: number, marked: boolean) {
+  return request<{ bill_id: number; marked: boolean; written: Written }>({
+    url: '/selfrun/pool-injects/', method: 'post', data: { bill_id: billId, marked },
+  })
 }

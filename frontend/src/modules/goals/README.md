@@ -1,5 +1,7 @@
 # Goals — 目标管理前端
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 ## Views
 
 | 文件 | 职责 |
@@ -19,6 +21,8 @@
 | `ActionDrawer.vue` | 行为记录抽屉（按目标查看/新增行为） |
 | `CreateActionDialog.vue` | 创建行为弹窗 |
 | `QuickGoalDialog.vue` | 快速创建弹窗（频率模板 + 批量里程碑 + 奖励设置） |
+| `GoalCheckupDialog.vue` | PDCA「C」只读体检（停滞 / 落后 / 逾期）；只查后端 `verdict`，不自己比大小 |
+| `MonthlyReviewDialog.vue` | PDCA「A」月度复盘；放弃理由必填，里程碑不动 |
 
 ## Store
 
@@ -29,5 +33,5 @@
 
 ## API / Types
 
-- `api/goalApi.ts`：目标/里程碑/行为/回顾/良品率 CRUD + quick_create/clone/stats/dimension_stats/checkin 等端点封装
+- `api/goalApi.ts`：目标/里程碑/行为/回顾/良品率 CRUD + quick_create/clone/stats/dimension_stats/checkin/checkup/abandon 等端点封装
 - `types/goalTypes.ts`：`Goal`/`Milestone`/`Action`/`GoalStats` 等类型 + `CATEGORY_OPTIONS`（含「📋 项目目标」）/`PRIORITY_OPTIONS`/`STATUS_OPTIONS`/`DIMENSION_OPTIONS` 常量

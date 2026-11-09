@@ -6,30 +6,138 @@
          要接回只需取消下面这行注释。 -->
     <!-- <QuarterlyDecisionCards /> -->
 
-    <!-- 两个回顾出口并排（v3.60.11）：
-         金句 = 摘录里「被推得最少」的一句（长度不超上限、冷落优先而非纯随机；
-         上限是「系统管理 → 系统设置 → 摘录金句池」里的配置项，v3.60.12 起可调）；
-         旧结论 = 问答库里标过采纳 / 写过备注的一条判断。
-         在此之前只有金句有出口、问答库没有，于是内容被手动拷贝到摘录一侧 —— 这里把两条出口对齐。 -->
-    <div class="recall-row">
-      <el-card shadow="hover" class="chart-card recall-card">
-        <template #header>
-          <div class="card-header">
-            <span class="card-title">📖 每日金句</span>
-            <el-button size="small" text @click="refreshQuote">🔄 换一句</el-button>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="header-left">
+        <!-- 菜单项已撤（v3.63.14）⇒ 入口挪到仪表盘页头，这里补回程。
+             写死 `/dashboard` 而不用 router.back()：刷新 / 直达 / 分享链接下没有上一条。 -->
+        <el-button size="small" @click="$router.push('/dashboard')">
+          <el-icon><ArrowLeft /></el-icon> 仪表盘
+        </el-button>
+        <h2>📊 综合进度看板</h2>
+        <!--
+          原来这里挂「年度目标 400 点」。
+          v3.62.43 拆掉总分后改成口径说明 —— 这一年到底在量什么，先说清。
+        -->
+        <el-tag size="small" type="success" effect="plain">口径：覆盖率 + 强度</el-tag>
+      </div>
+      <div class="header-actions">
+        <el-select
+          v-model="store.currentYear"
+          size="small"
+          style="width: 100px"
+          @change="store.switchYear"
+        >
+          <el-option
+            v-for="y in store.availableYears"
+            :key="y"
+            :label="`${y}年`"
+            :value="y"
+          />
+        </el-select>
+        <el-button :icon="Refresh" size="small" @click="store.fetchAll" />
+        <!--
+          年度明细入口（原来在「月度明细」表头里，那张表删掉后搬到这里）。
+          ⚠️ 它是**另一件事**：逐年的覆盖率对照，回答「哪一年开始松了」。
+        -->
+        <el-button size="small" @click="openYearDetail">📆 年度明细</el-button>
+      </div>
+    </div>
+
+    <!-- 雷达（覆盖率 / 达成率）+ 七维覆盖率与强度 -->
+    <el-row :gutter="16" class="summary-top-row">
+      <el-col :xs="24" :md="10">
+        <el-card shadow="hover" class="summary-card">
+          <template #header>
+            <div class="card-header-flex">
+              <span class="card-title">📡 七维平衡</span>
+              <div class="radar-head-actions">
+                <!--
+                  两种镜片、同一份数据（后端一次给全，切换不发请求）：
+                  覆盖率 = 我记了多少（客观）；达成率 = 相对每轴封顶（保留配置的意义）
+                -->
+                <el-radio-group v-model="radarBasis" size="small">
+                  <el-radio-button value="coverage">覆盖率</el-radio-button>
+                  <el-radio-button value="achievement">达成率</el-radio-button>
+                </el-radio-group>
+                <el-button size="small" text type="primary" @click="openRadarConfig">
+                  <el-icon style="margin-right:2px"><Setting /></el-icon>配置
+                </el-button>
+              </div>
+            </div>
+          </template>
+          <!-- v-show 保持组件常驻，避免 v-if 卸载/重挂载导致 ECharts DOM 竞态 -->
+          <RadarChart v-show="!!store.radarData" :basis="radarBasis" />
+          <div v-if="!store.radarData" class="chart-empty">暂无数据</div>
+
+          <!-- 最短板一句话：雷达看形状，这句给结论 -->
+          <div v-if="weakestText" class="weakest-line">
+            <span class="weakest-tag">最短板</span>
+            <span class="weakest-body">{{ weakestText }}</span>
           </div>
-        </template>
-        <div class="quote-card-body" v-if="dailyQuote">
-          <div class="quote-content">{{ dailyQuote.content }}</div>
-          <div class="quote-author" v-if="dailyQuote.author">— {{ dailyQuote.author }}</div>
-          <el-tag size="small">{{ dailyQuote.language }}</el-tag>
+
+          <!--
+            达成率为负时必须说出来：雷达几何只能画 0–100%，负值会被压到圆心，
+            形状上看是「没做」，实际是「净流出」。不写这一行就是静默误读。
+          -->
+          <div v-if="radarBasis === 'achievement' && negativeAxes.length" class="neg-line">
+            <span class="neg-tag">净流出</span>
+            <span class="neg-body">
+              {{ negativeAxes.join('；') }} —— 雷达只能画 0–100%，这些轴被压到圆心
+            </span>
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :md="14">
+        <el-card shadow="hover" class="summary-card">
+          <template #header>
+            <div class="card-header-flex">
+              <span class="card-title">📋 七维覆盖率与强度</span>
+              <span class="year-progress-badge">
+                {{ overview?.window?.elapsed_days ?? 0 }} 天 /
+                {{ overview?.window?.elapsed_months ?? 0 }} 个完整月
+              </span>
+            </div>
+          </template>
+          <CoverageTable
+            v-if="overview?.modules"
+            :modules="overview.modules"
+            :weakest-module="overview.weakest?.module"
+            @view-module="handleViewModule"
+          />
+          <div v-else class="chart-empty">暂无数据</div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 月度：覆盖率 + 强度 -->
+    <el-card shadow="hover" class="chart-card full-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">📈 月度覆盖率与强度</span>
+          <div class="card-hint">
+            格子里写的是覆盖率（有记录 / 该有的），底色越深 = 强度越高（按行比，跨行不比）。
+            点格子看当月明细
+          </div>
         </div>
-        <div v-else class="recall-empty">
-          还没有能上卡的摘录 —— 去
-          <el-button link type="primary" @click="$router.push('/toolkit/quotes')">摘录管理</el-button>
-          加一条，或到「系统设置 → 摘录金句池」把长度上限调大。
-        </div>
-      </el-card>
+      </template>
+      <TrendChart v-if="store.trendData.length" @pick-month="openMonthDetail" />
+      <div v-else class="chart-empty" style="height:200px;display:flex;align-items:center;justify-content:center">
+        暂无趋势数据
+      </div>
+    </el-card>
+
+    <!--
+      两个回顾出口并排（v3.60.11 起）：金句 + 一条旧结论。
+      🔴 v3.63.14 起从**页面顶部挪到底部**：这两张是「回顾读物」，实测各 450px 高，
+      把「七维雷达」挤到第 900px 处（可视高度只有 753px）——
+      进这一页第一眼看到两段文字，一张数据图都看不到。
+      本页要回答的是「这一年我到底在不在动」⇒ 先给图，再给读物。
+      金句卡自 v3.63.14 起是共享组件（`QuoteCard`），取数与空态只此一份。
+    -->
+    <div class="recall-row">
+      <QuoteCard shadow="hover" class="chart-card recall-card" />
 
       <el-card
         shadow="hover"
@@ -51,7 +159,7 @@
           </div>
         </template>
 
-        <div class="quote-card-body" v-if="conclusion">
+        <div class="conclusion-body" v-if="conclusion">
           <!-- 出处：后端一直在下发 `scene_name` / `topic_title`，卡片从未渲染过 ——
                实测这两项 100% 有值（11/11 主题有标题、有场景），等于白扔。 -->
           <div class="conclusion-src">
@@ -118,154 +226,32 @@
       </el-card>
     </div>
 
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="header-left">
-        <h2>📊 综合进度看板</h2>
-        <el-tag size="small" type="success" effect="plain">年度目标 {{ YEARLY_TARGET }} 点</el-tag>
-      </div>
-      <div class="header-actions">
-        <el-select
-          v-model="store.currentYear"
-          size="small"
-          style="width: 100px"
-          @change="store.switchYear"
-        >
-          <el-option
-            v-for="y in store.availableYears"
-            :key="y"
-            :label="`${y}年`"
-            :value="y"
-          />
-        </el-select>
-        <el-button :icon="Refresh" size="small" @click="store.fetchAll" />
-      </div>
-    </div>
-
-    <!-- 进度环 + 模块贡献 + 雷达图 -->
-    <el-row :gutter="16" class="summary-top-row">
-      <!-- 年度进度环 -->
-      <el-col :span="8">
-        <el-card shadow="hover" class="summary-card">
-          <template #header><span class="card-title">🎯 年度进度</span></template>
-          <div class="ring-wrapper">
-            <ProgressRing
-              :value="overview?.total_points ?? 0"
-              :max="YEARLY_TARGET"
-              :label="`${overview?.year || currentYear}年`"
-            />
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 各模块贡献 -->
-      <el-col :span="8">
-        <el-card shadow="hover" class="summary-card">
-          <template #header>
-            <div class="card-header-flex">
-              <span class="card-title">📊 各模块贡献</span>
-              <span v-if="overview?.total_points != null" class="year-progress-badge">
-                {{ overview.total_points }} / {{ overview.yearly_target }} 分
-                ({{ overview.progress_percent }}%)
-              </span>
-            </div>
-          </template>
-          <ModuleBar
-            v-if="overview?.modules"
-            :modules="overview.modules"
-            :show-percent="true"
-            @view-module="handleViewModule"
-          />
-          <div v-else class="chart-empty">暂无数据</div>
-        </el-card>
-      </el-col>
-
-      <!-- 雷达图 -->
-      <el-col :span="8">
-        <el-card shadow="hover" class="summary-card">
-          <template #header>
-          <div class="card-header-flex">
-            <span class="card-title">📡 七维平衡</span>
-            <el-button size="small" text type="primary" @click="openRadarConfig">
-              <el-icon style="margin-right:2px"><Setting /></el-icon>配置
-            </el-button>
-          </div>
-        </template>
-          <!-- v-show 保持组件常驻，避免 v-if 卸载/重挂载导致 ECharts DOM 竞态 -->
-          <RadarChart v-show="!!store.radarData" />
-          <div v-if="!store.radarData" class="chart-empty">暂无数据</div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 月度趋势图 -->
-    <el-card shadow="hover" class="chart-card full-card">
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">📈 月度进度趋势</span>
-          <div class="card-hint">堆叠柱状图展示各模块月度贡献，红线为月目标</div>
-        </div>
-      </template>
-      <TrendChart v-if="store.trendData.length" />
-      <div v-else class="chart-empty" style="height:200px;display:flex;align-items:center;justify-content:center">
-        暂无趋势数据
-      </div>
-    </el-card>
 
     <!-- 身体-状态关联（暂隐藏，等待数据接口就绪后启用） -->
     <!-- <BodyMindChart /> -->
 
-    <!-- 月度详情表格 -->
-    <el-card shadow="hover" class="chart-card full-card">
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">📅 月度明细</span>
-          <div class="header-actions">
-            <el-button size="small" @click="openYearDetail">📆 年度明细</el-button>
-            <el-button size="small" @click="showMonthModal = true">查看本月详情</el-button>
-          </div>
-        </div>
-      </template>
-      <el-table :data="monthTableData" stripe size="small" style="width: 100%" @row-click="handleRowClick">
-        <el-table-column label="月份" min-width="60">
-          <template #default="{ row }">{{ row.month }}月</template>
-        </el-table-column>
-        <el-table-column label="总进度" min-width="80" sortable prop="total_points">
-          <template #default="{ row }">
-            <span :class="row.total_points >= row.month_target ? 'text-success' : 'text-warning'">
-              {{ row.total_points.toFixed(1) }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="目标" min-width="60" prop="month_target" />
-        <el-table-column label="财富" min-width="60" prop="wealth" />
-        <el-table-column label="健康" min-width="60" prop="health" />
-        <el-table-column label="时间投入" min-width="70" prop="times" />
-        <el-table-column label="阅读" min-width="60" prop="book" />
-        <el-table-column label="小确幸" min-width="60" prop="sugar" />
-        <el-table-column label="旅行" min-width="60" prop="travel" />
-        <el-table-column label="文字" min-width="60" prop="words" />
-        <el-table-column label="达成率" width="80" sortable>
-          <template #default="{ row }">
-            <span :style="{ color: row.rate >= 80 ? '#52c41a' : row.rate >= 50 ? '#faad14' : '#f5222d', fontWeight: 600 }">
-              {{ row.rate }}%
-            </span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+    <!--
+      月度明细表已删除（v3.62.43）。
+      它的三列「总进度 / 目标 / 达成率」都是总分口径；改成覆盖率之后，
+      数字与上面的热力图**完全重复**，而表格还会让人误以为这些数能加。
+      当月明细的入口改到热力图上点格子（同一个 MonthlyModal）。
+      原「📆 年度明细」保留在页头下方？不 —— 它现在挂在趋势卡页头，见下。
+    -->
 
     <!-- 月度详情弹窗 -->
     <!-- 年度明细弹窗 -->
-    <el-dialog v-model="showYearModal" title="📆 年度明细" width="960" append-to-body>
+    <el-dialog v-model="showYearModal" title="📆 年度明细 · 覆盖率" width="960" append-to-body>
+      <div class="config-hint">
+        每一格是当年该维度的覆盖率：有记录期数 ÷ 该有的期数。
+        <b>0% 不是「没做」，是「没记」</b>——这两件事在业务上完全不同，数值上都是 0。
+      </div>
       <el-table :data="yearRows" v-loading="yearLoading" stripe size="small" max-height="420" style="width: 100%">
         <el-table-column v-for="col in YEAR_COLUMNS" :key="col.key" :label="col.label" :prop="col.key"
           align="right" :min-width="col.width" />
-        <el-table-column label="达成率" min-width="90" align="right" fixed="right">
+        <el-table-column label="当年最短板" min-width="120" align="right" fixed="right">
           <template #default="{ row }">
-            <span :class="row.progress_percent >= 100 ? 'text-success' : row.progress_percent >= 50 ? 'text-primary' : 'text-warning'">
-              {{ row.progress_percent }}%
-            </span>
+            <span v-if="row.weakest">{{ row.weakest }} {{ row.weakest_pct }}%</span>
+            <span v-else class="text-muted">—</span>
           </template>
         </el-table-column>
       </el-table>
@@ -345,23 +331,21 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { Refresh, Setting } from '@element-plus/icons-vue'
+import { Refresh, Setting, ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { apiErrorText } from '@/shared/utils/apiError'
 import { getRadarConfig, saveRadarConfig as apiSaveRadarConfig, getRadarConfigHistory, getYearlyDetail } from '../api/summaryApi'
 import { useSummaryStore } from '../stores/summaryStore'
-import { YEARLY_TARGET } from '../types/summaryTypes'
 import QuarterlyDecisionCards from '../components/QuarterlyDecisionCards.vue'
-import ProgressRing from '../components/ProgressRing.vue'
-import ModuleBar from '../components/ModuleBar.vue'
+import CoverageTable from '../components/CoverageTable.vue'
 import RadarChart from '../components/RadarChart.vue'
 import TrendChart from '../components/TrendChart.vue'
 import MonthlyModal from '../components/MonthlyModal.vue'
 import BodyMindChart from '../components/BodyMindChart.vue'
-import { getNextQuote } from '@/modules/toolkit/api/quoteApi'
+import type { RadarBasis } from '../types/summaryTypes'
 import { getNextConclusion } from '@/modules/toolkit/api/askLibraryApi'
 import type { AskConclusionItem } from '@/modules/toolkit/api/askLibraryApi'
-import type { Quote } from '@/modules/toolkit/types/quoteTypes'
+import QuoteCard from '@/modules/toolkit/components/QuoteCard.vue'
 
 const store = useSummaryStore()
 const router = useRouter()
@@ -369,11 +353,44 @@ const currentYear = computed(() => store.currentYear)
 const overview = computed(() => store.overview)
 const showMonthModal = ref(false)
 
-// ─── 年度明细 ───
+// ─── 雷达镜片（覆盖率 / 达成率）───
+const radarBasis = ref<RadarBasis>('coverage')
+
+/**
+ * 最短板一句话
+ *
+ * 🔴 只说事实，不评价、不给建议：
+ *    「292 天里只有 35 天有记录」是事实，「说明你不重视生活」是判断 ——
+ *    后者不该由系统代说（管理工具不该替人下结论）。
+ */
+const weakestText = computed(() => {
+  const w = overview.value?.weakest
+  if (!w) return ''
+  const base = `${w.label}：${w.periods} ${w.period_word}里只有 ${w.covered} ${w.period_word}有记录（${w.coverage_pct}%）`
+  if (w.recent_covered === null || w.recent_covered === undefined) return base + '。'
+  return `${base}；最近 ${w.recent_periods} 天只记了 ${w.recent_covered} 天。`
+})
+
+/**
+ * 达成率为负的维度（目前只有财富：净流出）。
+ *
+ * 文案里的数字全部来自后端 `achievement_pct` / `achievement_target`，
+ * 前端不自己算「负多少」——否则又是第二把尺子。
+ */
+const negativeAxes = computed(() => {
+  const mods = overview.value?.modules ?? []
+  return mods
+    .filter((m) => m.achievement_pct !== null && m.achievement_pct < 0)
+    .map((m) => {
+      const amount = m.raw_value === null ? '—' : `¥${m.raw_value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      const target = m.achievement_target === null ? '—' : `¥${m.achievement_target.toLocaleString('zh-CN', { minimumFractionDigits: 0 })}`
+      return `${m.label} ${amount} ÷ 目标 ${target} = ${m.achievement_pct}%`
+    })
+})
+
+// ─── 年度明细（覆盖率版）───
 const YEAR_COLUMNS = [
   { key: 'year', label: '年份', width: 70 },
-  { key: 'total_points', label: '总进度', width: 80 },
-  { key: 'yearly_target', label: '目标', width: 70 },
   { key: 'wealth', label: '财富', width: 70 },
   { key: 'health', label: '健康', width: 70 },
   { key: 'times', label: '时间投入', width: 85 },
@@ -399,7 +416,6 @@ async function openYearDetail() {
     yearLoading.value = false
   }
 }
-const dailyQuote = ref<Quote | null>(null)
 const conclusion = ref<AskConclusionItem | null>(null)
 
 // ─── 七维平衡封顶配置 ───
@@ -482,22 +498,6 @@ async function saveRadarConfig() {
 }
 
 /**
- * 金句：改走 `next/`（短句池 + 冷落优先），不再走 `random/`。
- *
- * ⚠️ 池为空时后端返回 **204**，此时 `res.data` 是空串 `''`（不是 null）——
- * 直接赋值会让 `v-if="dailyQuote"` 判真、把空串当成一条金句渲染出来。所以这里显式判类型。
- */
-async function refreshQuote() {
-  try {
-    const res = await getNextQuote()
-    const data = res.data
-    dailyQuote.value = data && typeof data === 'object' ? (data as Quote) : null
-  } catch {
-    dailyQuote.value = null
-  }
-}
-
-/**
  * 一条旧结论：问答库里「标过采纳 / 写过备注」的一条回答。
  * 库里还没有任何结论时后端返回 **200 + null**（这不是错误），照实显示引导文案。
  */
@@ -538,27 +538,19 @@ function openConclusion() {
   })
 }
 
-const monthTableData = computed(() => {
-  return store.trendData.map(d => ({
-    ...d,
-    total_points: d.total_points,
-    rate: d.month_target > 0 ? Math.round(d.total_points / d.month_target * 100) : 0,
-  }))
-})
-
 function handleViewModule(module: string, year?: number, month?: number) {
   store.fetchModuleDetail(module, year, month)
 }
 
-function handleRowClick(row: { month: number }) {
-  store.currentMonth = row.month
+/** 热力图点格子 → 打开当月明细（替代已删除的「月度明细」表逐行点击） */
+function openMonthDetail(month: number) {
+  store.currentMonth = month
   showMonthModal.value = true
 }
 
 onMounted(() => {
   store.fetchAll()
-  refreshQuote()
-  refreshConclusion()
+  refreshConclusion()   // 金句由共享组件 `<QuoteCard />` 自己取
 })
 </script>
 
@@ -649,10 +641,62 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
-.ring-wrapper {
+/* 雷达卡底部那句「最短板」—— 形状看雷达，结论看这行 */
+.weakest-line {
   display: flex;
-  justify-content: center;
-  padding: 8px 0;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--el-color-warning-light-9);
+}
+.weakest-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #92400E;
+  background: #FDE68A;
+}
+.weakest-body {
+  font-size: 12px;
+  line-height: 1.65;
+  color: #92400E;
+}
+
+.radar-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 达成率为负的说明行：雷达画不出来，只能靠文字补齐 */
+.neg-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--el-color-danger-light-9);
+}
+.neg-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-8);
+}
+.neg-body {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--el-color-danger-dark-2);
+}
+
+.text-muted {
+  color: var(--el-text-color-placeholder);
 }
 
 .chart-empty {
@@ -771,25 +815,10 @@ onMounted(() => {
   color: #9CA3AF;
 }
 
-.quote-card-body {
+/* 「一条旧结论」卡的内容容器。原名叫 `.quote-card-body`，
+   与金句卡共用 —— 金句抽成组件（自带同名类）后改名，免得同名不同义。 */
+.conclusion-body {
   padding: 8px 0;
-}
-.quote-content {
-  font-size: 14px;
-  color: #1F2937;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  /* 长度上限放开成可配置后（v3.60.12），长摘录会**全文**上卡 ——
-     卡内滚动而不是把卡片撑高：这里是两列并排布局，一张卡变高会带着整行一起变高，
-     旁边那张就被拉出一片空白。约 8 行的可视高度，超出自己滚。 */
-  max-height: 180px;
-  overflow-y: auto;
-}
-.quote-author {
-  margin-top: 6px;
-  font-size: 13px;
-  color: #6B7280;
-  font-style: italic;
 }
 .header-actions {
   display: flex;

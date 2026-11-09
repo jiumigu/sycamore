@@ -349,7 +349,7 @@ async function openHistory() {
 async function doReverse(row: SelfRunCheckin) {
   try {
     await ElMessageBox.confirm(
-      '撤销会**新增一条负数流水**，原记录保留（撤销 ≠ 删除）—— 否则已归档的周期会和明细账对不上。',
+      '撤销会新增一条负数流水，原记录保留（撤销 ≠ 删除）—— 否则已归档的周期会和明细账对不上。',
       '撤销这一笔？',
       { confirmButtonText: '撤销', cancelButtonText: '算了', type: 'warning' },
     )

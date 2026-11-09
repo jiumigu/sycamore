@@ -214,6 +214,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Link } from '@element-plus/icons-vue'
@@ -288,8 +289,8 @@ async function handleSave() {
     })
     showDialog.value = false
     ElMessage.success('已保存')
-  } catch {
-    ElMessage.error('保存失败，请检查日期与金额是否合法')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败，请检查日期与金额是否合法'))
   }
 }
 

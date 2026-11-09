@@ -64,8 +64,27 @@
       />
     </el-card>
 
-    <!-- 资产快照（按科目）—— 全页唯一的录入入口与历史列表 -->
+    <!--
+      净值变动归因（v3.62.42）—— 资产存量与账本流量的勾稽
+
+      为什么放在趋势图之后：趋势回答「涨了多少」，归因回答「涨的是不是真的」。
+      两张表各自都对却从来对不上账，是个人财务最贵的一类静默错误
+      （漏记大额支出、还款被记成消费、余额抄错一位）。
+    -->
     <el-card shadow="never" class="section-card">
+      <NetworthBridgePanel
+        ref="bridgeRef"
+        @go-assets="scrollToAssetSnapshot"
+        @go-ledger="switchToMonthly"
+      />
+    </el-card>
+
+    <!-- 资产快照（按科目）—— 全页唯一的录入入口与历史列表
+
+         🔴 `id="asset-snapshot"` 是上面归因卡里「资产表」按钮的落点（v3.64.1）：
+            滚到这块资产表，而**不是** push 一个指向本页的路由 —— 跳到当前页
+            等于「点了没反应」，是项目里反复踩过的坑。 -->
+    <el-card id="asset-snapshot" shadow="never" class="section-card">
       <AssetSnapshotPanel ref="snapshotPanelRef" />
     </el-card>
 
@@ -154,6 +173,7 @@ import { useClassifyStore } from '../stores/classifyStore'
 import { useRatioStore } from '../stores/ratioStore'
 import AssetOverview from '../components/cashflow/AssetOverview.vue'
 import AssetTrend from '../components/cashflow/AssetTrend.vue'
+import NetworthBridgePanel from '../components/cashflow/NetworthBridgePanel.vue'
 import HealthMetrics from '../components/cashflow/HealthMetrics.vue'
 import AccountPanel from '../components/asset/AccountPanel.vue'
 import AssetSnapshotPanel from '../components/asset/AssetSnapshotPanel.vue'
@@ -206,6 +226,7 @@ function handleConfigClose() {
  * **不再自己持有一份表单** —— 入口可以有两个，数据源只能有一个。
  */
 const snapshotPanelRef = ref<InstanceType<typeof AssetSnapshotPanel> | null>(null)
+const bridgeRef = ref<InstanceType<typeof NetworthBridgePanel> | null>(null)
 
 function handleNewSnapshot() {
   snapshotPanelRef.value?.openDialog()
@@ -213,6 +234,21 @@ function handleNewSnapshot() {
 
 function switchToMonthly() {
   router.push('/wealth/monthly')
+}
+
+/**
+ * 归因卡「资产表」按钮的落点（v3.64.1）。
+ *
+ * 🔴 走**滚动定位**，不走路由：资产表就是本页下方那块「资产快照（按科目）」，
+ *    `router.push('/wealth/cashflow')` 落在当前页，用户只会看到页面毫无变化
+ *    ⇒ 看起来像按钮坏了。
+ * ⚠️ 用 `getElementById` 而不是模板 ref：那个 `id` 挂在 `el-card` 上，
+ *    取到的是卡片本身（含标题），滚过去能看见「资产快照」四个字。
+ */
+function scrollToAssetSnapshot() {
+  const el = document.getElementById('asset-snapshot')
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 function switchToReview() {
   router.push('/wealth/review')
@@ -238,6 +274,8 @@ function handleRefresh() {
   classifyStore.fetchAll()
   // 快照列表归面板自己管，刷新时也要一起重拉
   snapshotPanelRef.value?.refresh()
+  // 归因依赖「快照 + 账单」两侧，任一侧变了数就变，同样重拉
+  bridgeRef.value?.reload()
   // 比率体系依赖资产快照 + 分类规则 + 负债台账 —— 三者任一变了数就变。
   // ⚠️ 负债台账那份数据由独立页写，本页**不持有** debtStore；
   //    但它的写入仍会影响比率，故这里照样让比率重算（后端直读库）。
@@ -295,6 +333,15 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 .section-card :deep(.el-card__body) { padding: 20px; }
+
+/* 归因卡「资产表」按钮滚到这里（v3.64.1）。
+   🔴 必须有 `scroll-margin-top`：页头是 `position: sticky; top: 0`（56px），
+      不留出这段距离，滚过来的卡片标题会被压在页头底下 ——
+      用户看到的是「滚到一个没有标题的卡片」，不知道自己在哪。
+      72 = 页头 56 + 一点呼吸。 */
+#asset-snapshot {
+  scroll-margin-top: 72px;
+}
 
 /* 口径配置抽屉（配置项收口入口） */
 .config-drawer__header {

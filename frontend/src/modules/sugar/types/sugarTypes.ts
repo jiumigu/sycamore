@@ -23,6 +23,7 @@ export interface SugarListParams {
   year?: number
   month?: number
   category?: string
+  joy_type?: string
   min_happiness?: number
   search?: string
   ordering?: string
@@ -178,6 +179,29 @@ export const JOY_TYPE_OPTIONS = [
   { value: '意外型', label: '意外型 — 惊喜感', icon: '🎁' },
   { value: '独处型', label: '独处型 — 内在空间', icon: '🧘' },
 ]
+
+/**
+ * 筛选下拉的选项 —— 由 `GET /sugar/records/joy_types/` 下发，前端零副本。
+ *
+ * 🔴 这里**不是** `JOY_TYPE_OPTIONS`：后者是录入表单的五个标准型；
+ *    筛选还得覆盖库里那些不在词表内的旧值（社交/其他/创造）与「未标注」，
+ *    否则那几条记录永远筛不出来。谁在筛选下拉里直接 v-for 上面那个常量，
+ *    就等于把「漏数」写死在页面里。
+ */
+export interface JoyTypeOption {
+  /** 筛选用值：标准/旧词是类型名，未标注是后端下发的哨兵（**不是空串**） */
+  value: string
+  label: string
+  /** 按当前 年/月/分类 统计的条数；不随 `joy_type` 自身的选择变化 */
+  count: number
+  kind: 'standard' | 'legacy' | 'unlabeled'
+}
+
+export interface JoyTypeOptions {
+  /** 「未标注」对应的请求值 —— 用它跟 `undefined`（= 没筛选）区分开 */
+  unlabeled_value: string
+  options: JoyTypeOption[]
+}
 
 export const JOY_TYPE_COLORS: Record<string, string> = {
   '感官型': '#10B981',

@@ -46,8 +46,14 @@
         </div>
         <div class="pool-cell">
           <span class="pc-cap">预计可支撑到</span>
-          <span class="pc-num">{{ stats.pool.support_until || '永不耗尽' }}</span>
+          <span class="pc-num">{{ stats.pool.support_until || supportNoneLabel }}</span>
         </div>
+      </div>
+      <!-- 🔴 「撑到哪天」算不出来时，说清**为什么**并给出路。
+           从前这里印「永不耗尽」—— 把「还没有速度可外推」读成了「钱花不完」。 -->
+      <div v-if="stats.pool.support_zero_reason" class="pool-hint">
+        窗口内还没有「为自己」的账，撑多久外推不出来 ——
+        <router-link to="/wealth/heatmap" class="go-bills">去记一笔</router-link>
       </div>
       <div class="sync-row">
         <el-button size="small" @click="doSync('preview')">同步到资金推演（预览）</el-button>
@@ -87,10 +93,15 @@
           :percentage="Math.min(100, Math.round(stats.time.coverage_rate * 100))"
           :color="stats.time.coverage_warn ? '#F59E0B' : '#10B981'"
           :stroke-width="12"
+          :show-text="false"
         />
         <div class="cov-sub">
           已记录 {{ stats.time.covered_hours }}h / 理论 {{ stats.time.theoretical_hours }}h
-          （按每天 12h 可支配估算；ATracker 之外的空转未记，覆盖率天然偏低）
+          （按每天 12h 可支配估算；记录含睡眠，可能超过 100%）
+          <span v-if="stats.time.fallback_hours > 0" class="fallback-hint">
+            · 其中 {{ stats.time.fallback_hours }}h 没设默认归因，按兜底「成长」计入
+            <router-link to="/temporal/mapping" class="go-map">去归好</router-link>
+          </span>
         </div>
       </div>
 
@@ -143,7 +154,10 @@ function emptyStats(): RedemptionStats {
   return {
     window: { start: '', end: '', total_days: 0, elapsed_days: 0, remaining_days: 0 },
     tracking_status: 'active',
-    pool: { principal: 0, injected: 0, self_expense: 0, self_income: 0, balance: 0, avg_daily: 0, support_until: null },
+    pool: {
+      principal: 0, injected: 0, self_expense: 0, self_income: 0,
+      balance: 0, avg_daily: 0, support_until: null, support_zero_reason: null,
+    },
     tier: [],
     time: null,
     unit_cost: null,
@@ -153,6 +167,20 @@ function emptyStats(): RedemptionStats {
 function fmt(n: number) {
   return formatAmount(n, 0)
 }
+
+/**
+ * `support_until` 为空时的显示词 —— **只查表，不猜语义**。
+ *
+ * 后端已经把原因码给出来了（`support_zero_reason`）；前端若自己判
+ * `support_until === null` 就想当然，等以后多一种「算不出来」的原因时，
+ * 它会静默地继续显示同一句话。
+ */
+const SUPPORT_ZERO_LABEL: Record<string, string> = {
+  no_self_expense: '算不出来',
+}
+const supportNoneLabel = computed(
+  () => SUPPORT_ZERO_LABEL[stats.value.pool.support_zero_reason || ''] || '—',
+)
 
 function tagStyle(tag: string) {
   const m = PERIOD_TAG_META[tag] || PERIOD_TAG_META.unmarked
@@ -207,6 +235,9 @@ onMounted(load)
 .pool-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 .pool-cell { display: flex; flex-direction: column; gap: 4px; padding: 10px; background: var(--el-fill-color-light); border-radius: 8px; }
 .pool-cell.hl { background: #F3E8FF; }
+.pool-hint { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
+.go-bills { color: var(--el-color-primary); text-decoration: none; }
+.go-bills:hover { text-decoration: underline; }
 .pc-cap { font-size: 12px; color: var(--el-text-color-secondary); }
 .pc-num { font-size: 16px; font-weight: 700; }
 .sync-row { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
@@ -222,8 +253,12 @@ onMounted(load)
 .cov-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
 .cov-rate { font-weight: 700; }
 .cov-sub { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; }
+.fallback-hint { color: var(--el-color-warning); }
+.go-map { margin-left: 6px; color: var(--el-color-primary); text-decoration: none; }
+.go-map:hover { text-decoration: underline; }
 
-.attr-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+/* 六类归因 ⇒ 3 列 × 2 行刚好铺满；用 4 列会在第二行留两个空位（L1 从四词涨到六词后就这样了） */
+.attr-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
 .attr-cell { display: flex; flex-direction: column; gap: 4px; padding: 10px; background: var(--el-fill-color-light); border-radius: 8px; }
 .ac-cap { font-weight: 600; }
 .ac-num { font-size: 16px; font-weight: 700; }

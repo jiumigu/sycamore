@@ -83,15 +83,21 @@ export const useSelfRunStore = defineStore('selfrun', () => {
     if (res.heartbeat) heartbeatInfo.value = res.heartbeat
   }
 
-  /** 拉「当前阶段 + KPI 清单」 —— 阶段详情接口一次给全（含变更留痕）。 */
+  /** 拉「当前阶段 + KPI 清单」 —— 阶段详情接口一次给全（含变更留痕）。
+   *
+   *  🔴 必须带 `shape=leaf`：分层之后长阶段与它的小阶段**同时**是 `active`，
+   *     只按 `status` 取第一条会拿到长阶段（排序按 `-start_date, -id`，
+   *     起点相同就按 id 大的在前）⇒ 页头显示「0 条 KPI」、周/月读一个
+   *     永不判定的阶段，而且**不报错**。判据与后端 `get_open_stage()` 同源。
+   */
   async function loadStage(silent = false) {
     if (!silent) loading.value = true
     try {
       // 先看有没有进行中的阶段；没有就直接清空（不去赌 id）
-      const res = await api.listStages({ status: 'active' })
+      const res = await api.listStages({ status: 'active', shape: 'leaf' })
       let list = res.data
       if (!list.length) {
-        const paused = await api.listStages({ status: 'paused' })
+        const paused = await api.listStages({ status: 'paused', shape: 'leaf' })
         list = paused.data
       }
       if (!list.length) {

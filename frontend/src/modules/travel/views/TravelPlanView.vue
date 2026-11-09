@@ -8,9 +8,14 @@
         <h1><span class="header-icon">🧳</span> 旅行计划</h1>
         <p class="header-desc">出发前做好预算，旅行中逐项打卡</p>
       </div>
-      <el-button type="primary" @click="openCreateDialog">
-        <el-icon><Plus /></el-icon> 新建计划
-      </el-button>
+      <div class="header-actions">
+        <!-- v3.63.8：这两个都不再占菜单项，改成「旅行计划」页内入口 -->
+        <el-button @click="$router.push('/travel/wishes')">⭐ 旅行心愿单</el-button>
+        <el-button @click="$router.push('/travel/route')">🚂 路线推演</el-button>
+        <el-button type="primary" @click="openCreateDialog">
+          <el-icon><Plus /></el-icon> 新建计划
+        </el-button>
+      </div>
     </div>
 
     <!-- 统计卡片 -->
@@ -163,6 +168,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -326,8 +332,8 @@ async function savePlan() {
     editingPlanId.value = null
     resetCreateForm()
     await fetchAll()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -460,6 +466,13 @@ onMounted(fetchAll)
         color: #9CA3AF;
         margin: 0;
       }
+    }
+
+    // 两个页内入口 + 主操作并排（align-items:flex-start 下要靠这层统一对齐）
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
   }
 

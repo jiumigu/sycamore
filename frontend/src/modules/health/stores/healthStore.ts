@@ -114,6 +114,8 @@ export const useHealthStore = defineStore('health', () => {
 
 export const useWeightStore = defineStore('weight', () => {
   const records = ref<WeightRecord[]>([])
+  /** 全量条数（后端 `count`）—— 分页条用它；**不是** `records.length`（那只等于当前页） */
+  const recordsTotal = ref(0)
   const stats = ref<WeightStats | null>(null)
   const trend = ref<WeightTrend | null>(null)
   const goal = ref<WeightGoal | null>(null)
@@ -176,8 +178,11 @@ export const useWeightStore = defineStore('weight', () => {
       const res = await healthApi.getWeightRecords({ user_id: 1, ...params })
       if (res.data.results) {
         records.value = res.data.results
+        recordsTotal.value = res.data.count ?? res.data.results.length
       } else if (Array.isArray(res.data)) {
+        // 后端若关了分页（返回裸数组）⇒ 全量即总数
         records.value = res.data
+        recordsTotal.value = res.data.length
       }
       return res.data
     } finally {
@@ -185,25 +190,24 @@ export const useWeightStore = defineStore('weight', () => {
     }
   }
 
+  // 🔴 增删改**不再本地改 `records`**：分页时它是「当前页的视图」，
+  //    `unshift` 会让本页变 21 条、`filter` 会让总数与本页条数两把尺子打架。
+  //    调用方改完统一 refetch 当前页（见 WeightDashboard）。
   async function createRecord(data: Record<string, unknown>) {
     const res = await healthApi.createWeightRecord({ user_id: 1, ...data })
-    records.value.unshift(res.data)
     return res.data
   }
 
   async function updateRecord(id: number, data: Record<string, unknown>) {
     const res = await healthApi.updateWeightRecord(id, { user_id: 1, ...data })
-    const idx = records.value.findIndex(r => r.id === id)
-    if (idx >= 0) records.value[idx] = res.data
     return res.data
   }
 
   async function deleteRecord(id: number) {
     await healthApi.deleteWeightRecord(id)
-    records.value = records.value.filter(r => r.id !== id)
   }
 
-  async function loadAll() {
+  async function loadAll(recordParams?: Record<string, unknown>) {
     await Promise.all([
       fetchStats(),
       fetchTrend(),
@@ -211,12 +215,12 @@ export const useWeightStore = defineStore('weight', () => {
       fetchMilestones(),
       fetchBodyInfo(),
       fetchAdjustments(),
-      fetchRecords(),
+      fetchRecords(recordParams),
     ])
   }
 
   return {
-    records, stats, trend, goal, milestones, bodyInfo, adjustments, loading,
+    records, recordsTotal, stats, trend, goal, milestones, bodyInfo, adjustments, loading,
     fetchStats, fetchTrend, fetchGoal, createGoal,
     fetchMilestones, fetchBodyInfo, updateBodyInfo, fetchAdjustments,
     fetchRecords, createRecord, updateRecord, deleteRecord, loadAll,

@@ -1,31 +1,35 @@
 <template>
   <el-dialog
     :model-value="visible"
-    :title="`${year}年${month}月 进度详情`"
-    width="520px"
+    :title="`${year}年${month}月 覆盖详情`"
+    width="560px"
     @update:model-value="$emit('update:visible', $event)"
     @open="loadData"
   >
     <div v-loading="loading" class="monthly-modal-body">
-      <!-- 总进度 -->
-      <div class="total-card">
-        <div class="total-title">本月总进度</div>
-        <div class="total-value">
-          <span class="num">{{ detail?.total_points ?? '--' }}</span>
-          <span class="sep">/</span>
-          <span class="target">{{ detail?.month_target ?? '--' }}</span>
-          <span class="unit">点</span>
+      <!-- 本月最短板：不再有「总分 / 月目标」 -->
+      <div class="weak-card">
+        <div class="weak-title">本月最短板</div>
+        <template v-if="detail?.weakest">
+          <div class="weak-value">
+            <span class="weak-name">{{ detail.weakest.label }}</span>
+            <span class="weak-pct">{{ detail.weakest.coverage_pct }}%</span>
+          </div>
+          <div class="weak-sub">
+            {{ detail.weakest.covered }}/{{ detail.weakest.periods }}
+            {{ detail.weakest.period_word }}有记录
+          </div>
+        </template>
+        <div v-else class="weak-sub">
+          这个月还没有可比较的记录
         </div>
-        <div class="total-bar">
-          <div
-            class="total-fill"
-            :style="{ width: Math.min((detail?.target_percent ?? 0), 100) + '%' }"
-          ></div>
-        </div>
-        <div class="total-percent">{{ (detail?.target_percent ?? 0).toFixed(1) }}%</div>
       </div>
 
-      <!-- 各模块 -->
+      <div class="hint">
+        覆盖率低的维度排在上面 —— 越低说明这个月漏得越多。
+      </div>
+
+      <!-- 各模块：覆盖率 + 强度 -->
       <div class="module-list">
         <div
           v-for="item in sortedModules"
@@ -35,10 +39,30 @@
         >
           <span class="m-dot" :style="{ background: item.color }"></span>
           <span class="m-label">{{ item.label }}</span>
-          <span class="m-points">{{ item.points }} 点</span>
-          <span class="m-raw">
-            {{ formatRaw(item.raw_value, item.unit) }}
+
+          <span class="m-cov">
+            <span class="m-bar">
+              <span
+                v-if="item.coverage.pct !== null"
+                class="m-bar-fill"
+                :style="{ width: Math.min(item.coverage.pct, 100) + '%', background: item.color }"
+              ></span>
+            </span>
+            <span class="m-pct">{{ item.coverage.pct === null ? '—' : item.coverage.pct + '%' }}</span>
           </span>
+
+          <span class="m-frac">
+            {{ item.coverage.covered }}/{{ item.coverage.periods }} {{ item.coverage.period_word }}
+          </span>
+
+          <span class="m-int" :title="item.coverage.intensity_label">
+            <template v-if="item.coverage.intensity !== null">
+              {{ fmtIntensity(item) }}
+              <span class="m-unit">{{ item.coverage.intensity_unit }}</span>
+            </template>
+            <span v-else class="m-muted">—</span>
+          </span>
+
           <el-icon class="m-arrow"><ArrowRight /></el-icon>
         </div>
         <div v-if="!detail?.modules?.length" class="empty">暂无数据</div>
@@ -51,6 +75,8 @@
 import { ref, computed, watch } from 'vue'
 import { ArrowRight } from '@element-plus/icons-vue'
 import { useSummaryStore } from '../stores/summaryStore'
+import { formatSignedAmount } from '@/shared/utils/format'
+import type { ModulePoint } from '../types/summaryTypes'
 
 const props = withDefaults(defineProps<{
   visible: boolean
@@ -65,20 +91,35 @@ const emit = defineEmits<{
   'update:visible': [v: boolean]
   'view-module': [module: string, year: number, month: number]
 }>()
+// 显式引用避免 TS 认为 emit 未使用（模板里用的是 $emit）
+void emit
 
 const store = useSummaryStore()
 const loading = ref(false)
 const detail = computed(() => store.monthlyDetail)
 
-const sortedModules = computed(() => {
+/**
+ * 按覆盖率**升序**：把漏得最多的放最上面。
+ * 原来按点数降序 —— 那是「谁贡献大」，分数拆掉之后这个问题不再存在。
+ */
+const sortedModules = computed<ModulePoint[]>(() => {
   if (!detail.value?.modules) return []
-  return [...detail.value.modules].sort((a, b) => b.points - a.points)
+  return [...detail.value.modules].sort((a, b) => {
+    const x = a.coverage.pct
+    const y = b.coverage.pct
+    // 算不出来（null）排最后，不要被当成 0% 顶到最前面
+    if (x === null && y === null) return 0
+    if (x === null) return 1
+    if (y === null) return -1
+    return x - y
+  })
 })
 
-function formatRaw(val: number, unit: string) {
-  if (!val && val !== 0) return ''
-  if (val >= 10000) return `${(val / 10000).toFixed(2)}万${unit}`
-  return `${val} ${unit}`
+function fmtIntensity(m: ModulePoint): string {
+  const v = m.coverage.intensity
+  if (v === null) return '—'
+  if (m.module === 'wealth') return formatSignedAmount(v, 2)
+  return v.toLocaleString('zh-CN', { maximumFractionDigits: 1 })
 }
 
 async function loadData() {
@@ -100,60 +141,46 @@ watch(() => [props.year, props.month], () => {
   min-height: 200px;
 }
 
-.total-card {
+.weak-card {
   text-align: center;
-  padding: 20px 16px;
-  background: linear-gradient(135deg, #ECFDF5, #D1FAE5);
+  padding: 16px;
+  background: linear-gradient(135deg, #FFFBEB, #FEF3C7);
   border-radius: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
-
-.total-title {
-  font-size: 13px;
-  color: #6B7280;
-  margin-bottom: 8px;
-}
-
-.total-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: #059669;
-}
-.total-value .sep {
-  color: #9CA3AF;
-  margin: 0 4px;
-  font-weight: 400;
-}
-.total-value .target {
-  font-weight: 400;
-  color: #6B7280;
-}
-.total-value .unit {
-  font-size: 14px;
-  color: #6B7280;
-  font-weight: 400;
-  margin-left: 4px;
-}
-
-.total-bar {
-  height: 6px;
-  background: #E5E7EB;
-  border-radius: 3px;
-  margin: 12px auto 6px;
-  max-width: 240px;
-  overflow: hidden;
-}
-
-.total-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #34D399, #059669);
-  border-radius: 3px;
-  transition: width 0.6s ease;
-}
-
-.total-percent {
+.weak-title {
   font-size: 12px;
-  color: #6B7280;
+  color: #92400E;
+  margin-bottom: 6px;
+}
+.weak-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+}
+.weak-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: #92400E;
+}
+.weak-pct {
+  font-size: 20px;
+  font-weight: 700;
+  color: #B45309;
+  font-variant-numeric: tabular-nums;
+}
+.weak-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #A16207;
+}
+
+.hint {
+  margin-bottom: 8px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
 }
 
 .module-list {
@@ -166,7 +193,7 @@ watch(() => [props.year, props.month], () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 8px;
+  padding: 9px 8px;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s;
@@ -185,23 +212,58 @@ watch(() => [props.year, props.month], () => {
 .m-label {
   font-size: 13px;
   color: var(--el-text-color-primary);
-  width: 64px;
+  width: 60px;
   flex-shrink: 0;
 }
 
-.m-points {
-  font-size: 14px;
+.m-cov {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.m-bar {
+  flex: 1;
+  min-width: 30px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--el-fill-color);
+  overflow: hidden;
+}
+.m-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+.m-pct {
+  width: 42px;
+  text-align: right;
+  font-size: 12px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--el-text-color-primary);
-  width: 60px;
 }
 
-.m-raw {
-  flex: 1;
-  font-size: 12px;
+.m-frac {
+  width: 74px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
-  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
+
+.m-int {
+  width: 92px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums;
+}
+.m-unit {
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
+}
+.m-muted { color: var(--el-text-color-placeholder); }
 
 .m-arrow {
   font-size: 12px;

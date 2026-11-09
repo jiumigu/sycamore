@@ -121,6 +121,15 @@ export function getAssetTrend(params?: { months?: number; user_id?: number }) {
   return request({ url: '/wealth/cashflow/trend/', method: 'get', params })
 }
 
+/**
+ * 净值变动归因（v3.62.42）—— 资产存量与账本流量的勾稽
+ *
+ * 门槛与方向判据都在后端：前端只读 `level` / `unexplained_side`，**不自己比大小**。
+ */
+export function getNetworthBridge(params?: { limit?: number; user_id?: number }) {
+  return request({ url: '/wealth/cashflow/networth-bridge/', method: 'get', params })
+}
+
 /** 盘点快照 CRUD */
 export function saveSnapshot(data: Record<string, unknown>) {
   return request({ url: '/wealth/cashflow/snapshot/', method: 'post', data })

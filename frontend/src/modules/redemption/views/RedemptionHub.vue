@@ -4,7 +4,7 @@
       <el-tab-pane label="仪表盘" name="dashboard">
         <RedemptionDashboard />
       </el-tab-pane>
-      <el-tab-pane label="归因规则" name="rules">
+      <el-tab-pane label="归因说明" name="rules">
         <AttrRuleEditor />
       </el-tab-pane>
       <el-tab-pane label="配置" name="config">
@@ -45,9 +45,12 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import RedemptionDashboard from './RedemptionDashboard.vue'
+// ⚠️ 文件名沿用旧名（原为规则 CRUD）：v3.64.16 起它只是**只读的归因口径说明**，
+//    不再有任何写入口。改归因请走「任务清单 → 分类映射编辑器」。
 import AttrRuleEditor from './AttrRuleEditor.vue'
 import * as rapi from '../api/redemptionApi'
 import type { RedemptionConfig } from '../types/redemptionTypes'
@@ -81,8 +84,8 @@ async function saveConfig() {
       pool_principal: cfg.pool_principal,
     })
     ElMessage.success('已保存')
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     saving.value = false
   }

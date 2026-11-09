@@ -1,6 +1,6 @@
 import request from '@/shared/utils/request'
 import type {
-  RedemptionConfig, PoolInject, AttrRule, RedemptionStats, SyncResult,
+  RedemptionConfig, PoolInject, RedemptionStats, SyncResult,
 } from '../types/redemptionTypes'
 
 /** 读取赎回期配置 + 派生字段 */
@@ -31,26 +31,6 @@ export function listInjects() {
 /** 新增现金池注入 */
 export function createInject(data: Record<string, unknown>) {
   return request({ url: '/redemption/injects/', method: 'post', data })
-}
-
-/** 归因规则列表 */
-export function listAttrRules() {
-  return request<AttrRule[]>({ url: '/redemption/attr-rules/', method: 'get' })
-}
-
-/** 新增归因规则 */
-export function createAttrRule(data: Record<string, unknown>) {
-  return request({ url: '/redemption/attr-rules/', method: 'post', data })
-}
-
-/** 更新归因规则 */
-export function updateAttrRule(id: number, data: Record<string, unknown>) {
-  return request({ url: `/redemption/attr-rules/${id}/`, method: 'put', data })
-}
-
-/** 删除归因规则 */
-export function deleteAttrRule(id: number) {
-  return request({ url: `/redemption/attr-rules/${id}/`, method: 'delete' })
 }
 
 /** 合体统计 */

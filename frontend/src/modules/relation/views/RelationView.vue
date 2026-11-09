@@ -26,6 +26,10 @@
         <el-select v-model="filterLocation" placeholder="认识地点" clearable size="default" style="width:130px" @change="onFilterChange">
           <el-option v-for="loc in locationOptions" :key="loc" :label="loc" :value="loc" />
         </el-select>
+        <!-- v3.63.8：「成长记录」不再占菜单项，改成这一页的页内入口（子页留了「← 关系管理」） -->
+        <el-button @click="$router.push('/relation/conflicts')">
+          🌱 成长记录
+        </el-button>
         <el-button type="primary" @click="openCreate">
           <el-icon><Plus /></el-icon> 添加关系
         </el-button>

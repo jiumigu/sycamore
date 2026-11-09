@@ -2,7 +2,7 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as sugarApi from '../api/sugarApi'
 import type {
-  EnergyLog, EnergyStats, EnergyTemplate, SugarRecord, SugarCategoryStats,
+  EnergyLog, EnergyStats, EnergyTemplate, JoyTypeOptions, SugarRecord, SugarCategoryStats,
   SugarHappinessBands, SugarTemplate,
 } from '../types/sugarTypes'
 
@@ -18,6 +18,26 @@ export const useSugarStore = defineStore('sugar', () => {
   const currentPage = ref(1)
   const pageSize = ref(10)
   const total = ref(0)
+
+  /** 最近一次生效的列表筛选（翻页时复用，避免翻页把筛选丢掉） */
+  const lastListParams = ref<Record<string, unknown>>({})
+
+  // ─── 快乐类型筛选项（下拉框唯一来源，见 types 里的说明） ───
+  const joyTypeOptions = ref<JoyTypeOptions | null>(null)
+
+  async function fetchJoyTypeOptions(params?: Record<string, unknown>) {
+    try {
+      const response = await sugarApi.getJoyTypeOptions(params)
+      joyTypeOptions.value = response.data as JoyTypeOptions
+      return joyTypeOptions.value
+    } catch (error) {
+      console.error('获取快乐类型选项失败:', error)
+      // 取不到就让下拉为空 —— 不退回前端硬编码的五个标准型：
+      // 那会让「旧词表」和「未标注」凭空消失，而且看起来一切正常。
+      joyTypeOptions.value = null
+      return null
+    }
+  }
 
   // ─── 统计汇总（来自 categories API） ───
   const statsSummary = ref<{
@@ -48,12 +68,15 @@ export const useSugarStore = defineStore('sugar', () => {
   }
 
   async function fetchSugarList(params?: Record<string, unknown>) {
+    // 有参数才覆盖：翻页走的是 `handlePageChange` → `fetchSugarList()` 无参调用，
+    // 若这里用空对象覆盖，第 2 页就会悄悄退回「全部记录」（筛选看起来像失效了）。
+    if (params) lastListParams.value = { ...params }
     loading.value = true
     try {
       const response = await sugarApi.getSugarList({
         page: currentPage.value,
         page_size: pageSize.value,
-        ...params,
+        ...lastListParams.value,
       })
       const data = response.data
       if (data.results) {
@@ -73,6 +96,7 @@ export const useSugarStore = defineStore('sugar', () => {
 
   function handlePageChange(page: number) {
     currentPage.value = page
+    // 不带参数 —— 筛选条件由 `lastListParams` 承接（见 fetchSugarList 里的说明）
     fetchSugarList()
   }
 
@@ -206,6 +230,8 @@ export const useSugarStore = defineStore('sugar', () => {
     updateExistingSugar, deleteExistingSugar, fetchCategories,
     // ─── 分页 ───
     currentPage, pageSize, total, handlePageChange,
+    // ─── 快乐类型筛选项 ───
+    joyTypeOptions, fetchJoyTypeOptions,
     // ─── 统计汇总 ───
     statsSummary,
     // ─── 模板 ───

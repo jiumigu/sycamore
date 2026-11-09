@@ -141,6 +141,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -249,8 +250,8 @@ async function saveAnswer(a: AskAnswerItem) {
       const fresh = groups.value.flatMap((g) => g.topics).find((t) => t.id === id)
       if (fresh) current.value = fresh
     }
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     savingId.value = null
   }

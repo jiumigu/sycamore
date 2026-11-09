@@ -131,15 +131,26 @@
             🍰 同时新增一条小确幸记录
           </el-checkbox>
           <template v-if="completeForm.addSugar">
-            <el-form-item label="开心指数" class="sub-option">
-              <el-rate v-model="completeForm.sugarRating" :max="5" />
+            <el-form-item label="开心程度" class="sub-option">
+              <HappinessScale v-model="completeForm.happiness" />
+            </el-form-item>
+            <el-form-item label="奖励" class="sub-option">
+              <span class="reward-preview">💰 ¥{{ completeForm.happiness }}</span>
+              <span class="reward-hint">金额 = 开心程度（由小确幸自动记一笔）</span>
             </el-form-item>
           </template>
 
-          <el-checkbox v-model="completeForm.addReward" class="reward-check">
+          <!-- 🔴 勾了小确幸就禁掉这个：小确幸创建时**后端已经记过一笔**奖励，
+               再勾一次等于同一件事记两笔（余额会翻倍，而且流水上看不出原因）。 -->
+          <el-checkbox
+            v-model="completeForm.addReward"
+            :disabled="completeForm.addSugar"
+            class="reward-check"
+          >
             🏦 同时新增奖励到快乐银行
+            <span v-if="completeForm.addSugar" class="reward-hint">（小确幸已自动记过，无需再加）</span>
           </el-checkbox>
-          <template v-if="completeForm.addReward">
+          <template v-if="completeForm.addReward && !completeForm.addSugar">
             <el-form-item label="奖励金额" class="sub-option">
               <el-input-number v-model="completeForm.rewardAmount" :min="1" :max="100" :precision="2" />
               <span class="suffix">元</span>
@@ -188,6 +199,8 @@ import { Upload, QuestionFilled } from '@element-plus/icons-vue'
 import { useInboxStore } from '../stores/inboxStore'
 import type { InboxItem } from '../types/inboxTypes'
 import * as sugarApi from '@/modules/sugar/api/sugarApi'
+// 快乐程度输入与小确幸页共用同一个组件 —— 避免这里再出现一套「星→分」的换算
+import HappinessScale from '@/modules/sugar/components/HappinessScale.vue'
 // 「值得留下」→ 作品库的「待提炼」。与上面三个「同时登记到…」同源：**前端串联**。
 import { capture as captureWork } from '@/modules/works/api/workApi'
 import * as rewardApi from '@/modules/reward/api/rewardApi'
@@ -230,8 +243,17 @@ function handleImportSuccess() {
 const completeForm = reactive({
   note: '',
   addSugar: false,
-  sugarRating: 3,
+  /**
+   * 快乐程度（5–20 分，区间由后端 `happiness_bands` 下发）。
+   *
+   * 🔴 这里曾经是 `sugarRating: 1–5 颗星`，提交时 `星 × 4` 折成 5–20 分。
+   *    折出来的 12 分被后端写进了流水文案（「获得 12 元奖励」），
+   *    而实际入账的是另一个字段 `rewardAmount: 5` ⇒ 同一条记录两个数、还都显示出来。
+   *    现在只有这一套刻度，且**金额 = 分数**，不再有第二次换算。
+   */
+  happiness: 10,
   addReward: false,
+  /** 仅「不记小确幸、只记奖励」时用：那种场景没有程度可派生，只能自己填金额 */
   rewardAmount: 5,
   rewardReason: '',
   // 良品率关联
@@ -258,7 +280,7 @@ const failTypeMap: Record<string, string> = {
 function resetCompleteForm() {
   completeForm.note = ''
   completeForm.addSugar = false
-  completeForm.sugarRating = 3
+  completeForm.happiness = 10
   completeForm.addReward = false
   completeForm.rewardAmount = 5
   completeForm.rewardReason = ''
@@ -291,59 +313,100 @@ function handleComplete(item: InboxItem) {
   completionDialogVisible.value = true
 }
 
+function localToday(): string {
+  // 🔴 用本地日期，不用 `toISOString().slice(0,10)`：那是 UTC，东八区早上 8 点前
+  //    会记成前一天（小确幸日期、良品率日期都会错一天）。
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** 从后端错误体里取一句人话；取不到就返回空串 —— 宁可少说，不编原因。 */
+function apiErrorSuffix(e: any): string {
+  const d = e?.response?.data
+  if (!d) return ''
+  if (typeof d === 'string') return `：${d.slice(0, 80)}`
+  const first = Object.values(d as Record<string, unknown>)[0]
+  const text = Array.isArray(first) ? String(first[0] ?? '') : String(first ?? '')
+  return text ? `：${text.slice(0, 80)}` : ''
+}
+
 async function confirmComplete() {
   if (!completingItem.value) return
   processing.value = true
+  const item = completingItem.value
+  const failed: string[] = []
+
   try {
-    const item = completingItem.value
+    // ── 1. 标记完成：只有这一步失败才是真的失败 ──
+    try {
+      await store.completeItem(item.id, completeForm.note || undefined)
+    } catch (e: any) {
+      console.error('标记完成失败:', e, e.response?.data)
+      ElMessage.error(`标记完成失败${apiErrorSuffix(e)}`)
+      return
+    }
 
-    // 1. 标记完成
-    await store.completeItem(item.id, completeForm.note || undefined)
-
-    // 2. 登记良品率（仅工作类别）
+    // ── 2~5. 附加联动：各自独立 try ──
+    //   🔴 2026-10-23 实案：原来 1~4 步共用一个 try，小确幸创建报 500 时整条链路
+    //   显示「操作失败」，而收件箱其实**已经完成**。用户以为没成、又点一次
+    //   ⇒ 多出一条重复小确幸（s_id 77/78）。附加项失败必须说成
+    //   「已完成；X 没记上」，绝不能让用户以为要重做。
     if (completeForm.recordOutput) {
       const mappedFailType = failTypeMap[completeForm.failType] || ''
-      await goalsApi.createOutputRecord({
-        title: item.content,
-        category: 'work',
-        quality: completeForm.quality,
-        difficulty: completeForm.difficulty,
-        fail_type: mappedFailType,
-        fail_reason: completeForm.quality !== 'good' ? (completeForm.failType || '') : '',
-        lesson_learned: completeForm.lesson || '',
-        occurred_at: new Date().toISOString().slice(0, 10),
-        expected_result: '',
-        actual_result: completeForm.note || '',
-      })
+      try {
+        await goalsApi.createOutputRecord({
+          title: item.content,
+          category: 'work',
+          quality: completeForm.quality,
+          difficulty: completeForm.difficulty,
+          fail_type: mappedFailType,
+          fail_reason: completeForm.quality !== 'good' ? (completeForm.failType || '') : '',
+          lesson_learned: completeForm.lesson || '',
+          occurred_at: localToday(),
+          expected_result: '',
+          actual_result: completeForm.note || '',
+        })
+      } catch (e: any) {
+        console.error('良品率登记失败:', e, e.response?.data)
+        failed.push('良品率')
+      }
     }
-
-    // 3. 新增小确幸 + 奖励（金额保持一致）
-    const rewardAmount = completeForm.rewardAmount || 5
 
     if (completeForm.addSugar) {
-      await sugarApi.createSugar({
-        title: `完成：${item.content}`,
-        content: item.content,
-        level_of_happiness: (completeForm.sugarRating || 3) * 4,  // 前端 1-5 分 → 后端 5-20 分
-        reward_amount: rewardAmount,  // 与银行奖励同金额
-        record_type: 'moment',
-        time: new Date().toISOString().slice(0, 10),  // 只传日期部分
-      })
+      try {
+        // 金额 = 开心程度（同一套刻度，1 分 = 1 元）—— 全模块唯一口径。
+        // 🔴 原来这里传 `星 × 4` 给程度、又传另一个 `rewardAmount=5` 当金额，
+        //    后端把程度写进了流水文案 ⇒ 「获得 12 元奖励」但实际 +¥5.00。
+        await sugarApi.createSugar({
+          title: `完成：${item.content}`,
+          level_of_happiness: completeForm.happiness,
+          reward_amount: completeForm.happiness,
+          time: localToday(),
+        })
+      } catch (e: any) {
+        console.error('小确幸创建失败:', e, e.response?.data)
+        failed.push('小确幸')
+      }
     }
 
-    // 4. 新增奖励
-    if (completeForm.addReward) {
-      await rewardApi.addRewardTransaction({
-        amount: rewardAmount,
-        source_type: 'inbox_complete',
-        transaction_type: 'inbox_complete',
-        description: `收件箱完成小奖励：${item.content}`,
-      })
+    // 🔴 互斥：小确幸创建时后端已记过一笔奖励，这里再记就是同一件事两笔
+    if (completeForm.addReward && !completeForm.addSugar) {
+      try {
+        await rewardApi.addRewardTransaction({
+          amount: completeForm.rewardAmount || 5,
+          source_type: 'inbox_complete',
+          transaction_type: 'inbox_complete',
+          description: `收件箱完成小奖励：${item.content}`,
+        })
+      } catch (e: any) {
+        console.error('奖励登记失败:', e, e.response?.data)
+        failed.push('快乐银行奖励')
+      }
     }
 
-    // 5. 标记「值得留下」（作品库）——
-    //    🔴 **单独 try**：它是附加标记，不能因为它失败就把「已完成」也报成失败。
-    //    勾的意思只是「这条以后可能长成一件东西」，此刻不用写任何字。
+    // 标记「值得留下」（作品库）—— 勾的意思只是「这条以后可能长成一件东西」，
+    // 此刻不用写任何字；失败同样只提示、不推翻「已完成」。
     if (completeForm.keepIt) {
       try {
         await captureWork({
@@ -353,19 +416,18 @@ async function confirmComplete() {
           excerpt: (completeForm.note || '').slice(0, 300),
         })
       } catch {
-        ElMessage.warning('已完成；「值得留下」没记上（作品库可能还没就绪）')
+        failed.push('「值得留下」')
       }
     }
 
-    ElMessage.success('已完成')
+    if (failed.length) {
+      ElMessage.warning(`已完成；${failed.join('、')}没记上`)
+    } else {
+      ElMessage.success('已完成')
+    }
     completionDialogVisible.value = false
     completingItem.value = null
     resetCompleteForm()
-  } catch (e: any) {
-    console.error('操作失败:', e)
-    console.error('响应数据:', e.response?.data)
-    console.error('响应状态:', e.response?.status)
-    ElMessage.error('操作失败')
   } finally {
     processing.value = false
   }
@@ -466,6 +528,20 @@ async function confirmComplete() {
   margin-left: 8px;
   font-size: 13px;
   color: #6B7280;
+}
+
+/* 奖励预览：金额由开心程度直接派生，不让它变成一个可填的输入框 ——
+   一旦能改，就又会和「开心程度」变成两个数、两处口径。 */
+.reward-preview {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e6a23c;
+}
+
+.reward-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #9CA3AF;
 }
 
 /* 「值得留下」那一行：与上面三个勾同长相，但**多一个去处说明** ——

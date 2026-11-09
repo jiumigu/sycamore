@@ -20,6 +20,9 @@ let chart: echarts.ECharts | null = null
 /** 未去过的区域底色 */
 const NO_DATA_COLOR = '#E9EDF3'
 
+/** 气泡缺 size 时的兜底直径，与后端 `BUBBLE_SIZE_MIN` 对齐 */
+const BUBBLE_SIZE_FALLBACK = 8
+
 /** 判断两个地名是否同一处（「宁德」↔「宁德市」），用于过滤来源明细里的自指项 */
 const NAME_SUFFIX_RE = /(自治州|自治县|地区|市|州|盟|县|区)$/
 function sameName(a: string, b: string): boolean {
@@ -77,7 +80,7 @@ function initChart() {
           return `<strong>${d.name}</strong><br/>
             ${d.province ? `省份：${d.province}<br/>` : ''}
             访问次数：${d.count || 1} 次<br/>
-            ${d.value ? `花费：¥${formatAmount(d.value, 0)}<br/>` : ''}
+            ${d.cost != null ? `花费：¥${formatAmount(d.cost, 0)}<br/>` : ''}
             ${d.rating ? `满意度：${'⭐'.repeat(d.rating)}<br/>` : ''}
             ${years ? `年份：${years}` : ''}`
         }
@@ -144,14 +147,20 @@ function initChart() {
         z: 6,
         data: props.bubbles.map((b) => ({
           name: b.city,
-          value: [b.longitude, b.latitude, b.value || 0],
+          // 🔴 `value` 是 ECharts 的**坐标**数组（经纬度 + 第三维），不是金额。
+          //    金额单独放 `cost`：tooltip 读 `cost`，别再让两个语义挤一个字段。
+          value: [b.longitude, b.latitude, b.value ?? 0],
+          cost: b.value,
           province: b.province,
           size: b.size,
           rating: b.rating,
           years: b.years,
           count: b.count,
         })),
-        symbolSize: (_val: number[], params: any) => params?.size || 12,
+        // 直径由后端 `bubble_size()` 唯一决定；这里只兜底、不参与换算（缺值时按下限画，
+        // 宁小勿大——大圆点会把底图盖住）
+        symbolSize: (_val: number[], params: any) =>
+          params?.data?.size ?? params?.size ?? BUBBLE_SIZE_FALLBACK,
         itemStyle: {
           color: (params: any) => getRatingColor(params?.data?.rating),
           borderColor: '#fff',

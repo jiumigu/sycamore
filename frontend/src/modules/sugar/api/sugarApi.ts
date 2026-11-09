@@ -29,6 +29,17 @@ export function getJoyTypeStats(params?: Record<string, unknown>) {
 }
 
 /**
+ * 快乐类型筛选项（下拉框唯一来源）。
+ *
+ * 传 `year` / `month` / `category` 让每个选项带上「当期有多少条」；
+ * ⚠️ **不要传 `joy_type`** —— 后端会故意忽略它，但前端也不该假装自己在筛，
+ *    否则读代码的人会以为「选了类型之后其它选项的条数会变 0」是预期行为。
+ */
+export function getJoyTypeOptions(params?: Record<string, unknown>) {
+  return request({ url: '/sugar/records/joy_types/', method: 'get', params })
+}
+
+/**
  * 快乐程度档位表（后端唯一真源）。
  *
  * 录入弹窗要在**拖滑块时**立刻显示档位词，那时还没有记录、拿不到 `reward_label`，

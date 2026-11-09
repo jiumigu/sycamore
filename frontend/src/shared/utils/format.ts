@@ -37,7 +37,11 @@ export const EMPTY_AMOUNT = '—'
  * 需要连符号一起渲染（货币符号在前，`¥-1,234.50`）请用 `formatSignedAmount`。
  */
 export function formatAmount(value: number | null | undefined, precision = 2): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return EMPTY_AMOUNT
+  // 🔴 必须是 number：数组也过得了类型检查（ECharts 的 `params.data` 是 any），
+  //    而 `[120.699, 27.994, 1200].toLocaleString(…, {maximumFractionDigits: 0})`
+  //    会逐元素舍入再 join ⇒ `121,28,1,200`，看着像一笔 1.2 亿的千分位金额。
+  //    静默失败里最坏的一种：不报错、不显 `—`，给一个**像样的错数**。
+  if (typeof value !== 'number' || Number.isNaN(value)) return EMPTY_AMOUNT
   const raw = value.toLocaleString('zh-CN', {
     minimumFractionDigits: precision,
     maximumFractionDigits: precision,

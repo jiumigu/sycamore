@@ -1,6 +1,8 @@
 <template>
   <div class="progress-section">
-    <div class="section-header">
+    <!-- 页面模式下标题由页面头部承担，卡片内不再重复一遍；也不给折叠按钮
+         （整页就是「看全部」，再折一次等于让人多点一下才知道自己看到了什么） -->
+    <div class="section-header" v-if="!pageMode">
       <span class="section-title">📅 月度进度追踪</span>
       <el-button v-if="milestones.length > 0" size="small" text @click="showAllPhases = !showAllPhases">
         {{ showAllPhases ? '收起' : '查看全部' }}
@@ -104,6 +106,8 @@ const props = defineProps<{
   milestones: WeightMilestone[]
   currentMonth: number
   loading?: boolean
+  /** 「整页模式」：不折叠、不显示卡内标题（v3.62.37 起列表页不再内联这两块） */
+  pageMode?: boolean
 }>()
 
 const showAllPhases = ref(false)
@@ -121,11 +125,14 @@ const currentMilestone = computed(() =>
 )
 
 const collapsedMilestones = computed(() =>
-  dedupedMilestones.value.filter(m => m.month_number !== props.currentMonth)
+  // 页面模式下「折叠区」恒空 —— 全部阶段已在 visibleMilestones 里，两份都填会画出两遍
+  props.pageMode ? [] : dedupedMilestones.value.filter(m => m.month_number !== props.currentMonth)
 )
 
 const visibleMilestones = computed(() =>
-  currentMilestone.value ? [currentMilestone.value] : []
+  props.pageMode
+    ? dedupedMilestones.value
+    : (currentMilestone.value ? [currentMilestone.value] : [])
 )
 
 const circumference = 2 * Math.PI * 52

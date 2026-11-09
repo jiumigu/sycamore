@@ -24,6 +24,11 @@ export function deleteGoal(id: number) {
   return request({ url: `/goals/goals/${id}/`, method: 'delete' })
 }
 
+/** 放弃一条目标：改状态 + 写一条月度复盘留痕（理由必填） */
+export function abandonGoal(id: number, reason: string) {
+  return request({ url: `/goals/goals/${id}/abandon/`, method: 'post', data: { reason } })
+}
+
 export function bulkDeleteGoals(ids: number[]) {
   return request({ url: '/goals/goals/bulk_delete/', method: 'delete', data: { ids } })
 }
@@ -139,4 +144,55 @@ export function deleteReview(id: number) {
 
 export function createOutputRecord(data: Record<string, unknown>) {
   return request({ url: '/goals/outputs/', method: 'post', data })
+}
+
+// ────────── 过程检查（PDCA 的 C） ──────────
+
+/** 检查结果单行。`time_progress` 为 null 时看 `time_progress_reason`，不要当 0 */
+export interface GoalCheckupRow {
+  id: number
+  title: string
+  status: string
+  category: string
+  priority: string
+  life_dimension: string
+  progress: number
+  time_progress: number | null
+  progress_gap: number | null
+  time_progress_reason: string
+  start_date: string | null
+  deadline: string | null
+  days_left: number | null
+  last_activity_at: string | null
+  days_since_activity: number | null
+  milestones_total: number
+  milestones_done: number
+  verdict: string
+  verdict_label: string
+}
+
+export interface GoalCheckupResponse {
+  as_of: string
+  /** 阈值随结果下发，前端不写死 */
+  stall_days: number
+  behind_gap: number
+  horizon_years: number
+  summary: {
+    checked: number
+    problem: number
+    overdue: number
+    stalled: number
+    behind: number
+    paused: number
+    on_track: number
+    ahead: number
+    long_horizon: number
+    never_recorded: number
+  }
+  rows: GoalCheckupRow[]
+}
+
+/** 目标过程检查（只读，不改任何数据） */
+export function getGoalCheckup() {
+  return request({ url: '/goals/goals/checkup/', method: 'get' })
 }

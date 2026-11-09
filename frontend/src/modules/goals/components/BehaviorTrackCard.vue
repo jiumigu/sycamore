@@ -144,6 +144,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ElMessageBox } from 'element-plus'
@@ -444,8 +445,8 @@ async function saveMilestoneEdit() {
     showEditDialog.value = false
     ElMessage.success('已保存')
     await loadStats()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     savingMilestone.value = false
   }

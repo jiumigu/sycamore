@@ -6,6 +6,14 @@
         <el-tag type="primary" class="module-tag">成长发展</el-tag>
       </div>
       <div class="header-actions">
+        <el-button @click="showMonthlyReview = true">
+          <el-icon><Calendar /></el-icon>
+          本月复盘
+        </el-button>
+        <el-button @click="showCheckup = true">
+          <el-icon><View /></el-icon>
+          过程检查
+        </el-button>
         <el-button @click="goToDimensionChart">
           <el-icon><PieChart /></el-icon>
           人生维度分布
@@ -111,6 +119,14 @@
     v-model:visible="showQuickDialog"
     @created="onQuickCreated"
   />
+
+  <MonthlyReviewDialog
+    v-model:visible="showMonthlyReview"
+    @done="refreshAll"
+  />
+
+  <!-- 过程检查（PDCA 的 C）：只读点名，不写库 -->
+  <GoalCheckupDialog v-model:visible="showCheckup" />
 
   <el-dialog v-model="showCloneDialog" title="复制目标" width="420px">
     <el-form label-width="90px">
@@ -404,10 +420,11 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, RefreshRight, Lightning, PieChart, QuestionFilled } from '@element-plus/icons-vue'
+import { Plus, Refresh, RefreshRight, Lightning, PieChart, QuestionFilled, Calendar, View } from '@element-plus/icons-vue'
 import { useGoalStore } from '../stores/goalStore'
 import { useGoalBoardStore } from '../stores/goalBoardStore'
 import * as goalApi from '../api/goalApi'
@@ -419,6 +436,8 @@ import GoalDetail from './GoalDetail.vue'
 import CreateActionDialog from '../components/CreateActionDialog.vue'
 import ActionDrawer from '../components/ActionDrawer.vue'
 import QuickGoalDialog from '../components/QuickGoalDialog.vue'
+import MonthlyReviewDialog from '../components/MonthlyReviewDialog.vue'
+import GoalCheckupDialog from '../components/GoalCheckupDialog.vue'
 import { getPresetByType } from '@/shared/api/coreApi'
 // 「值得留下」那个勾（v3.62.0）：**前端串联**调作品库，与收件箱那三个
 // 「同时登记到…」是同一个模式 —— 勾是用户的额外动作，不是「完成」的固有属性，
@@ -474,6 +493,10 @@ const actionDrawerMilestones = ref<Milestone[]>([])
 
 /** 打开新增行为弹窗前先加载选中目标的里程碑 */
 const showQuickDialog = ref(false)
+// 本月复盘：每月只回答一句「哪条计划该放弃」（PDCA 的 A）
+const showMonthlyReview = ref(false)
+// 过程检查：点名「哪些还动、哪些不动了」（PDCA 的 C，只读）
+const showCheckup = ref(false)
 const showCloneDialog = ref(false)
 const cloneForm = reactive({
   name: '',
@@ -750,8 +773,8 @@ async function saveMilestoneDetail() {
     showEditDialog.value = false
     ElMessage.success('已保存')
     refreshAll()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   }
 }
 

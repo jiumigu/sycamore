@@ -5,17 +5,17 @@ import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as summaryApi from '../api/summaryApi'
 import type {
-  YearlyOverview, MonthlyDetail, TrendPoint, RadarData, ModuleDetail,
+  YearlyOverview, MonthlyDetail, TrendData, TrendMonth, TrendModuleMeta, RadarData, ModuleDetail,
   QuarterlyReport, QuestionItem, AnswerItem, InsightItem,
 } from '../types/summaryTypes'
-import { MODULE_LABELS, MODULE_COLORS, MONTHLY_TARGET } from '../types/summaryTypes'
 
 export const useSummaryStore = defineStore('summary', () => {
   const loading = ref(false)
   const overview = ref<YearlyOverview | null>(null)
   const monthlyDetail = ref<MonthlyDetail | null>(null)
-  const trendData = ref<TrendPoint[]>([])
   const radarData = ref<RadarData | null>(null)
+  /** 趋势：覆盖率 + 强度两套值（v3.62.44 起是对象，不再是平铺的点数） */
+  const trend = ref<TrendData | null>(null)
   const availableYears = ref<number[]>([])
   const currentYear = ref(new Date().getFullYear())
   const currentMonth = ref(new Date().getMonth() + 1)
@@ -30,23 +30,13 @@ export const useSummaryStore = defineStore('summary', () => {
   const quarterlyLoading = ref(false)
 
   // ── 图表 computed ──
+  // 总分退役后，这里不再有「各模块点数堆叠 / 月度总分 / 月目标线」三个派生量：
+  // 趋势图直接读 `trend` 里的覆盖率与强度，组件自己拼。
 
-  const trendMonths = computed(() => trendData.value.map(d => `${d.month}月`))
-
-  const trendSeries = computed(() => {
-    const keys = ['wealth', 'health', 'times', 'words', 'sugar', 'travel', 'book'] as const
-    return keys.map(k => ({
-      name: MODULE_LABELS[k],
-      type: 'bar' as const,
-      stack: 'total',
-      barMaxWidth: 20,
-      itemStyle: { color: MODULE_COLORS[k] },
-      data: trendData.value.map(d => d[k]),
-    }))
-  })
-
-  const totalByMonth = computed(() => trendData.value.map(d => d.total_points))
-  const monthTargetLine = computed(() => trendData.value.map(() => MONTHLY_TARGET))
+  /** 12 个月的原始行（空数组兜底，模板里不用到处判空） */
+  const trendData = computed<TrendMonth[]>(() => trend.value?.months ?? [])
+  /** 维度元信息（颜色 / 单位由后端下发） */
+  const trendModules = computed<TrendModuleMeta[]>(() => trend.value?.modules ?? [])
 
   // ── 操作 ──
 
@@ -74,7 +64,7 @@ export const useSummaryStore = defineStore('summary', () => {
   async function fetchTrend(year?: number) {
     try {
       const res = await summaryApi.getTrend({ year: year ?? currentYear.value })
-      trendData.value = res.data
+      trend.value = res.data as TrendData
     } catch {
       ElMessage.error('获取趋势数据失败')
     }
@@ -186,9 +176,8 @@ export const useSummaryStore = defineStore('summary', () => {
   }
 
   return {
-    loading, overview, monthlyDetail, trendData, radarData,
+    loading, overview, monthlyDetail, trend, trendData, trendModules, radarData,
     availableYears, currentYear, currentMonth, moduleDetail,
-    trendMonths, trendSeries, totalByMonth, monthTargetLine,
     fetchOverview, fetchMonthlyDetail, fetchTrend, fetchRadar,
     fetchYears, fetchModuleDetail, fetchAll, switchYear,
     // 季度决策工作台

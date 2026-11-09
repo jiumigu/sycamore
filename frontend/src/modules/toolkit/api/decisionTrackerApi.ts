@@ -62,6 +62,13 @@ export interface DecisionTracker {
   review_note: string
   /** 自定义倾向选项（文字数组，2–6 项）；null/空 = 用默认三项 */
   lean_options: string[] | null
+  /**
+   * 结论取前几项：1 = 只取票数最高的一项（默认）。> 1 需先自定义倾向选项。
+   * 🔴 后端会再夹一次（默认三项恒为 1、不超选项数），前端展示以响应值为准，不自己算。
+   */
+  result_top_n: number
+  /** 做出决定时采纳的选项标签；与手写的 final_decision 语义不同 */
+  final_choices: string[] | null
   created_at?: string
   updated_at?: string
   record_count?: number
@@ -92,7 +99,26 @@ export interface DecisionReport {
   options: LeanOption[]
   total_records: number
   record_days: number
-  tendency_stats: Array<{ tendency: Tendency; label: string; count: number; percent: number }>
+  /** 结论取前几项（生效值） */
+  result_top_n: number
+  /** 结论项（按名次）。报告页标注「结论」徽标用这个，不自己再排序一遍 */
+  conclusion_keys: Tendency[]
+  /** 已采纳的选项标签 */
+  final_choices: string[]
+  final_decision: string
+  /**
+   * `rank` / `is_top` 由后端给：`tendency_stats` 本身按**选项定义顺序**返回，
+   * 这样进度条不会因为票数变化而跳动；名次单独放在这两个字段里。
+   */
+  tendency_stats: Array<{
+    tendency: Tendency
+    label: string
+    count: number
+    percent: number
+    weighted: number
+    rank: number | null
+    is_top: boolean
+  }>
   /** 每月各倾向条数（键为 tendency 值，见 options） */
   monthly_trend: Array<{ month: string } & Record<string, number>>
   reasons: Record<Tendency, Array<{ record_date: string; intensity: Intensity; intensity_label: string; reason: string }>>
@@ -122,6 +148,26 @@ export interface TrackerPreviewItem {
   weighted_lean_percent: number
   high_count: number
   conclusion: string
+  /** 结论口径取前几项（生效值） */
+  result_top_n: number
+  /** 结论项（按名次，长度 ≤ result_top_n） */
+  conclusion_keys: Tendency[]
+  /** 带名次的完整排名（只含有记录的选项）；卡片结论行直接用它，不再自己排序 */
+  lean_ranked: Array<{
+    tendency: Tendency
+    label: string
+    count: number
+    percent: number
+    weighted: number
+    weighted_percent: number
+    avg_intensity: number
+    high_count: number
+    high_ratio: number
+    rank: number
+    is_top: boolean
+  }>
+  /** 前 N 项加权合计占比：多选结论下替代「主导优势分」（后者只在单结论时有意义） */
+  top_share: number
   tendency_stats: Array<{
     tendency: Tendency
     label: string
@@ -190,8 +236,11 @@ export function getDecisionPreview(params?: { tracker?: number; status?: string 
   return request<DecisionPreview>({ url: '/toolkit/decision-trackers/preview/', method: 'get', params })
 }
 
-/** 做出决定 */
-export function decideTracker(id: number, data: { final_decision: string; decision_date?: string }) {
+/** 做出决定：手写一句话 与 采纳若干选项 至少给一个 */
+export function decideTracker(
+  id: number,
+  data: { final_decision?: string; adopted?: string[]; decision_date?: string },
+) {
   return request<DecisionTracker>({ url: `/toolkit/decision-trackers/${id}/decide/`, method: 'post', data })
 }
 

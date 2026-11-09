@@ -3,9 +3,16 @@
     <el-card shadow="never">
       <template #header>
         <div class="sm-head">
-          <span class="sm-title">本阶段 KPI（即时生效）</span>
+          <span class="sm-title">
+            本阶段 KPI（即时生效）
+            <!-- 🔴 区间写在这里不是装饰：「从现在起一直用它」这句话没有边界，
+                 人读不出「一直」到哪天为止。区间由后端 `range_label` 给。 -->
+            <el-tag v-if="store.stage" size="small" effect="plain" class="sm-range">
+              {{ store.stage.range_label }}
+            </el-tag>
+          </span>
           <span class="sm-hint">
-            改目标 / 底线**立刻生效，且从现在起一直用它** —— 想只改某一期，去右侧「按期修订」。
+            改目标 / 底线<b>立刻生效，一直到这个阶段结束为止</b> —— 想只改某一期，去右侧「按期修订」。
             往期是快照，改的是以后。
           </span>
         </div>
@@ -49,11 +56,11 @@
       </el-table>
 
       <div class="sm-note">
-        「退役」= 这条**永久**不要了（历史读数保留）。
+        「退役」= 这条<b>永久</b>不要了（历史读数保留）。
         「这周先不算」在「本周状态」页里勾（只影响这一期）。
         「整个阶段歇一阵」用页头的「暂停阶段」。
         「只改某一期」点右侧「按期修订」；「谁在什么时候改过」点右侧「配置变更留痕」。
-        **四处作用域不同，别混。**
+        <b>四处作用域不同，别混。</b>
       </div>
     </el-card>
 
@@ -112,6 +119,7 @@ async function doRevive(m: SelfRunMetric) {
 .sm-wrap { display: flex; flex-direction: column; gap: 12px; }
 .sm-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .sm-title { font-weight: 600; }
+.sm-range { margin-left: 8px; font-weight: 400; }
 .sm-hint { font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.6; }
 .sm-sub { font-size: 12px; color: var(--el-text-color-secondary); }
 .sm-note { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.8; }

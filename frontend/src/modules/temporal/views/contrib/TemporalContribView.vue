@@ -2,7 +2,7 @@
   <div class="contrib-page">
     <div class="page-header">
       <div class="header-left">
-        <el-button size="small" @click="$router.push('/temporal')">
+        <el-button size="small" @click="goBack">
           <el-icon><ArrowLeft /></el-icon> 返回
         </el-button>
         <h2 class="page-title">{{ title }}</h2>
@@ -21,6 +21,7 @@
         :data="graphData"
         :min-year="minYear"
         :max-year="maxYear"
+        :default-years="3"
         :title="title"
         :unit-label="unitLabel"
         :positive-negative="posNeg"
@@ -44,6 +45,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Refresh } from '@element-plus/icons-vue'
 import ContributionGraph from '@/shared/components/ContributionGraph.vue'
@@ -51,6 +53,21 @@ import DailyDetailDialog from '@/shared/components/DailyDetailDialog.vue'
 import { getTaskDailyDetail } from '@/modules/temporal/api/temporalApi'
 import * as temporalApi from '@/modules/temporal/api/temporalApi'
 import { ATTRIBUTION_COLOR_MAP } from '@/modules/temporal/types/temporalTypes'
+
+const route = useRoute()
+const router = useRouter()
+
+/**
+ * 返回来源页。
+ *
+ * 贡献图有两个入口：任务清单（主入口，带 `?from=tasks`）与时间统计报表（裸路径）。
+ * 硬编码回报表页会让「任务清单 → 贡献图 → 返回」跳到别的页 —— 返回目标必须由来源决定。
+ * 直接输 URL 进来时没有 `from`，按旧行为回报表页。
+ */
+function goBack() {
+  const from = route.query.from
+  router.push(typeof from === 'string' && from === 'tasks' ? '/temporal/tasks' : '/temporal')
+}
 
 const title = '时间贡献图'
 const posNeg = false

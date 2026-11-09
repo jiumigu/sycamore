@@ -1,5 +1,7 @@
 # Travel — 旅行记录 + 旅行心愿单 + 旅行计划 + 路线推演前端
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 ## Views
 
 | 文件 | 路由 | 职责 |
@@ -9,11 +11,13 @@
 | `TravelPlanView.vue` | /travel/plans | 旅行计划（4 统计卡 + 新建弹窗明细编辑器 + 可展开计划列表逐项勾选（关联心愿时弹打卡录入）+ 查看路线跳转） |
 | `TravelRouteView.vue` | /travel/route | 路线推演（路线预设抽屉 + 小火车沿路线动画 + 生成旅行计划弹窗：逐站勾选带入本城心愿）；原在工具箱，2026-09-11 迁入旅行模块作为主入口 |
 
+> **入口（v3.63.8 起）**：旅行心愿单 `/travel/wishes`、路线推演 `/travel/route` 从「旅行计划」页头进入；美食地图 `/food` 从「旅行足迹」页头进入。三者不再占菜单项，路由与数据保留。
+
 ## Components
 
 | 文件 | 职责 |
 |------|------|
-| `ChinaHeatmap.vue` | ECharts 中国**地级市**热力 + **省界叠加** + 城市气泡三层（显式 `geo` 组件 + 热力层 `map` 系列 `geoIndex: 0` 绑定；`visualMap` 分段 4 档并限定 `seriesIndex: 0`，避免把气泡一起染色；`lines` 系列以 polyline 画省界、`silent`；**地市名与气泡名默认隐藏，悬停/点击才显示**，tooltip 对地级市额外列出 `sources` 来源明细） |
+| `ChinaHeatmap.vue` | ECharts 中国**地级市**热力 + **省界叠加** + 城市气泡三层（显式 `geo` 组件 + 热力层 `map` 系列 `geoIndex: 0` 绑定；`visualMap` 分段 4 档并限定 `seriesIndex: 0`，避免把气泡一起染色；`lines` 系列以 polyline 画省界、`silent`；**地市名与气泡名默认隐藏，悬停/点击才显示**，tooltip 对地级市额外列出 `sources` 来源明细）。气泡直径由后端 `bubble_size` 下发（v3.64.2），前端兜底取区间下限 8、先读 `params.data.size` 再读 `params.size` |
 
 ## Utils
 

@@ -1,37 +1,50 @@
 <template>
-  <div class="contrib-graph">
+  <div class="contrib-graph" ref="rootEl">
     <div class="contrib-header">
       <span class="contrib-title">{{ title }}</span>
       <span class="contrib-stats">
         活跃 {{ summary.total_days }} 天 · 峰值 {{ summary.max_date ? summary.max_date + ' · ' + formatValue(summary.max_value) : '-' }}
         <template v-if="isAttrMode"> · 主导 {{ attrSummaryText }}</template>
-        · {{ minYear }} ~ {{ maxYear }}
+        · {{ years[0] }} ~ {{ years[years.length - 1] }}
       </span>
     </div>
 
-    <div class="contrib-body">
-      <div class="contrib-year" v-for="year in years" :key="year">
-        <div class="year-cell">{{ year }}</div>
-        <div class="year-content">
-          <div class="month-labels" :style="{ width: gridWidth + 'px' }">
-            <span v-for="ml in monthLabels(year)" :key="ml.col" class="month-label"
-                  :style="{ left: (ml.col * (CELL + GAP) + 6.5) + 'px' }">{{ ml.name }}</span>
-          </div>
-          <div class="week-row">
-            <div class="weekday-labels">
-              <span v-for="wd in 7" :key="wd" class="wd-label" :style="{ height: CELL + 'px', lineHeight: CELL + 'px' }">
-                {{ WEEKDAYS[wd - 1] }}
-              </span>
+    <!-- 年份窗口：多年图默认只显示最近 N 年，早期记录折在上方。
+         工具条 sticky —— 滚到任意年份都能跳转或收起，不用滚回顶。 -->
+    <div v-if="collapsible" class="contrib-toolbar">
+      <div v-if="expanded" class="anchor-list">
+        <span v-for="y in allYears" :key="y" class="anchor-chip" @click="scrollToYear(y)">{{ y }}</span>
+      </div>
+      <span class="anchor-toggle" @click="toggleExpand">
+        {{ expanded ? '收起早期记录' : `展开更早的记录（${allYears[0]} – ${years[0] - 1}）` }}
+      </span>
+    </div>
+
+    <div class="contrib-scroll" ref="scrollBox">
+      <div class="contrib-body">
+        <div class="contrib-year" v-for="year in years" :key="year" :data-year="year">
+          <div class="year-cell">{{ year }}</div>
+          <div class="year-content">
+            <div class="month-labels" :style="{ width: gridWidth + 'px' }">
+              <span v-for="ml in monthLabels(year)" :key="ml.col" class="month-label"
+                    :style="{ left: (ml.col * (CELL + GAP) + 6.5) + 'px' }">{{ ml.name }}</span>
             </div>
-            <div class="cells-grid">
-              <div v-for="d in yearDays(year)" :key="d.date"
-                   class="day-cell"
-                   :class="{ clickable: d.v !== 0 }"
-                   :style="{ left: d.col * (CELL + GAP) + 'px', top: d.row * (CELL + GAP) + 'px', backgroundColor: dayColor(d) }"
-                   @click="d.v !== 0 && emit('cell-click', d.date)">
-                <el-tooltip v-if="d.v !== 0" :content="d.tip" placement="top" :show-after="150">
-                  <div class="cell-inner"></div>
-                </el-tooltip>
+            <div class="week-row">
+              <div class="weekday-labels">
+                <span v-for="wd in 7" :key="wd" class="wd-label" :style="{ height: CELL + 'px', lineHeight: CELL + 'px' }">
+                  {{ WEEKDAYS[wd - 1] }}
+                </span>
+              </div>
+              <div class="cells-grid">
+                <div v-for="d in yearDays(year)" :key="d.date"
+                     class="day-cell"
+                     :class="{ clickable: d.v !== 0 }"
+                     :style="{ left: d.col * (CELL + GAP) + 'px', top: d.row * (CELL + GAP) + 'px', backgroundColor: dayColor(d) }"
+                     @click="d.v !== 0 && emit('cell-click', d.date)">
+                  <el-tooltip v-if="d.v !== 0" :content="d.tip" placement="top" :show-after="150">
+                    <div class="cell-inner"></div>
+                  </el-tooltip>
+                </div>
               </div>
             </div>
           </div>
@@ -66,9 +79,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
 const emit = defineEmits<{ 'cell-click': [date: string] }>()
+
+/** 同页只挂一份图，锚点查询限定在根节点内 */
+const rootEl = ref<HTMLElement | null>(null)
+/** 年份区的滚动盒：展开后在此内部滚动，页头统计与工具条始终可见 */
+const scrollBox = ref<HTMLElement | null>(null)
 
 const props = defineProps<{
   data: Array<{ date: string; value: number; attr?: string | null; breakdown?: Record<string, number> }>
@@ -81,6 +99,12 @@ const props = defineProps<{
   mode?: 'value' | 'attribution'
   /** 归因模式下的「归因名 → 颜色」映射，同时也决定图例顺序 */
   palette?: Record<string, string>
+  /**
+   * 默认显示的年份数；不传或 0 = 全部年份平铺。
+   * 多年图（时间/日记/健康/财富贡献图）传 3：一屏放得下，早期记录折起来按需展开。
+   * 单年图（如某一年的日记热力图）不需要传，年份不足 N 时也不显示折叠按钮。
+   */
+  defaultYears?: number
 }>()
 
 const isAttrMode = computed(() => props.mode === 'attribution')
@@ -150,23 +174,50 @@ const attrMap = computed(() => {
   return m
 })
 
-/** 各归因作为「当天主导」的天数统计（用于页头文案与图例） */
+/** 各归因作为「当天主导」的天数统计（用于页头文案与图例），只算可见年份 */
 const attrDayCount = computed(() => {
   const c: Record<string, number> = {}
-  for (const item of props.data) if (item.attr) c[item.attr] = (c[item.attr] || 0) + 1
+  for (const item of visibleData.value) if (item.attr) c[item.attr] = (c[item.attr] || 0) + 1
   return c
 })
 
-const unclassifiedDays = computed(() => props.data.filter(d => !d.attr).length)
+const unclassifiedDays = computed(() => visibleData.value.filter(d => !d.attr).length)
 
 const attrSummaryText = computed(() =>
   legendKeys.value.map(k => `${k} ${attrDayCount.value[k] || 0}`).join(' · ')
 )
 
-const years = computed(() => {
+/** 全部年份（接口给的 min_year ~ max_year），折叠与展开都从这里切窗口 */
+const allYears = computed(() => {
   const list: number[] = []
   for (let y = props.minYear; y <= props.maxYear; y++) list.push(y)
   return list
+})
+
+/** 默认窗口的年份数：数据不足 N 年时退化为全部，不出现折叠按钮 */
+const windowSize = computed(() => {
+  const n = props.defaultYears ?? 0
+  const total = allYears.value.length
+  return !n || n >= total ? total : n
+})
+
+const collapsible = computed(() => windowSize.value < allYears.value.length)
+const expanded = ref(false)
+
+const years = computed(() => {
+  const list = allYears.value
+  return collapsible.value && !expanded.value ? list.slice(-windowSize.value) : list
+})
+
+/**
+ * 统计口径跟随可见范围：折叠时只算近 N 年，否则页头「活跃 xxx 天」是全年数字、
+ * 图里只有三年，同一屏两个口径。
+ * 注意颜色尺度（maxAbs）故意仍用全量 —— 同一格子的深浅在任何视图下都代表同一个量。
+ */
+const visibleData = computed(() => {
+  if (!collapsible.value || expanded.value) return props.data
+  const fromYear = years.value[0]
+  return props.data.filter((d) => Number(d.date.slice(0, 4)) >= fromYear)
 })
 
 const maxAbs = computed(() => {
@@ -176,10 +227,10 @@ const maxAbs = computed(() => {
 })
 
 const summary = computed(() => {
-  const days = props.data.filter(d => d.value !== 0).length
+  const days = visibleData.value.filter(d => d.value !== 0).length
   let maxDate = ''
   let maxValue = 0
-  for (const d of props.data) {
+  for (const d of visibleData.value) {
     if (Math.abs(d.value) > Math.abs(maxValue)) {
       maxValue = d.value
       maxDate = d.date
@@ -195,6 +246,46 @@ function monthLabels(year: number) {
     labels.push({ col: pos.col, name: MONTH_NAMES[m - 1] })
   }
   return labels
+}
+
+/**
+ * 展开 / 收起早期年份。
+ *
+ * 年份块插在**上方**，滚动位置不会自动跟着走；直接把年份区滚回顶端 ——
+ * 展开就是从最早的年份往下读（像翻开旧记录），收起就是回到当前那几年。
+ * 滚动发生在卡片内的年份区，不动整页，所以统计与工具条始终可见。
+ */
+async function toggleExpand() {
+  expanded.value = !expanded.value
+  await nextTick()
+  if (scrollBox.value) scrollBox.value.scrollTop = 0
+}
+
+/** 年份锚点跳转（只在展开后出现）。落在容器顶部，留 8px 呼吸位。 */
+function scrollToYear(year: number) {
+  const el = rootEl.value?.querySelector(`.contrib-year[data-year="${year}"]`)
+  if (el instanceof HTMLElement) scrollToEl(el)
+}
+
+/**
+ * 把元素滚到其滚动容器顶部。
+ *
+ * 不用 scrollIntoView：页面真正的滚动容器是 main.layout-main，而 el-card__body
+ * 自己带 overflow:auto（滚不动但会被当成滚动祖先），scrollIntoView 在里面定位会偏。
+ * 这里显式挑「真能滚」的祖先，自己算位移。
+ */
+function scrollToEl(el: HTMLElement | null) {
+  if (!el) return
+  let box = el.parentElement
+  let scroller: HTMLElement | null = null
+  while (box) {
+    const oy = getComputedStyle(box).overflowY
+    if (/(auto|scroll)/.test(oy) && box.scrollHeight > box.clientHeight + 1) { scroller = box; break }
+    box = box.parentElement
+  }
+  if (!scroller) return
+  const delta = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8
+  scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: 'smooth' })
 }
 
 function formatValue(v: number) {
@@ -228,7 +319,11 @@ function dayColor(d: { v: number; attr: string | null }): string {
 </script>
 
 <style scoped>
-.contrib-graph { font-family: inherit; user-select: none; overflow-x: auto; }
+/* 横向溢出与展开后的纵向滚动都收在这一层：页面不跟着滚，
+   页头的统计与年份工具条就始终留在视野里。 */
+.contrib-graph { font-family: inherit; user-select: none; }
+/* 留出卡片上方页头、工具条、图例和底部固定状态栏的高度，否则图例会压到状态栏下面 */
+.contrib-scroll { overflow: auto; max-height: max(410px, calc(100vh - 330px)); }
 .contrib-header {
   display: flex; justify-content: space-between; align-items: baseline;
   margin-bottom: 12px; flex-wrap: wrap; gap: 6px;
@@ -236,6 +331,24 @@ function dayColor(d: { v: number; attr: string | null }): string {
 .contrib-title { font-size: 16px; font-weight: 600; }
 .contrib-stats { font-size: 12px; color: #909399; }
 .contrib-body { display: flex; flex-direction: column; gap: 16px; }
+
+/* 年份窗口工具条：折叠时只有一行淡化的「展开更早记录」；展开后左侧补出年份锚点。
+   注意别加 position:sticky —— el-card__body 自带 overflow:auto，会把 sticky 困在里面而不生效。 */
+.contrib-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.anchor-list { display: flex; gap: 6px; flex-wrap: wrap; }
+.anchor-chip {
+  font-size: 11px; line-height: 16px; color: #606266; padding: 1px 8px;
+  border: 1px solid #dcdfe6; border-radius: 10px; cursor: pointer;
+}
+.anchor-chip:hover { color: #2563eb; border-color: #2563eb; background: #eff6ff; }
+.anchor-toggle {
+  font-size: 11px; line-height: 16px; color: #606266; cursor: pointer;
+  padding: 2px 10px; border: 1px solid #dcdfe6; border-radius: 10px; background: #fafafa;
+}
+.anchor-toggle:hover { color: #2563eb; border-color: #2563eb; background: #eff6ff; }
 
 .contrib-year { display: flex; gap: 8px; align-items: flex-start; }
 .year-cell {

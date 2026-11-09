@@ -90,6 +90,7 @@
       <div v-for="q in quotes" :key="q.id" class="quote-item">
         <div class="quote-text">{{ q.content }}</div>
         <div class="quote-bottom">
+          <span class="quote-time">{{ formatDateTime(q.created_at) }}</span>
           <span v-if="q.author" class="quote-author">— {{ q.author }}</span>
           <el-tag size="small">{{ q.language }}</el-tag>
           <el-tooltip :content="poolTip(q)" placement="top">
@@ -147,6 +148,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { LANGUAGE_OPTIONS } from '../types/quoteTypes'
 import type { Quote } from '../types/quoteTypes'
 import { getQuoteList, getQuoteStats, deleteQuote } from '../api/quoteApi'
+import { formatDateTime } from '@/shared/utils/datetime'
 import QuoteForm from '../components/QuoteForm.vue'
 import { useWorkKeep } from '@/modules/works/composables/useWorkKeep'
 import KeepMark from '@/modules/works/components/KeepMark.vue'
@@ -339,8 +341,13 @@ onMounted(() => { fetchStats(); fetchQuotes(); loadKeeps() })
 
 .quote-bottom {
   display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: #666;
+  /* 这一行放的是「时间 · 作者 · 语言 · 池状态 · 字数 · 标签 · 推送次数 · 留 · 操作」，
+     窄屏下必须允许换行，否则新增的时间会把操作按钮挤出卡片 */
+  flex-wrap: wrap; row-gap: 6px;
 }
 .quote-author { font-style: italic; }
+/* 录入时间：贴在正文左边缘，与内容左对齐成一列，扫「哪天摘的」时视线不用来回找 */
+.quote-time { font-size: 12px; color: #9CA3AF; white-space: nowrap; }
 .review-count { font-size: 12px; color: #9CA3AF; }
 .quote-len { font-size: 12px; color: #9CA3AF; }
 .tag-item { margin: 0 2px; }

@@ -145,6 +145,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/shared/utils/request'
@@ -203,8 +204,8 @@ async function handleSave() {
     saved.value = true
     ElMessage.success('配置已保存')
     setTimeout(() => { saved.value = false }, 2000)
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -235,8 +236,8 @@ async function handleObsidianSave() {
       },
     })
     ElMessage.success('Obsidian 配置已保存')
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     obsidianSaving.value = false
   }

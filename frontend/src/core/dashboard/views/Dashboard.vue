@@ -12,6 +12,10 @@
         <el-tag type="primary" class="module-tag">总览</el-tag>
       </div>
       <div class="header-actions">
+        <!-- 汇总总览的菜单项已撤（v3.63.14）⇒ 入口挂在这里。
+             它回答的是「这一年我到底在不在动」（年度尺度），与本页的「本周」是两件事，
+             所以只并入入口、不合并页面（合并会把首屏待办挤到图表下面）。 -->
+        <el-button @click="$router.push('/summary')">📊 汇总总览</el-button>
         <el-button @click="refreshAll">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -60,6 +64,12 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 今天的三条线（v3.64.13）：睡眠 / 午睡 / 流失
+         🔴 放在「自我运转」之上：那一张是**周**尺子（这周有没有在动），
+            这一张是**今天**（今天有没有过度）。裸辞后最先滑坡的是当天，
+            所以今日的护栏要在周的上面。 -->
+    <DailyGuardCard />
 
     <!-- 自我运转小卡（第一屏）：
          只在**真的在进行中**时出现 —— 没有阶段时整张卡不渲染，
@@ -141,28 +151,11 @@
       </el-col>
     </el-row>
 
-    <!-- 每日金句（v3.60.11 起取数改走 quotes/next/：长度不超上限的池 + 冷落优先，不再纯随机；
-         v3.60.12 起上限改为「系统管理 → 系统设置」里的配置项。
-         卡片**显示全文**（卡内滚动兜住长文），不再截断 ——
-         原来的段落分支（限 4 行 + 点击看全文）与 QuoteDetailDialog 已随之撤掉。 -->
-    <el-card shadow="never" class="section-card">
-      <template #header>
-        <div class="card-header">
-          <span>📖 每日金句</span>
-          <el-button size="small" text @click="refreshQuote">🔄 换一句</el-button>
-        </div>
-      </template>
-      <div class="quote-body" v-if="dailyQuote">
-        <div class="quote-content">
-          {{ dailyQuote.content }}
-        </div>
-        <div class="quote-meta">
-          <span v-if="dailyQuote.author" class="quote-author">— {{ dailyQuote.author }}</span>
-          <el-tag size="small">{{ dailyQuote.language }}</el-tag>
-        </div>
-      </div>
-      <el-empty v-else description="暂无金句" :image-size="60" />
-    </el-card>
+    <!-- 每日金句：v3.63.14 起改为共享组件 `<QuoteCard />`（唯一实现）。
+         原先仪表盘与汇总总览各写一套模板 + 各调一次 quotes/next/，
+         空态文案与作者排布也是两套 ⇒ 改口径要改两处，漏一处就长得不一样。
+         取数、空态、卡内滚动全部收在组件里，这里只管摆在哪。 -->
+    <QuoteCard ref="quoteCardRef" class="section-card" />
   </div>
 </template>
 
@@ -176,10 +169,10 @@ import { getDueReminders } from '@/modules/relation/api/relationshipApi'
 import { getYearlyOverview } from '@/modules/summary/api/summaryApi'
 import { getWeekCount, getWeekStats } from '@/modules/temporal/api/temporalApi'
 import { getRandomRetro } from '@/modules/summary/api/summaryApi'
-import { getNextQuote } from '@/modules/toolkit/api/quoteApi'
 import SelfRunCard from '@/modules/selfrun/components/SelfRunCard.vue'
+import DailyGuardCard from '@/modules/temporal/components/DailyGuardCard.vue'
+import QuoteCard from '@/modules/toolkit/components/QuoteCard.vue'
 import type { InboxItem } from '@/modules/inbox/types/inboxTypes'
-import type { Quote } from '@/modules/toolkit/types/quoteTypes'
 
 interface AlertItem {
   type: 'danger' | 'warning'
@@ -220,7 +213,8 @@ const stats = reactive({
 const pendingItems = ref<InboxItem[]>([])
 const alerts = reactive<AlertItem[]>([])
 const retroItem = ref<RetroItem | null>(null)
-const dailyQuote = ref<Quote | null>(null)
+/** 金句卡（共享组件）—— 「刷新」时要能重取一条 */
+const quoteCardRef = ref<InstanceType<typeof QuoteCard> | null>(null)
 
 // ─── 独立加载状态 ───
 const loadingGoals = ref(true)
@@ -321,20 +315,9 @@ async function fetchRandomRetro() {
 }
 
 /**
- * 金句：走 `quotes/next/`（短句池 + 冷落优先），与汇总总览取同一份口径 ——
- * 两处若各用各的接口，迟早会「同一张卡显示两类内容」而界面上看不出来。
- * ⚠️ 池为空时后端返回 **204**，`res.data` 是空串（不是 null），要显式判类型。
+ * 金句取数已搬进共享组件 `QuoteCard`（唯一实现）。
+ * 这里只保留「刷新时重取一条」的入口 —— 不再有第二份 `getNextQuote()` 调用。
  */
-async function refreshQuote() {
-  try {
-    const res = await getNextQuote()
-    const data = res.data
-    dailyQuote.value = data && typeof data === 'object' ? (data as Quote) : null
-  } catch {
-    dailyQuote.value = null
-  }
-}
-
 async function refreshAll() {
   await Promise.all([
     fetchGoalStats(),
@@ -342,18 +325,17 @@ async function refreshAll() {
     fetchAlerts(),
     fetchWeekStats(),
     fetchRandomRetro(),
-    refreshQuote(),
+    quoteCardRef.value?.refresh(),
   ])
 }
 
 onMounted(() => {
-  // 各自独立加载，不互相阻塞
+  // 各自独立加载，不互相阻塞（金句由组件自己在 onMounted 里取）
   fetchGoalStats()
   fetchWeekStats()
   fetchPendingItems()
   fetchAlerts()
   fetchRandomRetro()
-  refreshQuote()
 })
 </script>
 
@@ -538,28 +520,6 @@ onMounted(() => {
   }
   .mid-row .el-col {
     margin-bottom: 16px;
-  }
-}
-
-.quote-content {
-  font-size: 15px;
-  line-height: 1.6;
-  color: #333;
-  white-space: pre-wrap;
-  /* 同汇总总览：长度上限可配之后长摘录会全文上卡，卡内滚动兜住版面 */
-  max-height: 190px;
-  overflow-y: auto;
-}
-
-.quote-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-
-  .quote-author {
-    font-size: 13px;
-    color: #999;
   }
 }
 </style>

@@ -4,9 +4,12 @@
  *    取值由 `GET /api/works/meta/` 下发，前端零副本
  *    （抄一份就会漏改，而且**不报错**：界面上只是少一个下拉项）。
  */
+import type { MediaItem } from '@/shared/types/media'
 
 export type WorkKind =
-  | 'article' | 'model' | 'template' | 'checklist' | 'craft' | 'tutorial' | 'other'
+  | 'article' | 'model' | 'template' | 'checklist'
+  | 'craft' | 'drawing' | 'embroidery'
+  | 'tutorial' | 'other'
 
 /** ⚠️ `private` 不是「草稿」—— 它是「本来就不打算发」，不是「还没做完」。 */
 export type WorkStatus = 'private' | 'ready' | 'published'
@@ -61,6 +64,8 @@ export interface Work {
   /** 空串 = 「要发但还没定发到哪」，与 `status='private'` 是两件事 */
   channel: string
   note: string
+  /** 作品的本体证据（图片 / 视频），type 由后端上传接口判定下发 */
+  media: MediaItem[]
   created_at: string
   updated_at: string
   origin: WorkOrigin[]

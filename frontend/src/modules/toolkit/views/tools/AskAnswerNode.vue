@@ -63,6 +63,7 @@ import { computed, ref } from 'vue'
 import { marked } from 'marked'
 import { ChatLineRound } from '@element-plus/icons-vue'
 import type { AskAnswerItem } from '../../api/askLibraryApi'
+import { formatDateTime } from '@/shared/utils/datetime'
 
 defineOptions({ name: 'AskAnswerNode' })
 
@@ -86,11 +87,6 @@ const rendered = computed(() => {
   if (!props.answer.answer) return ''
   return marked.parse(props.answer.answer, { breaks: true, gfm: true })
 })
-
-function formatDateTime(iso?: string | null): string {
-  if (!iso) return ''
-  return iso.slice(0, 16).replace('T', ' ')
-}
 </script>
 
 <style scoped lang="scss">

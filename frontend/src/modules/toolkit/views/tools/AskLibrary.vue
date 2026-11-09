@@ -404,6 +404,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { reactive, ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search, Download, FolderOpened, DocumentChecked, View } from '@element-plus/icons-vue'
@@ -418,6 +419,7 @@ import type { AskTopicItem, AskAnswerItem, AskSceneItem, AskSummaryTopic } from 
 import { useWorkKeep } from '@/modules/works/composables/useWorkKeep'
 import KeepMark from '@/modules/works/components/KeepMark.vue'
 import type { KeepState } from '@/modules/works/types/workTypes'
+import { formatDateTime } from '@/shared/utils/datetime'
 
 const AI_OPTIONS = ['WorkBuddy', 'Claude Code', 'ChatGPT', 'Gemini', 'Kimi', '豆包', 'DeepSeek', '通义千问']
 const VERDICT_MARK: Record<string, string> = { 采纳: '✅ 采纳', 备用: '📎 备用', 不采用: '✖ 不采用' }
@@ -471,10 +473,6 @@ function keepStateOf(row: AskTopicItem): KeepState {
 async function keepTopic(row: AskTopicItem) {
   const oneLine = (row.question || '').replace(/\s+/g, ' ').trim()
   await toggleKeep(row.id, (row.title || oneLine).slice(0, 50), oneLine.slice(0, 300))
-}
-function formatDateTime(iso?: string | null): string {
-  if (!iso) return ''
-  return iso.slice(0, 16).replace('T', ' ')
 }
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
@@ -585,8 +583,8 @@ async function saveScene() {
     ElMessage.success('已保存')
     sceneFormVisible.value = false
     await loadScenes()
-  } catch {
-    ElMessage.error('保存失败（场景名可能重复）')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败（场景名可能重复）'))
   } finally {
     sceneSaving.value = false
   }
@@ -677,8 +675,8 @@ async function saveTopic() {
     await Promise.all([fetchTopics(), loadScenes()])
     // 新建后直接打开详情，方便立即「↳ 追问」继续
     if (isNew) void openDetail(saved)
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     topicSaving.value = false
   }
@@ -815,8 +813,8 @@ async function saveAnswer() {
     ElMessage.success('已保存')
     answerDialogVisible.value = false
     await reloadDetail()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     answerSaving.value = false
   }

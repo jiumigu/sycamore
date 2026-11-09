@@ -1,10 +1,15 @@
 <template>
   <div class="travel-route">
-    <!-- 页面标题 -->
+    <!-- 页面标题：v3.63.8 起不再是菜单项，是「旅行计划」的页内子页 ⇒ 必须有回程 -->
     <div class="page-head">
-      <div class="head-left">
-        <h2 class="page-title">🚂 旅行路线推演</h2>
-        <p class="subtitle">编排出发地与多个目的地，一键生成旅行计划并带入心愿</p>
+      <div class="head-wrap">
+        <el-button size="small" @click="$router.push('/travel/plans')">
+          <el-icon><ArrowLeft /></el-icon> 旅行计划
+        </el-button>
+        <div class="head-left">
+          <h2 class="page-title">🚂 旅行路线推演</h2>
+          <p class="subtitle">编排出发地与多个目的地，一键生成旅行计划并带入心愿</p>
+        </div>
       </div>
       <el-button type="primary" :disabled="!stops.length" @click="openPlanDialog">
         生成旅行计划
@@ -172,6 +177,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
@@ -284,8 +290,8 @@ async function savePreset() {
     }
     showPresetDialog.value = false
     await loadPresets()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     savingPreset.value = false
   }
@@ -805,6 +811,14 @@ onUnmounted(() => {
   border-bottom: 1px solid #f0f0f0;
 
   .head-left { min-width: 0; }
+  /* 回程按钮 + 标题块并排（原来 head-left 独占左侧，加按钮后需要一层行容器）
+     注意：本文件的 style 块是原生 CSS，注释只认 C 风格，双斜杠会让整块样式编译失败 */
+  .head-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
 
   .page-title {
     margin: 0;

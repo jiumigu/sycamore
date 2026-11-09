@@ -27,30 +27,34 @@
           <el-icon><Plus /></el-icon>
         </el-button>
       </el-tooltip>
+
+      <!-- 实时计时（在任何页面都能开始/结束一段计时） -->
+      <TimerWidget />
     </div>
 
-    <!-- 右侧：时间维度、主题、通知、用户 -->
+    <!-- 右侧：自我运转入口、主题、通知、用户 -->
     <div class="header-right">
-      <!-- 时间维度切换 -->
-      <el-dropdown @command="handleTimeDimensionChange">
-        <span class="time-dimension-selector">
-          <el-icon><Clock /></el-icon>
-          <span>{{ currentTimeDimensionLabel }}</span>
+      <!-- 自我运转入口（v3.63.23）
+           🔴 这个位置原来叫「日视图 / 周视图 / 月视图 / 年视图」，是个**空壳**：
+              点一下只改自己的标签，然后 `dispatchEvent('time-dimension-change')` ——
+              全仓**没有一个监听者**，点什么都不会发生（用户原话「这个框架中的视图没有真正用起来」）。
+           现在它真的能用：点哪项就进自我运转的那一页，侧边栏因此不再列那四项
+           （`menuConfig.ts` 里已撤）—— 一个入口，四处直达。
+           ⚠️ 不在自我运转里时显示模块名「自我运转」；在里面时显示当前页名，
+              免得人以为「我点的是周状态，怎么标签还写着自我运转」。 -->
+      <el-dropdown trigger="click" @command="goSelfRun">
+        <span class="selfrun-entry" :class="{ 'is-in': isInSelfRun }">
+          <el-icon><Odometer /></el-icon>
+          <span>{{ selfRunEntryLabel }}</span>
           <el-icon class="arrow"><ArrowDown /></el-icon>
         </span>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="day">
-              <el-icon><Sunrise /></el-icon>日视图
-            </el-dropdown-item>
-            <el-dropdown-item command="week">
-              <el-icon><Calendar /></el-icon>周视图
-            </el-dropdown-item>
-            <el-dropdown-item command="month">
-              <el-icon><Calendar /></el-icon>月视图
-            </el-dropdown-item>
-            <el-dropdown-item command="year">
-              <el-icon><DataAnalysis /></el-icon>年视图
+            <el-dropdown-item
+              v-for="e in SELF_RUN_ENTRIES" :key="e.key" :command="e.key"
+            >
+              <el-icon><component :is="e.icon" /></el-icon>{{ e.label }}
+              <span v-if="e.key === currentSelfRunEntry" class="entry-cur">· 当前</span>
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -118,18 +122,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Platform, Plus,
-  Clock, ArrowDown, Sunrise, Calendar,
-  DataAnalysis, Moon, Sunny, Bell,
+  ArrowDown, Odometer,
+  // 自我运转四个入口的图标（与原来的侧边栏图标同义）
+  // ⚠️ 现在是五个入口（v3.64.19 加了「阶段账本」，图标 `DataAnalysis`）
+  EditPen, Calendar, Histogram, Clock, DataAnalysis,
+  Moon, Sunny, Bell,
   Lock, Unlock,
   User, Setting, SwitchButton,
 } from '@element-plus/icons-vue'
 import NotificationCenter from './NotificationCenter.vue'
 import QuickRecordPanel from '@/shared/components/QuickRecordPanel.vue'
 import SearchBar from '@/shared/components/SearchBar.vue'
+import TimerWidget from '@/shared/components/TimerWidget.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -153,8 +161,44 @@ const toggleTheme = () => {
 // ============================================
 // 响应式数据
 // ============================================
-const currentTimeDimension = ref<'day' | 'week' | 'month' | 'year'>('week')
 const showQuickPanel = ref(false)
+
+/**
+ * 自我运转的四个入口 —— **页头就是它唯一的常驻入口**（v3.63.23 起侧边栏不再列）。
+ *
+ * 🔴 这里只做「路由名」映射，**不另存 current 状态**：
+ *    当前在哪一页由 `route.name` 决定（与 `SelfRunHub` 的页签同源）。
+ *    另存一个 ref 的话，从别处点进来 / 浏览器后退都会让它和页签分家。
+ * ⚠️ 「阶段总结」不在这里：它是模块内的深层页，只从页内页签进
+ *    （四次点开里有几次会看总结？占一个常驻入口等于让低频页抢高频位）。
+ */
+const SELF_RUN_ENTRIES: { key: string; route: string; label: string; icon: Component }[] = [
+  { key: 'setup', route: 'selfrun-setup', label: '制定配置', icon: EditPen },
+  { key: 'week', route: 'selfrun-week', label: '本周状态', icon: Calendar },
+  { key: 'month', route: 'selfrun-month', label: '本月状态', icon: Histogram },
+  { key: 'review', route: 'selfrun-review', label: '历史复盘', icon: Clock },
+  // v3.64.19：「一段长路」的账本（钱 / 时间 / 作品 / 它下面的小阶段）。
+  // 🔴 路由是 `stage/:id?` —— **这里刻意不带 id**（页头拿不到「哪一段路」），
+  //    由页面自己取「正在跑的那个长阶段」。带一个猜出来的 id 只会更容易开到错的阶段。
+  { key: 'stage', route: 'selfrun-stage', label: '阶段账本', icon: DataAnalysis },
+]
+
+/**
+ * 路由名 → 入口 key。
+ * ⚠️ 「制定配置」的三个页内子页面（模板库 / 按期修订 / 变更留痕）都归到 `setup` ——
+ *    它们不是并列的入口，页头这时该说「制定配置」，而不是跳到子页标题上。
+ */
+const SELF_RUN_ENTRY_OF_ROUTE: Record<string, string> = {
+  'selfrun-setup': 'setup',
+  'selfrun-setup-templates': 'setup',
+  'selfrun-setup-targets': 'setup',
+  'selfrun-setup-logs': 'setup',
+  'selfrun-week': 'week',
+  'selfrun-month': 'month',
+  'selfrun-review': 'review',
+  'selfrun-summary': 'review',   // 总结是「历史复盘」旁边的深层页，归在同一个入口下
+  'selfrun-stage': 'stage',
+}
 
 // ============================================
 // 计算属性
@@ -164,14 +208,13 @@ const breadcrumbs = computed(() => {
   return matched.slice(1)
 })
 
-const currentTimeDimensionLabel = computed(() => {
-  const labels: Record<string, string> = {
-    day: '日视图',
-    week: '周视图',
-    month: '月视图',
-    year: '年视图',
-  }
-  return labels[currentTimeDimension.value] || '周视图'
+const currentSelfRunEntry = computed(() => SELF_RUN_ENTRY_OF_ROUTE[String(route.name ?? '')] ?? '')
+const isInSelfRun = computed(() => !!currentSelfRunEntry.value)
+
+/** 在里面显示当前页名，在外面显示模块名 —— 否则读不出「这个按钮现在指向哪」 */
+const selfRunEntryLabel = computed(() => {
+  const cur = SELF_RUN_ENTRIES.find(e => e.key === currentSelfRunEntry.value)
+  return cur ? cur.label : '自我运转'
 })
 
 // ============================================
@@ -181,9 +224,9 @@ const goToDashboard = () => {
   router.push('/dashboard')
 }
 
-const handleTimeDimensionChange = (command: 'day' | 'week' | 'month' | 'year') => {
-  currentTimeDimension.value = command
-  window.dispatchEvent(new CustomEvent('time-dimension-change', { detail: { dimension: command } }))
+const goSelfRun = (key: string) => {
+  const entry = SELF_RUN_ENTRIES.find(e => e.key === key)
+  if (entry) router.push({ name: entry.route })
 }
 
 const handleNotificationClick = (notification: any) => {
@@ -267,7 +310,8 @@ onMounted(() => {
     align-items: center;
     gap: 12px;
     flex: 1;
-    max-width: 520px;
+    // 520 → 620：右侧多了常驻的计时入口（窄屏下仍会先压缩搜索框）
+    max-width: 620px;
 
     .quick-add-btn {
       width: 38px;
@@ -289,8 +333,8 @@ onMounted(() => {
     gap: 16px;
     flex-shrink: 0;
 
-    // 时间维度切换
-    .time-dimension-selector {
+    // 自我运转入口
+    .selfrun-entry {
       display: flex;
       align-items: center;
       gap: 6px;
@@ -307,11 +351,20 @@ onMounted(() => {
         background: var(--lm-bg-card);
       }
 
+      // 在自我运转里时给一点「这里是当前模块」的提示（不抢眼，只是不再是一片灰）
+      &.is-in {
+        color: var(--lm-primary-color);
+      }
+
       .arrow {
         font-size: 12px;
         color: var(--lm-text-secondary);
       }
     }
+
+    // 🔴 注意：下拉菜单里那一项**不能**写在这层嵌套里 —— 菜单被 teleport 到 body，
+    //    `.header-right .entry-cur` 的祖先链在真实 DOM 里断了，规则一条都不会命中
+    //    （不报错，只是「当前」两个字永远没样式）。它写在下方的**顶层**规则里。
 
     // 主题切换
     .theme-switch {
@@ -390,6 +443,16 @@ onMounted(() => {
       }
     }
   }
+}
+
+/* 自我运转下拉里「· 当前」的标记。
+   🔴 必须是**顶层**选择器：`el-dropdown-menu` 被 teleport 到 body，
+      写成 `.header-right .entry-cur` 的话祖先链在真实 DOM 里不存在 ⇒ 一条都不命中。
+   ⚠️ 内容仍是在本组件模板里编译的，带 scope id ⇒ 顶层 scoped 规则能命中。 */
+.entry-cur {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--el-color-primary);
 }
 </style>
 

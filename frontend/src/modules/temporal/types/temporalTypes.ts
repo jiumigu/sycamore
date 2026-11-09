@@ -78,6 +78,48 @@ export interface TemporalTask {
   activity_type?: string | null
   attribution?: string | null
   is_unclassified?: boolean
+  /**
+   * 记录来源（v3.64.33）：由 `import_batch` 在后端分类得出，**前端不写中文映射**。
+   * `unlabeled` = 早期记录没留来源；`other` = 有批次号但代码没认出来 —— 两者别混。
+   */
+  source_kind?: TaskSourceKind
+  source_label?: string
+}
+
+export type TaskSourceKind =
+  | 'manual' | 'timer' | 'csv' | 'worklog' | 'overtime_recon' | 'unlabeled' | 'other'
+
+/** 来源类型汇总（`/temporal/tasks/sources/`） */
+export interface SourceKindSummary {
+  kind: TaskSourceKind
+  label: string
+  /** 这个来源是什么、从哪写进来的（后端下发，前端不编） */
+  hint: string
+  count: number
+  batches: number
+}
+
+/** 单个导入批次 */
+export interface SourceBatchItem {
+  /** 批次号；`未标注` 的那一项为 null */
+  batch: string | null
+  kind: TaskSourceKind
+  label: string
+  count: number
+  /** 这一批涉及多少个不同任务名 */
+  name_kinds: number
+  first_start: string | null
+  last_start: string | null
+  /** 这批记录**最后一次被改动**的时刻（不是导入时刻 —— 编辑也会刷新它） */
+  last_touch: string | null
+}
+
+export interface SourceOverview {
+  total_records: number
+  total_batches: number
+  items: SourceBatchItem[]
+  kinds: SourceKindSummary[]
+  unlabeled_count: number
 }
 
 export interface TaskOverview {
@@ -111,43 +153,51 @@ export interface UnclassifiedItem {
 
 // ─── 分类台账（映射编辑器主体：全量 task_name + 真实使用量）───
 
-export type AttributionSource = 'rule' | 'default' | 'fallback'
-
-/** 归因规则的匹配维度（与后端 `RedemptionAttrRule.MATCH_FIELD_CHOICES` 一一对应） */
-export type AttrRuleField = 'task_name' | 'activity_type' | 'task_type'
-
-/** 维度中文名：台账提示「这条归因来自哪条规则」时用，口径与赎回期页面保持一致 */
-export const RULE_FIELD_LABEL: Record<AttrRuleField, string> = {
-  task_name: '任务名',
-  activity_type: '活动类型(L2)',
-  task_type: '任务类型',
-}
-
-/** 只有按任务名的规则能被台账单行撤销；其余维度会波及其他任务名 */
-export function ruleIsRowScoped(field: AttrRuleField | null | undefined): boolean {
-  return field === 'task_name'
-}
+/**
+ * 归因来源只有两档（v3.64.16）：
+ * - `default`：映射表那一列（`temporal_task_meta.default_attribution`）明确写着的值
+ * - `fallback`：没设 → 兜底「成长」
+ *
+ * 🔴 曾有第三档 `rule`（赎回期外挂规则）。它是 `default` 的影子副本，却只覆盖少数
+ *    任务名，导致赎回期的六类小时静默漏数 —— 整条退役，不要再加回来。
+ */
+export type AttributionSource = 'default' | 'fallback'
 
 export interface MetaLedgerItem {
   task_name: string
   activity_type: string
   /** TaskMeta 上存的默认归因（可能为空） */
   default_attribution: string | null
-  /** 实际生效归因：规则 > 默认 > 兜底 */
+  /** 实际生效归因：映射表那列 > 兜底 */
   effective_attribution: string | null
   attribution_source: AttributionSource | null
   /**
-   * 命中的归因规则（仅 source='rule' 时有值，其余恒为 null）
+   * 是否「没配 L1 归因、靠兜底」。
    *
-   * ⚠️ `rule_field` 决定「撤销覆盖」能不能撤：只有 `task_name` 维度可撤；
-   * `activity_type`(L2) / `task_type` 规则同时覆盖同一维度下的**其他**任务名，
-   * 单行撤销会连坐，须到赎回期「归因规则」页停用。
+   * 🔴 与 `attribution_source === 'fallback'` 同源，但**单独给一个布尔**是为了
+   *    让下拉框能直接用它判「该显示空还是显示值」：从前下拉绑的是
+   *    `effective_attribution`，兜底值被当成已填的选中项 ⇒ 用户点「去归好」
+   *    进来只看到「成长」，以为早配好了，而库里是 NULL。
    */
-  rule_id: number | null
-  rule_field: AttrRuleField | null
-  rule_value: string | null
+  is_attr_unset: boolean
   is_unclassified: boolean
   is_system: boolean
+  /**
+   * 是否计入「成长计时」（每周状态里的成长小时数）。
+   *
+   * 🔴 这是**唯一依据**（v3.64.11）：此前是隐式的「L2 = 深度工作」，
+   *    界面上看不见，想拉一个新分类进来只能把它塞进「深度工作」桶；
+   *    而且挪走某项任务会顺手改掉成长口径。现在改 L2 不再影响这里。
+   */
+  counts_growth: boolean
+  /**
+   * 「今天的三条线」里的角色（v3.64.12）；空串 = 不参与护栏。
+   *
+   * 🔴 与 `counts_growth` 同理：角色写在标记上、**不看任务名**。
+   *    否则改个名，护栏会静默变成「未记录」，且看不出是改名导致的。
+   *    阈值不在前端 —— 后端 `DAILY_GUARD_LINES` 是唯一一份。
+   */
+  daily_role: DailyRole
   total_hours: number
   record_count: number
   /** 单次均时（分钟） */
@@ -161,6 +211,19 @@ export interface MetaLedgerSummary {
   unclassified: number
   total_hours: number
   unclassified_hours: number
+  /** 计入成长计时的任务名个数 / 累计时长（改开关时能立刻看到动了多少量） */
+  growth_count: number
+  growth_hours: number
+  /** 标了「护栏角色」的任务名个数（只数睡眠 / 午睡；「流失」按归因，不占这一格） */
+  role_count: number
+  /**
+   * 没配 L1 归因（按兜底「成长」计入）的任务名个数 / 累计时长。
+   *
+   * 🔴 与 `unclassified`（L2 没配）分开：一个是「它属于哪类活动」没答，
+   *    一个是「它对你意味着什么」没答。合并成一个「未配」会让人以为填一次就都好了。
+   */
+  unset_attr_count: number
+  unset_attr_hours: number
   by_attribution: Record<string, number>
 }
 
@@ -172,13 +235,13 @@ export interface MetaLedgerData {
 
 /** 台账「来源」列：口径与后端 resolve_attribution_detail 一致 */
 export const ATTR_SOURCE_MAP: Record<AttributionSource, { label: string; color: string; tip: string }> = {
-  rule: { label: '赎回期规则', color: '#6366F1', tip: '由三年赎回期归因规则覆盖（优先级最高）。按任务名的规则可在本页撤销；按活动类型(L2)/任务类型的规则会覆盖同一维度下多个任务名，需到赎回期页停用' },
-  default: { label: '类型默认', color: '#94A3B8', tip: '取自该任务名的默认归因' },
-  fallback: { label: '兜底', color: '#CBD5E1', tip: '未设默认归因，兜底为「成长」；改 L2 类型不会顺手改归因' },
+  // ⚠️ 标签叫「任务默认」而不是「类型默认」：这个值来自**该任务名**自己的那一行，
+  //    不是 L2 类型预设。旧标签让人以为「改 L2 就能改归因」，实际改 L2 不碰归因。
+  default: { label: '任务默认', color: '#94A3B8', tip: '取自该任务名在映射表里设的 L1 归因' },
+  // ⚠️ 「兜底」用琥珀色而不是浅灰：浅灰（#CBD5E1）在表格里几乎看不见，
+  //    用户因此认为「已经配好了」。兜底不是一个中性的信息，它是一条待办。
+  fallback: { label: '兜底', color: '#F59E0B', tip: '未设默认归因，兜底为「成长」；改 L2 类型不会顺手改归因' },
 }
-
-/** 台账 L1 下拉的「清除覆盖」哨兵值（不落库，仅前端语义） */
-export const ATTR_CLEAR = '__clear__'
 
 // 旭日 3 环：L1 归因 → L2 类型 → L3 task_name
 export interface SunburstLeaf {
@@ -304,9 +367,120 @@ export interface ImportResult {
   deduplicated?: number
   /** CSV 解析出的有效原始记录条数（去重前） */
   total_parsed?: number
+  /** 用户在预演清单里自己勾掉的行数（与「库已有故跳过」分开报，v3.64.32） */
+  skipped_by_user?: number
   /** 本次新建的「未归类」任务名数量 */
   unclassified?: number
   error?: string
+}
+
+/**
+ * 两条时段「怎么重叠的」—— `contained/edge/likely_dup` 是后端定的四类，前端只查表。
+ *
+ * 🔴 别在前端按 `overlap_minutes` 重新分档：分档还看长度比与包含关系，
+ *    口径在 `services.classify_overlap`（单一真源）。
+ */
+export type ConflictRelation = 'contained' | 'edge' | 'review' | 'likely_dup'
+
+export interface ImportConflict {
+  id: number
+  task_name: string
+  start_time: string
+  end_time: string
+  overlap_minutes: number
+  relation: ConflictRelation
+}
+
+/** 预演里「需要人看一眼」的一行（`contained/edge/clean` 不进这个数组） */
+export interface ImportPreviewRow {
+  /** CSV 物理行号（表头是第 1 行）—— 导入时原样回传，别自己重算 */
+  row_no: number
+  task_name: string
+  start_time: string
+  /** 只有时分；为空表示源数据没给结束时刻（时长另算） */
+  end_time: string
+  hours: number
+  verdict: ConflictRelation
+  /** 与它相交的记录总数（`conflicts` 最多带 2 条） */
+  conflict_total: number
+  conflicts: ImportConflict[]
+}
+
+/**
+ * 导入预演结果（只读）。
+ *
+ * 两个维度正交，别混：
+ * - **出路** `already_exists`：库里已有同一条 ⇒ 落库时跳过或更新（预演不判哪个）
+ * - **关系** 四类：与库里**其它**记录的时段关系
+ *
+ * 不变量：`total = inner_duplicate + already_exists + clean + Σ四类`
+ */
+export interface ImportPreview {
+  total_parsed: number
+  parse_errors: Record<string, number>
+  /** 同一份 CSV 内部重复的行数（落库时丢弃，不计入 summary 的桶） */
+  inner_duplicate: number
+  summary: {
+    total: number
+    already_exists: number
+    clean: number
+    contained: number
+    edge: number
+    review: number
+    likely_dup: number
+    /** `review + likely_dup`：需要人看的行数 */
+    needs_review: number
+  }
+  rows: ImportPreviewRow[]
+  error?: string
+}
+
+/** 最近常用任务名的一项（手工新增弹窗的快捷候选） */
+export interface FrequentTaskName {
+  task_name: string
+  /** 窗口内的记录次数 —— 「频繁」的实际口径 */
+  record_count: number
+  total_hours: number
+}
+
+/**
+ * 最近 N 个月最频繁的任务名。
+ *
+ * 🔴 窗口（几个自然月）与排序口径全在后端
+ *    （`TemporalStatsService.get_frequent_names`），前端不复制判据、
+ *    也不自己算「最近 3 个月」—— 否则两把尺子，改一处漏一处还不报错。
+ */
+export interface FrequentNamesData {
+  months: number
+  limit: number
+  window_start: string
+  items: FrequentTaskName[]
+}
+
+/** 与待新增/编辑时段相交的一条已有记录 */
+export interface OverlapConflict {
+  id: number
+  task_name: string
+  /** 已是本地时间 `YYYY-MM-DD HH:MM`（后端格式化，前端不再二次转） */
+  start_time: string
+  end_time: string
+  /** 交集分钟数 —— 提示里给人看的量 */
+  overlap_minutes: number
+  /** 同名 ⇒ 极可能重复新增；异名 ⇒ 合法并行（大段里套细分） */
+  same_name: boolean
+}
+
+/**
+ * 时段重叠查询结果（`tasks/check_overlap`）。
+ *
+ * 🔴 「重叠」在本库里是**合法形态**（「牛马工作 08:00-18:00」之内再细分「代码编程」），
+ *    所以后端只回答「撞了哪些」，**不阻断保存** —— 由用户看完这份清单自己决定。
+ *    别在前端把它改成一票否决，也别自己再算一遍重叠（口径在 `services.find_overlaps`）。
+ */
+export interface OverlapCheckData {
+  has_overlap: boolean
+  conflicts: OverlapConflict[]
+  same_name_count: number
 }
 
 export const CATEGORY_MAP: Record<string, { color: string; icon: string }> = {
@@ -315,3 +489,50 @@ export const CATEGORY_MAP: Record<string, { color: string; icon: string }> = {
   '生活': { color: '#F59E0B', icon: '🏠' },
   '兴趣记录': { color: '#3B82F6', icon: '🎨' },
 }
+
+// ─── 日常护栏：「今天的三条线」（v3.64.13）──────────────────────────────
+// 🔴 这里只是后端 `constants.DAILY_ROLE_CHOICES` 的**副本**（值域要一致）；
+//    **阈值一个都不在这里** —— 8 小时 / 1.5 小时 / 4 小时只在后端常量里。
+// ⚠️ 「流失」那条线**没有角色**，按 L1 归因统计，所以它不在这个值域里。
+
+export type DailyRole = '' | 'sleep_night' | 'nap'
+
+export const DAILY_ROLE_OPTIONS: { value: DailyRole; label: string }[] = [
+  { value: '', label: '不参与' },
+  { value: 'sleep_night', label: '夜间睡眠' },
+  { value: 'nap', label: '午睡' },
+]
+
+/** 三档状态：没有 `unknown` / `pending` 之类的兜底桶（项目铁律） */
+export type DailyGuardStatus = 'ok' | 'off' | 'unrecorded'
+
+export interface DailyGuardLine {
+  key: 'sleep' | 'nap' | 'lost'
+  label: string
+  /** `at_least` = 下限（睡够），`at_most` = 上限（别超） */
+  direction: 'at_least' | 'at_most'
+  /** 这条线「配好了没有」。false ⇒ 未记录是「还没配」（配置问题），不是「今天没做」 */
+  configured: boolean
+  threshold_hours: number
+  /** 「≥ 8 小时」/「≤ 1.5 小时」—— 后端给，前端不拼 */
+  threshold_text: string
+  /** 没记录时是 `null`，**不是 0**（`null` 与 `0` 是两件事） */
+  value_hours: number | null
+  value_text: string
+  status: DailyGuardStatus
+  /** 「达标」/「未达」/「越线」/「未记录」—— 后端给，前端不写中文表 */
+  status_text: string
+  /** 「差 0.6 小时」/「超 2 小时」；达标与未记录时为空串 */
+  gap_text: string
+  /** 未记录时是原因句（「今天没有午睡记录」），否则是阈值说明 */
+  detail_text: string
+  record_count: number
+}
+
+export interface DailyGuardData {
+  date: string
+  lines: DailyGuardLine[]
+  /** 三条线里已落地的条数（睡眠/午睡看角色、流失看归因）；0 = 一条都还没配 */
+  configured_lines: number
+}
+

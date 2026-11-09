@@ -1,5 +1,5 @@
 <template>
-  <div class="bmi-card" v-if="stats?.bmi">
+  <div class="bmi-card" :class="{ 'page-mode': pageMode }" v-if="stats?.bmi">
     <div class="bmi-header">
       <span class="bmi-label">BMI</span>
       <span class="bmi-value">{{ stats.bmi }}</span>
@@ -28,7 +28,7 @@
     </div>
     <div class="bmi-advice" v-if="adviceText">{{ adviceText }}</div>
   </div>
-  <div class="bmi-card bmi-empty" v-else>
+  <div class="bmi-card bmi-empty" :class="{ 'page-mode': pageMode }" v-else>
     <div class="bmi-label">BMI</div>
     <div class="bmi-value">--</div>
     <div class="bmi-sub">填写身体信息后计算</div>
@@ -40,7 +40,7 @@ import { computed } from 'vue'
 import { BMI_RANGES } from '../../types/healthTypes'
 import type { WeightStats } from '../../types/healthTypes'
 
-const props = defineProps<{ stats: WeightStats | null }>()
+const props = defineProps<{ stats: WeightStats | null; pageMode?: boolean }>()
 
 const bmiColor = computed(() => {
   if (!props.stats?.bmi) return '#9CA3AF'
@@ -104,4 +104,12 @@ const indicatorPos = computed(() => {
 .bmi-advice { font-size: 13px; color: #6B7280; margin-top: 8px; }
 .bmi-empty { text-align: center; padding: 24px; }
 .bmi-sub { font-size: 12px; color: #9CA3AF; margin-top: 4px; }
+/* 整页模式：独立页面上这张卡是主角，数字与刻度条放大一档（首页卡片维持原尺寸） */
+.bmi-card.page-mode { padding: 24px; }
+.bmi-card.page-mode .bmi-value { font-size: 44px; }
+.bmi-card.page-mode .bmi-status { font-size: 20px; margin: 6px 0 18px; }
+.bmi-card.page-mode .bmi-track { height: 12px; border-radius: 6px; }
+.bmi-card.page-mode .bmi-indicator { font-size: 14px; top: -4px; }
+.bmi-card.page-mode .bmi-range-labels { font-size: 12px; height: 18px; }
+.bmi-card.page-mode .bmi-advice { font-size: 14px; margin-top: 14px; }
 </style>

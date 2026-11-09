@@ -1,8 +1,12 @@
 <template>
   <div class="conflict-tracker">
-    <!-- 归档提示（仅在当前仍处于归档状态时显示，重新启用后自动消失） -->
-    <el-alert v-if="ready && isArchived" title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
-    <h2 class="page-title">🌱 成长记录</h2>
+    <!-- v3.63.8：不再是菜单项，是「关系管理」的页内子页 ⇒ 必须留回程 -->
+    <div class="page-header">
+      <el-button size="small" @click="$router.push('/relation')">
+        <el-icon><ArrowLeft /></el-icon> 关系管理
+      </el-button>
+      <h2 class="page-title">🌱 成长记录</h2>
+    </div>
 
     <!-- 统计卡片 -->
     <el-row :gutter="16" class="stats-row">
@@ -176,15 +180,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { EVENT_TYPE_OPTIONS, type ConflictEvent } from '../types/conflictTypes'
 import { useConflictStore } from '../stores/conflictStore'
 import * as conflictApi from '../api/conflictApi'
 import { getRelationshipList } from '../api/relationshipApi'
 import type { Relationship } from '../types/relationshipTypes'
-import { useMenuArchive } from '@/shared/composables/useMenuArchive'
-
-// 归档横幅的判据唯一实现在 useMenuArchive（存档态含用户偏好，非写死的 defaultArchived）
-const { ready, isArchived } = useMenuArchive('relation_conflicts')
 import { maskName } from '@/shared/utils/privacy'
 import { formatAmount } from '@/shared/utils/format'
 import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
@@ -319,6 +320,16 @@ onMounted(() => {
   font-weight: 600;
   margin-bottom: 16px;
   color: var(--el-text-color-primary);
+}
+
+// 回程按钮 + 标题同处一行（撤掉菜单项后这页没有别的出口）
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+
+  .page-title { margin-bottom: 0; }
 }
 
 .stats-row { margin-bottom: 16px; }

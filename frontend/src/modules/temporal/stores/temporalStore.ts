@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import * as temporalApi from '../api/temporalApi'
 import type {
   BalanceData, CalendarDay, CompletenessData, DistributionData,
-  ImportResult, OneDayPage, OneDayPageStats, RankingItem, SunburstData,
+  ImportPreview, ImportResult, OneDayPage, OneDayPageStats, RankingItem, SunburstData,
   TaskOverview, TemporalTask, TrendItem, WeeklyStructure,
 } from '../types/temporalTypes'
 
@@ -213,9 +213,20 @@ export const useTemporalStore = defineStore('temporal', () => {
     return res.data
   }
 
-  async function importCsv(file: File) {
+  /** 预演（只读）：先看这份 CSV 会撞上什么，再决定落不落。 */
+  async function previewCsv(file: File) {
     const form = new FormData()
     form.append('file', file)
+    const res = await temporalApi.previewImportCsv(form)
+    return res.data as ImportPreview
+  }
+
+  async function importCsv(file: File, skipRows: number[] = []) {
+    const form = new FormData()
+    form.append('file', file)
+    // 🔴 行号必须原样回传预演给出的 `row_no`：后端会校验，对不上就 400 且一条都不写
+    //    （传成 0-based 时若静默跳过第 1 行，界面还显示导入成功 —— 那是静默丢数）。
+    if (skipRows.length) form.append('skip_rows', JSON.stringify(skipRows))
     const res = await temporalApi.importTaskCsv(form)
     return res.data as ImportResult
   }
@@ -255,7 +266,7 @@ export const useTemporalStore = defineStore('temporal', () => {
     fetchOneDayList, fetchStats, createOneDay, updateOneDay, deleteOneDay, bulkDeleteOneDay,
     taskList, taskTotal, taskLoading, overview, trendData, balanceData, rankingData, distributionData, calendarData,
     fetchTaskList, fetchOverview, fetchTrend, fetchBalance, fetchRanking, fetchDistribution, fetchCalendar,
-    fetchAllTaskData, importCsv,
+    fetchAllTaskData, importCsv, previewCsv,
     unclassified, completeness, sunburst, weeklyStructure,
     loadUnclassified, batchSetMeta, fetchSunburst, fetchCompleteness, fetchWeeklyStructure,
     resetState,

@@ -1,5 +1,7 @@
 # Relation — 关系管理前端
 
+> 文档对齐 v3.64.5 ｜ 最后核对 2026-10-29
+
 | 文件/组件 | 职责 |
 |-----------|------|
 | `RelationView.vue` | 关系总览（联系人/读者群体双 TAB，4统计卡+3ECharts+待提醒+卡片网格+CRUD弹窗） |
@@ -18,4 +20,4 @@
 | `components/reader/ResonanceList.vue` | 认知共振点列表 |
 | `components/reader/MonthlySummaryTab.vue` | 月末盘点标签页（取关自动计算 + 编辑/删除） |
 | `stores/conflictStore.ts` | 冲突事件 Pinia 状态管理（CRUD + 统计 + 事件列表） |
-| `views/ConflictTrackerView.vue` | 冲突追踪主页（情绪等级标签/解决状态/关联人搜索/隐私脱敏/统计卡片+趋势图） |
+| `views/ConflictTrackerView.vue` | 冲突追踪（成长记录）主页，路由 `/relation/conflicts`；自 v3.63.8 起从「关系管理」页头进入，不占菜单项，页内保留「← 关系管理」回程（情绪等级标签/解决状态/关联人搜索/隐私脱敏/统计卡片+趋势图） |

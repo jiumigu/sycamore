@@ -188,6 +188,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFixedExpenseList, createFixedExpense, updateFixedExpense, deleteFixedExpense } from '../../api/toolkitApi'
@@ -328,8 +329,8 @@ async function handleCalculate() {
     }
     editingId.value = null
     await fetchHistory()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     saving.value = false
   }

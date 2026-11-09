@@ -66,6 +66,9 @@
 import { ref, onMounted } from 'vue'
 import type { Component } from 'vue'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
+// 🔴 模板里 <ArrowUp />/<ArrowDown /> 靠具名导入解析 —— 只 `import *` 的话
+//    这两个名字在 <script setup> 作用域不存在 ⇒ 渲染成空白按钮（不报错）。
+import { ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { allMenuItems, defaultGroups } from '@/shared/config/menuConfig'
 // 保存后让归档判据缓存失效（与侧边栏、各模块页横幅共用同一份状态）
@@ -138,17 +141,20 @@ const renameGroup = async (g: GroupRow) => {
 
 const moveGroup = async (g: GroupRow, dir: number) => {
   const idx = groups.value.indexOf(g)
-  const target = groups.value[idx + dir]
-  if (!target) return
-  const tmp = g.sort_order
-  g.sort_order = target.sort_order
-  target.sort_order = tmp
-  // 交换后按 sort_order 重排本地数组
-  groups.value.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-  await Promise.all([
-    updateMenuGroup(g.id, { sort_order: g.sort_order }),
-    updateMenuGroup(target.id, { sort_order: target.sort_order }),
-  ])
+  const j = idx + dir
+  if (j < 0 || j >= groups.value.length) return
+  // 🔴 不能用「交换 sort_order」：库里排序号有历史撞号（如 selfrun/temporal 都是 4），
+  //    撞号行交换 4↔4 = 没换，顺序退化为按 group_key 字母序 ⇒ 提示成功但纹丝不动。
+  //    正确做法：按**显示位置**交换后，把 sort_order 重写为 1..N 连续号，彻底消灭撞号。
+  const list = [...groups.value]
+  ;[list[idx], list[j]] = [list[j], list[idx]]
+  const renumbered = list.map((row, i) => ({ row, sort_order: i + 1 }))
+  groups.value = renumbered.map(u => ({ ...u.row, sort_order: u.sort_order }))
+  // 只把**号真的变了**的行写回后端
+  const changed = renumbered.filter(u => u.row.sort_order !== u.sort_order)
+  if (changed.length > 0) {
+    await Promise.all(changed.map(u => updateMenuGroup(u.row.id, { sort_order: u.sort_order })))
+  }
   ElMessage.success('已调整顺序')
 }
 

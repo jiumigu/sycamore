@@ -50,7 +50,13 @@
                 <span v-if="t.background" class="bg-text" :title="t.background">{{ t.background }}</span>
               </div>
               <div v-if="t.status === '已决策' || t.status === '已归档'" class="decision-line">
-                ✅ 最终决定：<b>{{ t.final_decision }}</b><span v-if="t.decision_date">（{{ t.decision_date }}）</span>
+                <!-- 采纳与手写是两个语义，可能只有一个有值：只采纳不写字也允许（多选结论下很常见） -->
+                <template v-if="t.final_choices?.length">
+                  ✅ 采纳：<b>{{ t.final_choices.join('、') }}</b>
+                  <span v-if="t.final_decision">｜{{ t.final_decision }}</span>
+                </template>
+                <template v-else>✅ 最终决定：<b>{{ t.final_decision }}</b></template>
+                <span v-if="t.decision_date">（{{ t.decision_date }}）</span>
               </div>
               <div v-if="t.status === '已归档'" class="review-line">
                 📌 事后回看：{{ t.review_note || '（待补，30 天后回看可填）' }}
@@ -67,7 +73,14 @@
               </div>
               <div v-else-if="previewOf(t.id)?.total_records" class="lean-line">
                 📈 当前倾向：{{ previewOf(t.id)?.conclusion }}
-                <el-tag size="small" effect="plain" :type="leanTagTypeOf(previewOf(t.id)!)">
+                <!-- 多选结论下标「前 N 项合计」：原来的「主导加权差」衡量的是第一名领先多少，
+                     结论本身有 N 项时这个数已经没有对应物，不能再拿来当一个可视元素 -->
+                <el-tag
+                  v-if="isMultiConclusion(previewOf(t.id)!)" size="small" effect="plain" type="primary"
+                >
+                  前 {{ previewOf(t.id)?.conclusion_keys.length }} 项合计 {{ previewOf(t.id)?.top_share ?? 0 }}%
+                </el-tag>
+                <el-tag v-else size="small" effect="plain" :type="leanTagTypeOf(previewOf(t.id)!)">
                   {{ isCustomLean(previewOf(t.id)!) ? '主导加权差' : '强度加权' }} {{ signedScore(previewOf(t.id)?.weighted_score ?? 0) }}
                 </el-tag>
               </div>
@@ -140,6 +153,19 @@
               + 添加选项
             </el-button>
             <div class="lean-hint">留空则使用默认三项：想继续 / 不想继续 / 不确定（2–6 项，每项 ≤ 20 字）</div>
+          </div>
+        </el-form-item>
+        <!-- 只有自定义选项才开放多选：默认三项是互斥判断，取前 2 名会输出
+             「想继续 40% · 不想继续 35%」这种等于没说的结论 -->
+        <el-form-item v-if="createTopNMax > 1" label="结论条数">
+          <el-select v-model="createForm.result_top_n" style="width: 100%">
+            <el-option
+              v-for="n in createTopNOptions" :key="n"
+              :label="n === 1 ? '只取第一名' : `取前 ${n} 名`" :value="n"
+            />
+          </el-select>
+          <div class="lean-hint">
+            观察期结束后，票数最高的前 {{ createForm.result_top_n }} 项都算结论（0 次记录的选项不占名次）
           </div>
         </el-form-item>
       </el-form>
@@ -230,9 +256,19 @@
             <div class="stat-label">覆盖天数</div>
           </div>
 
-          <div class="section-title">📊 倾向统计</div>
+          <div class="section-title">
+            📊 倾向统计
+            <span v-if="report.result_top_n > 1" class="section-note">
+              （结论取前 {{ report.result_top_n }} 名）
+            </span>
+          </div>
           <div v-for="s in report.tendency_stats" :key="s.tendency" class="tendency-bar">
-            <span class="tendency-name">{{ s.label }}</span>
+            <span class="tendency-name">
+              {{ s.label }}
+              <el-tag v-if="s.is_top" size="small" type="primary" effect="plain" class="top-badge">
+                {{ report.result_top_n > 1 ? `第 ${s.rank} 名` : '结论' }}
+              </el-tag>
+            </span>
             <span class="tendency-track">
               <span class="tendency-fill" :style="{ width: s.percent + '%', background: tendencyColor(s.tendency, reportCols) }" />
             </span>
@@ -270,10 +306,21 @@
     </el-dialog>
 
     <!-- 做出决定 -->
-    <el-dialog v-model="decideVisible" :title="`🎯 做出决定 — ${current?.topic ?? ''}`" width="480px" destroy-on-close>
+    <el-dialog v-model="decideVisible" :title="`🎯 做出决定 — ${current?.topic ?? ''}`" width="520px" destroy-on-close>
       <el-form label-width="90px">
+        <el-form-item label="采纳倾向">
+          <div class="adopt-box">
+            <el-checkbox-group v-model="decideForm.adopted" class="adopt-group">
+              <el-checkbox v-for="o in decideOptions" :key="o.key" :value="o.label">{{ o.label }}</el-checkbox>
+            </el-checkbox-group>
+            <div class="adopt-actions">
+              <el-button size="small" type="primary" plain @click="applySuggestion">采用建议（前 {{ decideTopN }} 项）</el-button>
+              <span class="adopt-hint">采纳只记「选了哪几项」，不顶替下面那句话</span>
+            </div>
+          </div>
+        </el-form-item>
         <el-form-item label="最终决定">
-          <el-input v-model="decideForm.final_decision" placeholder="如：离职 / 留下 / 暂不动作" maxlength="50" show-word-limit />
+          <el-input v-model="decideForm.final_decision" placeholder="如：离职 / 留下 / 暂不动作（可与采纳二选一）" maxlength="50" show-word-limit />
         </el-form-item>
         <el-form-item label="决定日期">
           <el-date-picker v-model="decideForm.decision_date" type="date" placeholder="选择日期"
@@ -318,7 +365,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick } from 'vue'
+import { apiErrorText } from '@/shared/utils/apiError'
+import { ref, reactive, computed, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, Refresh, Plus, EditPen } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -373,15 +421,39 @@ const current = ref<DecisionTracker | null>(null)
 const createForm = reactive({
   topic: '', start_date: todayISO(), end_date: todayISO(90), background: '',
   lean_options: [] as string[],
+  /** 结论取前几项：1 = 只取第一名（默认）。> 1 只在自定义选项时可设 */
+  result_top_n: 1,
 })
 const createRules: FormRules = {
   topic: [{ required: true, message: '请填写决策主题', trigger: 'blur' }],
   end_date: [{ required: true, message: '请选择观察结束日期', trigger: 'change' }],
 }
+
+/**
+ * 创建表单里的「有效选项数」—— 空行不算、重复文字不算，与后端 `validate_lean_options`
+ * 的清洗规则一致。用它当 N 的上界，避免填了 3 个选项却把 N 设成 4 再被接口打回来。
+ */
+const createOptionCount = computed(() => {
+  const seen = new Set<string>()
+  for (const raw of createForm.lean_options) {
+    const text = raw.trim()
+    if (text) seen.add(text)
+  }
+  return seen.size
+})
+/** 结论最多能取几项：选项不足 2 个时只能取 1（默认三项是互斥判断，不开放多选） */
+const createTopNMax = computed(() => (createOptionCount.value >= 2 ? createOptionCount.value : 1))
+const createTopNOptions = computed(() =>
+  Array.from({ length: createTopNMax.value }, (_, i) => i + 1),
+)
+// 选项被删到比 N 还少时把 N 收回上界，否则控件会显示一个提交必被拒的值
+watch(createTopNMax, (max) => {
+  if (createForm.result_top_n > max) createForm.result_top_n = max
+})
 const recordForm = reactive<{ tendency: Tendency; reason: string; intensity: Intensity; record_date: string }>({
   tendency: 'uncertain', reason: '', intensity: 3, record_date: todayISO(),
 })
-const decideForm = reactive({ final_decision: '', decision_date: todayISO() })
+const decideForm = reactive({ final_decision: '', decision_date: todayISO(), adopted: [] as string[] })
 const archiveForm = reactive({ review_note: '' })
 const extendForm = reactive({ end_date: '' })
 
@@ -482,6 +554,10 @@ function leanTagTypeOf(item: TrackerPreviewItem): 'info' | 'warning' | 'danger' 
   if (isCustomLean(item)) return item.weighted_score > 0 ? 'warning' : 'info'
   return leanTagType(item.weighted_score)
 }
+/** 是否多选结论（取前 N 名）。长度取后端给的 `conclusion_keys`，前端不自己数票 */
+function isMultiConclusion(item: TrackerPreviewItem): boolean {
+  return (item.conclusion_keys?.length ?? 0) > 1
+}
 
 async function fetchTrackers() {
   loading.value = true
@@ -509,7 +585,7 @@ async function fetchPreview() {
 function openCreate() {
   Object.assign(createForm, {
     topic: '', start_date: todayISO(), end_date: todayISO(90), background: '',
-    lean_options: [],
+    lean_options: [], result_top_n: 1,
   })
   createVisible.value = true
 }
@@ -522,8 +598,13 @@ async function handleCreate() {
       ElMessage.warning('结束日期不能早于开始日期')
       return
     }
-    // 自定义倾向选项：过滤空白项；只填了 1 项视为未定义
-    const cleaned = createForm.lean_options.map(s => s.trim()).filter(Boolean)
+    // 自定义倾向选项：过滤空白项 + 去重（与后端 validate_lean_options 同一套清洗，
+    // 否则「A / A / B」会按 3 项算，把 N 放到 3 再被接口以「最多取前 2 项」打回）
+    const cleaned: string[] = []
+    for (const raw of createForm.lean_options) {
+      const text = raw.trim()
+      if (text && !cleaned.includes(text)) cleaned.push(text)
+    }
     if (cleaned.length === 1) {
       ElMessage.warning('自定义倾向选项至少 2 项，或删掉留空用默认三项')
       return
@@ -536,6 +617,8 @@ async function handleCreate() {
         end_date: createForm.end_date,
         background: createForm.background,
         lean_options: cleaned.length >= 2 ? cleaned : null,
+        // 没有自定义选项时后端只接受 1；这里跟着传 1，不去赌服务端宽容
+        result_top_n: cleaned.length >= 2 ? createForm.result_top_n : 1,
       })
       ElMessage.success('已开始观察，记得定期记录感受')
       createVisible.value = false
@@ -564,8 +647,8 @@ async function handleAddRecord() {
     ElMessage.success('记录成功')
     recordVisible.value = false
     await fetchTrackers()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
   } finally {
     submitting.value = false
   }
@@ -645,35 +728,63 @@ function disposeReportChart() {
   report.value = null
 }
 
+/** 决定弹窗里可勾选的倾向：自定义选项 → 文字；否则默认三项 */
+const decideOptions = computed<LeanOption[]>(() => {
+  const t = current.value
+  if (t?.lean_options?.length) return t.lean_options.map(l => ({ key: l, label: l }))
+  return DEFAULT_LEAN_OPTIONS
+})
+/** 这条决策的结论口径（生效值由后端夹过，直接读，不自己算） */
+const decideTopN = computed(() => current.value?.result_top_n ?? 1)
+
 function openDecide(t: DecisionTracker) {
   current.value = t
-  Object.assign(decideForm, { final_decision: '', decision_date: todayISO() })
+  Object.assign(decideForm, { final_decision: '', decision_date: todayISO(), adopted: [] })
   decideVisible.value = true
+}
+
+/**
+ * 「采用建议」：按报告/预览的结论项预填勾选。
+ * 🔴 取自后端 `conclusion_keys`，不在前端重新排序 —— 否则卡片说取前 2 名是 A/B、
+ *    这里却预填 C/D，两边都「看起来对」。
+ */
+function applySuggestion() {
+  if (!current.value) return
+  const p = previewOf(current.value.id)
+  if (!p?.conclusion_keys?.length) {
+    ElMessage.warning('这条决策还没有记录，先记几天再采用建议')
+    return
+  }
+  decideForm.adopted = p.conclusion_keys.map(k => tendencyLabel(k, p.options))
+}
+
+async function handleDecide() {
+  if (!current.value) return
+  if (!decideForm.final_decision.trim() && !decideForm.adopted.length) {
+    ElMessage.warning('请填写最终决定，或勾选至少一项采纳倾向')
+    return
+  }
+  submitting.value = true
+  try {
+    await decideTracker(current.value.id, {
+      final_decision: decideForm.final_decision.trim(),
+      adopted: decideForm.adopted,
+      decision_date: decideForm.decision_date || todayISO(),
+    })
+    ElMessage.success('已记录决定')
+    decideVisible.value = false
+    await fetchTrackers()
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
+  } finally {
+    submitting.value = false
+  }
 }
 
 function decideFromReport() {
   reportVisible.value = false
   if (!current.value) return
   openDecide(current.value)
-}
-
-async function handleDecide() {
-  if (!current.value) return
-  if (!decideForm.final_decision.trim()) {
-    ElMessage.warning('请填写最终决定')
-    return
-  }
-  submitting.value = true
-  try {
-    await decideTracker(current.value.id, { final_decision: decideForm.final_decision.trim(), decision_date: decideForm.decision_date || todayISO() })
-    ElMessage.success('已记录决定')
-    decideVisible.value = false
-    await fetchTrackers()
-  } catch {
-    ElMessage.error('保存失败')
-  } finally {
-    submitting.value = false
-  }
 }
 
 function openArchive(t: DecisionTracker) {
@@ -817,6 +928,22 @@ fetchTrackers()
   .lean-hint { font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.5; margin-top: 2px; }
 }
 
+/* 决定弹窗：采纳倾向（勾选 + 一键采用建议） */
+.adopt-box {
+  width: 100%;
+  .adopt-group {
+    display: flex; flex-wrap: wrap; gap: 4px 14px;
+    /* 🔴 Element 给 `.el-checkbox-group` 设了 `font-size:0; line-height:0`（消组内空白）。
+       flex 布局已不依赖 inline-block 间隙，但仍显式兜住字号与行高：
+       组内自定义内容的行高会被继承成 0，盒子算出来 0px、被裁掉且不报错。 */
+    font-size: 13px; line-height: 1.6;
+  }
+  .adopt-actions {
+    display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap;
+  }
+  .adopt-hint { font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.5; }
+}
+
 .report-body { min-height: 200px;
   .report-topic { margin: 0 0 4px; font-size: 16px; font-weight: 600; color: var(--el-text-color-primary);
     .report-period { font-size: 12px; font-weight: 400; color: var(--el-text-color-secondary); margin-left: 10px; }
@@ -825,10 +952,16 @@ fetchTrackers()
     .stat-num { font-size: 26px; font-weight: 700; color: var(--el-color-primary); }
     .stat-label { font-size: 12px; color: var(--el-text-color-secondary); }
   }
-  .section-title { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); margin: 16px 0 8px; }
+  .section-title { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); margin: 16px 0 8px;
+    .section-note { font-weight: 400; font-size: 12px; color: var(--el-text-color-secondary); }
+  }
 
   .tendency-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
-    .tendency-name { width: 70px; font-size: 13px; color: var(--el-text-color-regular); }
+    /* 结论徽标挂在名字后面 ⇒ 名字列要放得下「不想继续 + 第 1 名」 */
+    .tendency-name { width: 150px; font-size: 13px; color: var(--el-text-color-regular);
+      display: flex; align-items: center; gap: 6px;
+      .top-badge { flex: none; }
+    }
     .tendency-track { flex: 1; height: 12px; background: var(--el-fill-color-light); border-radius: 6px; overflow: hidden;
       .tendency-fill { display: block; height: 100%; border-radius: 6px; transition: width .5s; }
     }

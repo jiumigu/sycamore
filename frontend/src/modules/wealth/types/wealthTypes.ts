@@ -1183,7 +1183,10 @@ export interface RatioAssetPosition {
 export interface LiabilityState {
   total: number
   active: number
-  /** empty（完全没录）/ none_active（录了但都不在还）/ ok */
+  /**
+   * empty（台账一行没录 ⇒ DTI 不可知）/ none_active（录过、全部「已结清」
+   * ⇒ DTI = 0%，**不是**数据不可用）/ ok（有「在还」的行）
+   */
   state: string
 }
 
@@ -1242,4 +1245,72 @@ export interface RatioMeta {
   note: string[]
   bands: RatioBand[] | null
   target: number | null
+}
+
+// ══════════════════════════════════════════════════════════════
+// 净值变动归因（v3.62.42）
+//
+// 🔴 门槛与方向都是**后端判据**：前端只读 `level` / `unexplained_side`，
+//    不自己写 `Math.abs(x) > 500`（两把尺子必然漂移，§同一事实一把尺子）。
+// ══════════════════════════════════════════════════════════════
+
+/** 差额方向：正 = 钱比账本多（漏记进项 / 余额抄少）；负 = 钱比账本少（漏记出项） */
+export type BridgeSide = 'more_than_recorded' | 'less_than_recorded' | null
+
+/** 能否划窗口：undated = 盘点没填日期；invalid_span = 同月两期日期倒挂 */
+export type BridgeWindowReason = 'ok' | 'undated' | 'invalid_span'
+
+/** 需不需要看一眼：no_window = 算不出来（不是 0） */
+export type BridgeLevel = 'ok' | 'material' | 'no_window'
+
+/** 净值归因单期 */
+export interface NetworthBridgePeriod {
+  from_yearmon: string
+  to_yearmon: string
+  from_date: string | null
+  to_date: string | null
+  days: number | null
+  assets_start: number
+  assets_end: number
+  assets_change: number
+  borrow_start: number
+  borrow_end: number
+  borrow_change: number
+  net_worth_start: number
+  net_worth_end: number
+  net_worth_change: number
+  /** 以下四项在「划不出窗口」时是 null —— null 不是 0 */
+  income: number | null
+  expense: number | null
+  adjustment: number | null
+  flow_net: number | null
+  bill_count: number | null
+  unexplained: number | null
+  unexplained_pct: number | null
+  unexplained_side: BridgeSide
+  window_reason: BridgeWindowReason
+  level: BridgeLevel
+}
+
+/** 净值归因汇总 */
+export interface NetworthBridgeSummary {
+  periods: number
+  checkable: number
+  material: number
+  total_unexplained: number
+  missing_months: string[]
+  missing_count: number
+  stale_days: number | null
+  snapshot_count: number
+  /** 恒等式自检：Δ净资产 = 账本净流量 + 未解释差额 − Δ负债 */
+  identity_ok: boolean
+}
+
+/** 净值归因整体响应 */
+export interface NetworthBridge {
+  as_of: string | null
+  latest: NetworthBridgePeriod | null
+  periods: NetworthBridgePeriod[]
+  summary: NetworthBridgeSummary
+  thresholds: { material_amount: number }
 }

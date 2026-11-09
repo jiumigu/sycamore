@@ -26,7 +26,12 @@
     <el-card v-if="view.explain" shadow="never" class="pp-judge" :body-style="{ padding: '12px 16px' }">
       <div class="pp-judge-row">
         <span class="pp-judge-value" :style="{ color: statusColor }">{{ statusText }}</span>
-        <span class="pp-judge-frac">
+        <!-- 🔴 月度这行是 **KPI 参考**，不是判定依据（判定只看三问）——
+             写成「达标 4/4」而档位来自 2/3，就是在同一行里摆两把尺子。 -->
+        <span v-if="periodType === 'monthly'" class="pp-judge-frac">
+          KPI 参考 <b>{{ view.explain.ok }}</b> / {{ view.explain.counted }}
+        </span>
+        <span v-else class="pp-judge-frac">
           达标 <b>{{ view.explain.ok }}</b> / 计入 <b>{{ view.explain.counted }}</b>
         </span>
         <span class="pp-judge-note">{{ judgeNote }}</span>
@@ -40,17 +45,26 @@
           你说不算 {{ view.explain.skipped }}（不进分母）
         </el-tag>
         <el-tag v-if="view.explain.empty" size="small" effect="plain">
-          真的没做 {{ view.explain.empty }}（**进**分母）
+          真的没做 {{ view.explain.empty }}（<b>进</b>分母）
         </el-tag>
+      </div>
+      <!-- 月度未答三问 = 还没结论：当场指出下一步在哪，别只留一个「待答三问」 -->
+      <div v-if="view.explain.awaiting_answers && !isClosed" class="pp-awaiting">
+        在下面「月度三问」里选「是 / 否」，归档那一刻定档。
       </div>
     </el-card>
 
-    <!-- ── ③ 月度三问（只有月度有；归档前后都可改）─────────── -->
+    <!-- ── ③ 月度三问（只有月度有）─────────────────────────────
+         🔴 这三问是**月度档位的唯一来源**（v3.64.6）：没答 = 未判定，
+            不拿 KPI 达标率顶替。归档前必须答完 3 个（见下方归档按钮）。 -->
     <el-card v-if="periodType === 'monthly' && period" shadow="never" class="pp-questions">
       <template #header>
         <div class="card-header">
           <span>月度三问</span>
-          <span class="pp-hint">答「是」的个数 = 本月判定；`未答` 与 `否` 是两回事</span>
+          <span class="pp-hint">
+            本月档位只看这三问；「未答」与「否」是两回事
+            <template v-if="isClosed">；这一期已归档，补答只作记录，不改档</template>
+          </span>
         </div>
       </template>
       <div v-for="q in MONTHLY_QUESTIONS" :key="q.key" class="pp-q">
@@ -65,9 +79,16 @@
         </el-radio-group>
       </div>
       <div class="pp-q-footer">
-        <el-button size="small" :loading="savingAnswers" @click="saveAnswers">保存三问</el-button>
-        <span class="pp-hint">
-          答完之后本月的判定会**跟着重判** —— 这是刻意留的口子：月度要的是结论，不是当月那天的数。
+        <!-- 🔴 未归档时不摆「保存三问」：虚拟期没有 id，存不了（点了只会弹「先归档」），
+             而看着像按钮却点不动是负资产。归档请求会连 `answers` 一起提交。 -->
+        <template v-if="isClosed">
+          <el-button size="small" :loading="savingAnswers" @click="saveAnswers">保存三问</el-button>
+          <span class="pp-hint">
+            这一期已归档：补答只作记录，档位不变 —— 要改档请先「重开这一期」。
+          </span>
+        </template>
+        <span v-else class="pp-hint">
+          这一期还没归档：上面的选择会随「归档」一起提交（不用单独保存），归档那一刻定档。
         </span>
       </div>
     </el-card>
@@ -144,14 +165,22 @@
       description="归档之后补记不会、也不该回头改这一期的结论 —— 否则明细账与结论会悄悄分家。要改请先「重开这一期」（在「复盘」页，会留痕）。"
     />
 
-    <!-- ── ⑤ 归档 ──────────────────────────────────────────── -->
+    <!-- ── ⑤ 归档 ────────────────────────────────────────────
+         🔴 月度必须先答完三问才能归档（后端同样拦，400）：
+            月度档位只来自三问，没答就归档 = 落一个没有结论的期；
+            而归档后又不许补答改档 ⇒ 这一期会永远没有档位。
+         按钮 disabled 时**必须当场说清原因和去处**（恒灰控件不得沉默）。 -->
     <div v-if="!isClosed && !loading" class="pp-footer">
-      <el-button type="primary" :loading="closing" @click="doClose">
+      <el-button type="primary" :loading="closing" :disabled="archiveBlocked" @click="doClose">
         归档这{{ periodType === 'weekly' ? '一周' : '一月' }}
       </el-button>
-      <span class="pp-hint">
-        🔴 系统**不会自动归档** —— 归不归档、什么时候归是你的动作。
-        归档后读数定格，往后重算口径也**不改**它。
+      <span v-if="archiveBlocked" class="pp-hint pp-block-hint">
+        月度档位只来自三问：还有 {{ unansweredCount }} 个没答，答完才能归档 ——
+        就在上面那张「月度三问」里。
+      </span>
+      <span v-else class="pp-hint">
+        系统<b>不会自动归档</b> —— 归不归档、什么时候归是你的动作。
+        归档后读数定格，往后重算口径也<b>不改</b>它。
       </span>
     </div>
     <div v-else-if="isClosed" class="pp-footer">
@@ -178,8 +207,10 @@ import { useSelfRunStore } from '../stores/selfrunStore'
 // ⚠️ 作品有自己的 store（它跨四个模块取来源，不属于自我运转）。
 import { useWorkStore } from '@/modules/works/stores/workStore'
 import ComposeDialog from '@/modules/works/components/ComposeDialog.vue'
+import { apiErrorText } from '@/shared/utils/apiError'
 import {
-  FALLBACK_COLOR, MONTHLY_QUESTIONS, PERIOD_STATUS_LABEL,
+  FALLBACK_COLOR, MONTHLY_QUESTION_COUNT, MONTHLY_QUESTIONS, PERIOD_PREFIX,
+  PERIOD_STATUS_LABEL, periodStatusLabel,
 } from '../types/selfrunTypes'
 import type { AnswerSheet, PeriodType, Reading, SelfRunMetric } from '../types/selfrunTypes'
 
@@ -217,26 +248,48 @@ const loading = computed(() => store.loading)
  */
 const canEdit = computed(() => props.editable && !isClosed.value)
 
+/** 月度三问里还没答的个数（按本地编辑态算 —— 归档提交的就是这份 `answers`） */
+const unansweredCount = computed(() => {
+  if (props.periodType !== 'monthly') return 0
+  return MONTHLY_QUESTIONS.filter((q) => answers[q.key]?.answer == null).length
+})
+/** 月度三问没答完 ⇒ 不许归档（后端同样 400，这里先拦住并说明为什么） */
+const archiveBlocked = computed(
+  () => props.periodType === 'monthly' && unansweredCount.value > 0,
+)
+
 const statusText = computed(() => {
-  const v = view.value.explain?.value
-  if (!v) return '—'
-  return PERIOD_STATUS_LABEL[v] ?? v
+  const ex = view.value.explain
+  if (!ex) return '—'
+  // 后端拼好的全名（含前缀）；月度未答三问时是「待答三问」
+  if (ex.label_text) return ex.label_text
+  const v = ex.value
+  if (!v) return '待答三问'
+  // 🔴 前缀按本期类型拼：本月页说「本月我超棒」，不再一律说「本周」
+  return periodStatusLabel(v, props.periodType)
 })
 const statusColor = computed(
   () => store.colors.period[view.value.explain?.value ?? ''] ?? FALLBACK_COLOR,
 )
 /**
- * 🔴 判定档位文案**不写死阈值** —— 从后端下发的 `thresholds` 念出来，
- *    前端 0 个阈值数字（写死 = 哪天后端调线，界面还在说旧线）。
+ * 判定说明**整句由后端下发**（`basis_text`）。
+ *
+ * 🔴 前端不拼阈值文案 —— 两套尺子（周 KPI / 月三问）都在后端，
+ *    前端拼的话，月度页会把「三问答了几个是」讲成「≥80% …」的百分比线。
+ *    这里只兜底：老接口没有 `basis_text` 时才读 `thresholds`。
  */
 const judgeNote = computed(() => {
-  const v = view.value.explain?.value
+  const ex = view.value.explain
+  if (!ex) return ''
+  if (ex.basis_text) return ex.basis_text
+  const v = ex.value
   if (v === 'fallow') return '阶段暂停中 —— 休耕不是失败'
-  if (v === 'no_record') return '计入的条数为 0 —— 这周什么都没记'
-  const bands = view.value.explain?.thresholds ?? {}
+  if (v === 'no_record') return '计入的条数为 0 —— 这期什么都没记'
+  const bands = ex.thresholds ?? {}
+  const prefix = PERIOD_PREFIX[props.periodType] ?? ''
   const parts = Object.entries(bands)
     .sort((a, b) => b[1] - a[1])
-    .map(([k, lower]) => `≥${Math.round(lower * 100)}% ${PERIOD_STATUS_LABEL[k] ?? k}`)
+    .map(([k, lower]) => `≥${Math.round(lower * 100)}% ${prefix}${PERIOD_STATUS_LABEL[k] ?? k}`)
   return parts.length ? `判定线：${parts.join(' · ')}` : ''
 })
 const backfillDays = computed(() => {
@@ -276,8 +329,12 @@ async function doClose() {
     : ''
   try {
     await ElMessageBox.confirm(
-      `归档 ${p.period_key}：读数会在这一刻**定格**，以后重算口径不会改它。\n`
-      + `归档之后你仍然可以补写「这一期的话」和月度三问。${skipTip}`,
+      `归档 ${p.period_key}：读数会在这一刻定格，以后重算口径不会改它。\n`
+      + (props.periodType === 'monthly'
+        ? `本月档位也在这刻定下来（三问 ${MONTHLY_QUESTION_COUNT - unansweredCount.value}/${MONTHLY_QUESTION_COUNT} 已答）`
+          + ' —— 归档后补答只作记录，改档要重开。'
+        : '归档之后你仍然可以补写「这一期的话」。')
+      + `${skipTip}`,
       `归档${label}？`,
       { confirmButtonText: '归档', cancelButtonText: '再等等', type: 'warning' },
     )
@@ -296,9 +353,10 @@ async function doClose() {
       res.note || `已归档 ${p.period_key}`,
     )
     emit('changed')
-  } catch (e: any) {
-    // 409 = 已经归档过了（后端不静默覆盖）—— 原样念出来
-    ElMessage.error(e?.response?.data?.detail ?? '归档失败')
+  } catch (e) {
+    // 409 = 已经归档过了（后端不静默覆盖）；400 = 月度三问没答完（后端同样拦）
+    // —— 都把后端那句话原样念出来，别统一成「归档失败」
+    ElMessage.error(apiErrorText(e, '归档失败'))
   } finally {
     closing.value = false
   }
@@ -313,10 +371,16 @@ async function saveAnswers() {
   savingAnswers.value = true
   try {
     await store.saveReview(p.id, { answer_sheet: { ...answers } })
-    ElMessage.success('已保存，本月判定已重判')
+    // 🔴 已归档的期补答**不改档**（后端 `update_review` 也不改）——
+    //    别在这里说「已重判」，那是一句会让人白等的话。
+    ElMessage.success(
+      isClosed.value
+        ? '已保存。这一期已归档，档位已定格 —— 要改档请先重开这一期。'
+        : '已保存，本月判定已按三问重算。',
+    )
     emit('changed')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail ?? '保存失败')
+  } catch (e) {
+    ElMessage.error(apiErrorText(e, '保存失败'))
   } finally {
     savingAnswers.value = false
   }
@@ -363,6 +427,8 @@ function onChanged() {
 .pp-judge-frac { font-size: 14px; color: var(--el-text-color-regular); }
 .pp-judge-note { font-size: 12px; color: var(--el-text-color-secondary); }
 .pp-judge-chips { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+/* 月度未答三问 = 未判定：给下一步方向，不只留一个空档位 */
+.pp-awaiting { margin-top: 8px; font-size: 12px; color: var(--el-color-primary); }
 
 .card-header { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
 .pp-q { padding: 8px 0; border-bottom: 1px dashed var(--el-border-color-lighter); }
@@ -373,6 +439,8 @@ function onChanged() {
 .pp-readings { display: flex; flex-direction: column; }
 .pp-locked { margin-top: 4px; }
 .pp-footer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
+/* 归档被拦时那句话要显眼 —— 否则灰按钮看着像坏了 */
+.pp-block-hint { color: var(--el-color-warning); }
 
 /* 「这周留下了什么」扁条 —— 一条，不占位置（与页头两把尺子的做法一致） */
 .pp-harvest {

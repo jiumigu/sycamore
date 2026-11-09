@@ -7,6 +7,11 @@
         <el-tag type="warning" class="module-tag">时间追踪</el-tag>
       </div>
       <div class="header-actions">
+        <!-- v3.63.7：报表已从侧边栏降为「按钮页」（偶尔打开、看完就关），
+             因此这里要有一条明确的回主入口的路 —— 任务清单才是这一块的主页面。 -->
+        <el-button type="primary" size="default" @click="$router.push('/temporal/tasks')">
+          <el-icon><ArrowLeft /></el-icon> 任务清单
+        </el-button>
         <el-select v-model="selectedYear" size="default" style="width: 130px" @change="refreshData">
           <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
         </el-select>
@@ -17,9 +22,6 @@
         <el-button size="default" @click="refreshData">
           <el-icon><Refresh /></el-icon>
           刷新
-        </el-button>
-        <el-button type="primary" size="default" @click="$router.push('/temporal/tasks')">
-          📋 任务清单
         </el-button>
         <el-button size="default" @click="$router.push('/temporal/mapping')">
           🧩 映射编辑器
@@ -117,38 +119,46 @@
       </el-col>
       <el-col :span="8">
         <el-card class="chart-card">
-          <template #header><span>💎 赎回时间面</span></template>
-          <div v-loading="redemptionLoading" class="redemption-mini">
-            <template v-if="redemption">
+          <template #header><span>🧭 当前阶段时间面</span></template>
+          <div v-loading="stageLoading" class="stage-mini">
+            <template v-if="ledger">
               <div class="rm-item">
-                <span class="rm-label">窗口剩余</span>
-                <span class="rm-value">{{ redemption.window?.remaining_days ?? '—' }} 天</span>
+                <span class="rm-label">阶段剩余</span>
+                <span class="rm-value">{{ ledger.range.remaining_days }} 天</span>
               </div>
               <div class="rm-item">
-                <span class="rm-label">赎回池余额</span>
-                <span class="rm-value">¥{{ formatAmount(redemption.pool?.balance ?? 0, 0) }}</span>
+                <span class="rm-label">时间覆盖率</span>
+                <span class="rm-value">{{ (ledger.time.coverage_rate * 100).toFixed(1) }}%</span>
               </div>
               <div class="rm-item">
-                <span class="rm-label">当前档位</span>
-                <span class="rm-value">{{ tierText }}</span>
+                <span class="rm-label">已记录</span>
+                <span class="rm-value">{{ ledger.time.covered_hours }}h</span>
               </div>
               <el-divider />
               <div class="rm-4color">
-                <div v-for="(h, k) in (redemption.time?.breakdown || {})" :key="k" class="rm-bar-row">
-                  <span class="rm-bar-label" :style="{ color: attrColor(k) }">{{ k }}</span>
-                  <span class="rm-bar-val">{{ Math.round(h) }}h</span>
+                <div v-for="(h, k) in ledger.time.hours" :key="k" class="rm-bar-row">
+                  <span class="rm-bar-label" :style="{ color: attrColor(String(k)) }">{{ k }}</span>
+                  <span class="rm-bar-val">{{ Number(h).toFixed(1) }}h</span>
                 </div>
-                <div v-if="!redemption.time?.breakdown" class="muted">暂停追踪中</div>
               </div>
             </template>
-            <el-empty v-else description="暂无赎回数据" :image-size="60" />
+            <!-- 🔴 两种「空」必须分开说：「还没有阶段」与「有阶段但账本取不到」
+                 是完全不同的结论 —— 一律印「暂无数据」，用户会去查阶段是不是丢了。 -->
+            <el-empty
+              v-else
+              :description="stageState === 'no_stage' ? '还没有进行中的阶段' : '阶段账本暂时取不到'"
+              :image-size="60"
+            />
+            <div v-if="stageState === 'unavailable' && stageHint" class="stage-hint">
+              {{ stageHint }}
+            </div>
           </div>
         </el-card>
       </el-col>
     </el-row>
 
-    <!-- CSV 导入弹窗 -->
-    <el-dialog v-model="importVisible" title="📂 导入数据" width="560px" @close="resetImport">
+    <!-- CSV 导入弹窗：两步 —— 先检查会撞上什么，再决定落哪些（v3.64.32） -->
+    <el-dialog v-model="importVisible" title="📂 导入数据" width="780px" @close="resetImport">
       <div class="import-body">
         <el-upload
           ref="uploadRef"
@@ -163,20 +173,73 @@
             选择 CSV 文件
           </el-button>
           <template #tip>
-            <div class="upload-tip">支持格式：.csv</div>
+            <div class="upload-tip">支持格式：.csv（ATracker 导出）</div>
           </template>
         </el-upload>
 
-        <el-divider />
-
-        <div class="import-rules">
-          <h4>📋 导入规则</h4>
+        <!-- 第一步：还没检查 -->
+        <div v-if="!preview" class="import-rules">
+          <h4>📋 落库前先看一眼</h4>
           <ul>
-            <li>按 ATracker 原始记录逐条导入：同一天同一任务的多段记录会各占一行，时长不再合并</li>
-            <li>去重键 =「任务名称 + 开始时间」；重复导入不会产生重复数据，只更新有变化的行</li>
-            <li>每行的时长就是该条记录的时长，正常情况下与「结束 − 开始」一致</li>
-            <li>任务自动映射到 L2 活动类型；未命中请到映射编辑器完善</li>
+            <li>先检查：这份文件里哪些行库里已经有了、哪些行与已有记录的时段相交</li>
+            <li>「相交」不一定是错 —— 大段「牛马工作」里再细分「代码编程」是合法记录</li>
+            <li>检查阶段一个字都不写库，可以反复看、换文件重看</li>
           </ul>
+        </div>
+
+        <!-- 第二步：检查结果 -->
+        <div v-else class="preview-block">
+          <el-alert
+            :title="previewSummaryText"
+            :type="preview.summary.needs_review ? 'warning' : 'success'"
+            :description="previewHintText"
+            show-icon
+            :closable="false"
+          />
+          <el-table
+            v-if="preview.rows.length"
+            :data="preview.rows"
+            size="small"
+            max-height="300"
+            class="preview-table"
+          >
+            <el-table-column label="行" width="52">
+              <template #default="{ row }">{{ row.row_no }}</template>
+            </el-table-column>
+            <el-table-column label="这次要导入的" min-width="196">
+              <template #default="{ row }">
+                <div class="pv-task">{{ row.task_name }}</div>
+                <div class="pv-time">
+                  {{ row.start_time }}<template v-if="row.end_time">–{{ row.end_time }}</template>
+                  · {{ row.hours }}h
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="与已有记录的关系" min-width="232">
+              <template #default="{ row }">
+                <el-tag size="small" :type="verdictTagType(row.verdict)">
+                  {{ verdictLabel(row.verdict) }}
+                </el-tag>
+                <div v-if="row.conflicts.length" class="pv-conflict">
+                  {{ row.conflicts[0].task_name }}
+                  {{ row.conflicts[0].start_time.slice(11) }}–{{ row.conflicts[0].end_time.slice(11) }}
+                  · 重叠 {{ row.conflicts[0].overlap_minutes }} 分钟<template
+                    v-if="row.conflict_total > 1"> · 共 {{ row.conflict_total }} 条</template>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="这次不导入" width="92" align="center">
+              <template #default="{ row }">
+                <el-checkbox
+                  :model-value="isSkipped(row.row_no)"
+                  @change="toggleSkip(row.row_no)"
+                />
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="pv-empty">
+            没有需要你判断的行 —— 直接确认导入即可。
+          </div>
         </div>
 
         <div v-if="importResult" class="import-result">
@@ -189,8 +252,17 @@
 
       <template #footer>
         <el-button @click="importVisible = false">取消</el-button>
-        <el-button type="primary" :loading="importing" :disabled="!selectedFile" @click="handleImport">
-          确认导入
+        <el-button
+          v-if="!preview"
+          type="primary"
+          :loading="checking"
+          :disabled="!selectedFile"
+          @click="handlePreview"
+        >
+          先检查
+        </el-button>
+        <el-button v-else type="primary" :loading="importing" @click="handleImport">
+          {{ importButtonText }}
         </el-button>
       </template>
     </el-dialog>
@@ -200,15 +272,19 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Upload, Clock, Document, Calendar, TrendCharts } from '@element-plus/icons-vue'
+import type { UploadInstance } from 'element-plus'
+import { Refresh, Upload, Clock, Document, Calendar, TrendCharts, ArrowLeft } from '@element-plus/icons-vue'
 import { useTemporalStore } from '../stores/temporalStore'
 import * as temporalApi from '@/modules/temporal/api/temporalApi'
-import * as redemptionApi from '@/modules/redemption/api/redemptionApi'
+// ⚠️ v3.64.20：「赎回时间面」这块改成读**当前阶段账本** —— 赎回期已并入自我运转，
+//    旧的 `/api/redemption/stats/` 端点整体下线（留着就会调一个 404）。
+import * as selfrunApi from '@/modules/selfrun/api/selfrunApi'
+import type { StageLedger } from '@/modules/selfrun/types/selfrunTypes'
 import * as echarts from 'echarts'
 import SunburstChart from '../components/SunburstChart.vue'
 import Weekly168Chart from '../components/Weekly168Chart.vue'
-import { formatAmount } from '@/shared/utils/format'
 import { ATTRIBUTION_COLOR_MAP } from '../types/temporalTypes'
+import type { ConflictRelation, ImportPreview } from '../types/temporalTypes'
 
 const store = useTemporalStore()
 
@@ -246,34 +322,150 @@ function attrColor(name: string | number) {
   return ATTRIBUTION_COLOR_MAP[String(name)] || '#94A3B8'
 }
 
-// ─── 导入 ───
+// ─── 导入（两步：预演 → 落库）───
 const importVisible = ref(false)
+/**
+ * el-upload 的实例 —— `resetImport` 必须靠它清掉**界面上那个文件名**。
+ * 🔴 只清 `selectedFile` 不够：弹窗重开时文件列表还挂着上一次的名字，
+ *    而按钮因为 `selectedFile === null` 是灰的 ⇒「文件明明选着，却点不动」。
+ */
+const uploadRef = ref<UploadInstance | null>(null)
 const selectedFile = ref<File | null>(null)
+const checking = ref(false)
 const importing = ref(false)
-const importResult = ref<{ inserted: number; updated: number; skipped: number; deduplicated?: number; unclassified?: number } | null>(null)
+/** 预演结果；`null` = 还没检查过（弹窗此时显示规则说明，按钮是「先检查」） */
+const preview = ref<ImportPreview | null>(null)
+/** 用户勾掉的行号 —— **CSV 物理行号**，原样回传后端；前端不得自己重算 */
+const skippedRows = ref<number[]>([])
+const importResult = ref<{ inserted: number; updated: number; skipped: number; deduplicated?: number; skipped_by_user?: number; unclassified?: number; batch?: string } | null>(null)
 const importError = ref('')
+
+/** 四类的显示词 —— 唯一一份。后端只给 key，中文不写在两个地方 */
+const VERDICT_LABEL: Record<ConflictRelation, string> = {
+  likely_dup: '看起来是重复',
+  review: '要你判断',
+  edge: '跨整点摩擦',
+  contained: '大段里的细分',
+}
+
+function verdictLabel(v: ConflictRelation): string {
+  return VERDICT_LABEL[v]
+}
+
+function verdictTagType(v: ConflictRelation): 'danger' | 'warning' | 'info' {
+  if (v === 'likely_dup') return 'danger'
+  if (v === 'review') return 'warning'
+  return 'info'
+}
+
+function isSkipped(rowNo: number): boolean {
+  return skippedRows.value.includes(rowNo)
+}
+
+function toggleSkip(rowNo: number) {
+  const i = skippedRows.value.indexOf(rowNo)
+  if (i >= 0) skippedRows.value.splice(i, 1)
+  else skippedRows.value.push(rowNo)
+}
+
+/**
+ * 预演汇总。注意**不说「将新增 N 条」**：预演不判「更新还是新增」
+ * （那是落库时按字段差异定的），编一个数出来就是假精确。
+ */
+const previewSummaryText = computed(() => {
+  const p = preview.value
+  if (!p) return ''
+  const s = p.summary
+  const parts = [`共 ${s.total} 行`]
+  if (s.already_exists) parts.push(`库里已有 ${s.already_exists} 行（会跳过或更新）`)
+  if (s.clean) parts.push(`干净 ${s.clean} 行`)
+  const hits = s.contained + s.edge + s.review + s.likely_dup
+  if (hits) parts.push(`与已有记录相交 ${hits} 行`)
+  return parts.join(' · ')
+})
+
+const previewHintText = computed(() => {
+  const p = preview.value
+  if (!p) return ''
+  const s = p.summary
+  const bits: string[] = []
+  if (s.contained || s.edge) {
+    bits.push(`${s.contained} 行是大段里的细分、${s.edge} 行是跨整点的几分钟摩擦 —— 都算正常，没列出来`)
+  }
+  if (s.needs_review) {
+    bits.push(`下面 ${s.needs_review} 行需要你看：「看起来是重复」指长度接近且几乎完全重合，最常见是同一件事在手机和电脑上各记了一次，默认已勾掉`)
+  } else {
+    bits.push('没有需要判断的行')
+  }
+  if (p.inner_duplicate) bits.push(`另有 ${p.inner_duplicate} 行在文件内部重复，落库时自动丢弃`)
+  return bits.join('；')
+})
+
+const importButtonText = computed(() => (skippedRows.value.length
+  ? `确认导入（跳过 ${skippedRows.value.length} 行）`
+  : '确认导入'))
 
 // 导入结果文案：把「全部跳过」这种情况讲清楚——它不是失败，而是这批记录库里已有一份
 const importSummary = computed(() => {
   const r = importResult.value
   if (!r) return ''
   const dedup = r.deduplicated ? `，CSV 内重复去重 ${r.deduplicated} 条` : ''
+  const mine = r.skipped_by_user ? `，你勾掉 ${r.skipped_by_user} 条` : ''
   const tail = r.unclassified ? `；${r.unclassified} 个任务待归类` : ''
   if (!r.inserted && !r.updated && r.skipped) {
-    return `本次没有新增：CSV 里 ${r.skipped} 条记录库里都已有${dedup}（重复导入不会产生重复数据）${tail}`
+    return `本次没有新增：CSV 里 ${r.skipped} 条记录库里都已有${mine}${dedup}（重复导入不会产生重复数据）${tail}`
   }
-  return `导入完成：新增 ${r.inserted} 条，更新 ${r.updated} 条，跳过 ${r.skipped} 条${dedup}${tail}`
+  // v3.64.33：把本批批次号摆出来 —— 否则「来源批次」弹窗里那 15 个批次，
+  // 用户没法把「我刚导的这批」跟其中某一行对上（只能凭日期猜）。
+  // ⚠️ 一条都没写进去时不显示：那批号在库里没有任何记录可归，显示出来反而是空指针。
+  const batch = r.batch ? `；本批记为 ${r.batch}` : ''
+  return `导入完成：新增 ${r.inserted} 条，更新 ${r.updated} 条，跳过 ${r.skipped} 条${mine}${dedup}${tail}${batch}`
 })
 
 function resetImport() {
   selectedFile.value = null
+  uploadRef.value?.clearFiles()   // 界面上的文件名也要清，否则重开时「选着却点不动」
+  preview.value = null
+  skippedRows.value = []
   importResult.value = null
   importError.value = ''
+  checking.value = false
   importing.value = false
 }
 
 function handleFileChange(file: any) {
   selectedFile.value = file.raw || null
+  // 🔴 换了文件 ⇒ 旧的检查结果与勾选全部作废。留着会拿**旧行号**去跳新文件的行，
+  //    轻则 400（后端会拒），重则跳过根本不该跳的那一行。
+  preview.value = null
+  skippedRows.value = []
+  importResult.value = null
+  importError.value = ''
+}
+
+async function handlePreview() {
+  if (!selectedFile.value || checking.value) return
+  checking.value = true
+  importError.value = ''
+  preview.value = null
+  importResult.value = null
+  try {
+    const res = await store.previewCsv(selectedFile.value)
+    if (res.error) {
+      importError.value = res.error
+      return
+    }
+    preview.value = res
+    // 「看起来是重复」默认勾掉：同一件事两端各记一次是最常见的形态。
+    // 「要你判断」**不预勾** —— 预勾等于替用户决定不要这份数据。
+    skippedRows.value = res.rows
+      .filter(r => r.verdict === 'likely_dup')
+      .map(r => r.row_no)
+  } catch (e: any) {
+    importError.value = e?.response?.data?.error || '检查失败'
+  } finally {
+    checking.value = false
+  }
 }
 
 async function handleImport() {
@@ -282,13 +474,17 @@ async function handleImport() {
   importError.value = ''
   importResult.value = null
   try {
-    const result = await store.importCsv(selectedFile.value)
+    const result = await store.importCsv(selectedFile.value, skippedRows.value)
     if (result.error) {
+      // 失败时**保留清单**：用户可以改勾选重试，不用再传一次文件
       importError.value = result.error
     } else {
       importResult.value = result
+      preview.value = null
+      skippedRows.value = []
       await refreshData()
       ElMessage.success(`导入完成：新增 ${result.inserted} 条，更新 ${result.updated} 条，跳过 ${result.skipped ?? 0} 条`
+        + (result.skipped_by_user ? `，你勾掉 ${result.skipped_by_user} 条` : '')
         + (result.deduplicated ? `，CSV 内重复去重 ${result.deduplicated} 条` : ''))
     }
   } catch (e: any) {
@@ -298,21 +494,41 @@ async function handleImport() {
   }
 }
 
-// ─── 赎回 mini 仪表 ───
-const redemption = ref<any>(null)
-const redemptionLoading = ref(false)
-const tierText = computed(() => {
-  const t = redemption.value?.tier
-  if (!t) return '—'
-  return t.current_tier || t.tier_name || t.name || '—'
-})
+// ─── 当前阶段时间面（v3.64.20：赎回期已并入自我运转）───
+// 🔴 两步取数，不是偷懒：账本接口要 stage id，而「哪一个是当前阶段」由后端定
+//    （`get_open_stage` 收窄为「有在跑 KPI 的叶子」）。前端自己按 start_date 排
+//    会取到长阶段 —— 长阶段没有 KPI，账本页面显示 0/0，看着像没数据。
+const ledger = ref<StageLedger | null>(null)
+const stageLoading = ref(false)
+/** `no_stage` = 确实没有在跑的阶段；`unavailable` = 有阶段但账本没取到 */
+const stageState = ref<'ok' | 'no_stage' | 'unavailable'>('ok')
+/** 取不到时把后端那句话原样带出来（例如「请先执行 migrate」），别自己编 */
+const stageHint = ref('')
 
-async function loadRedemption() {
-  redemptionLoading.value = true
+async function loadStageLedger() {
+  stageLoading.value = true
+  stageHint.value = ''
   try {
-    const res = await redemptionApi.getRedemptionStats()
-    redemption.value = res.data
-  } catch { redemption.value = null } finally { redemptionLoading.value = false }
+    // 🔴 `shape=long`：这一面讲的是「这段长路」的时间归因，
+    //    取的必须是长阶段。裸 `status=active` 会同时返回长阶段与小阶段，
+    //    靠「取第一条」拿对纯属排序巧合（起点相同按 -id，id 大的正好是长阶段）。
+    const stages = await selfrunApi.listStages({ status: 'active', shape: 'long' })
+    const stage = (stages.data || [])[0]
+    if (!stage) {
+      ledger.value = null
+      stageState.value = 'no_stage'
+      return
+    }
+    ledger.value = (await selfrunApi.getStageLedger(stage.id)).data.ledger
+    stageState.value = 'ok'
+  } catch (e: any) {
+    // 取不到就空态 —— 不许把上一份数留在屏上（那会让人以为这一期没变化）
+    ledger.value = null
+    stageState.value = 'unavailable'
+    stageHint.value = e?.response?.data?.detail || ''
+  } finally {
+    stageLoading.value = false
+  }
 }
 
 // ─── 月度趋势（L1 堆叠）───
@@ -373,7 +589,7 @@ async function refreshData() {
     store.fetchSunburst(year),
     store.fetchWeeklyStructure(year, 12),
     store.fetchCompleteness(year),
-    loadRedemption(),
+    loadStageLedger(),
     store.fetchStats(),
   ])
   nextTick(initTrendChart)
@@ -447,7 +663,7 @@ onMounted(async () => { await refreshData() })
     }
   }
 
-  .redemption-mini { padding: 4px 8px; width: 100%;
+  .stage-mini { padding: 4px 8px; width: 100%;
     .rm-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed #f0f0f0;
       .rm-label { font-size: 13px; color: #6B7280; }
       .rm-value { font-size: 16px; font-weight: 700; color: #1F2937; } }
@@ -456,6 +672,7 @@ onMounted(async () => { await refreshData() })
       .rm-bar-label { font-weight: 600; }
       .rm-bar-val { color: #4B5563; } }
     .muted { color: #b8bcc4; font-size: 13px; }
+    .stage-hint { padding: 0 8px 8px; font-size: 12px; color: #B45309; line-height: 1.7; }
   }
 
   .import-body {
@@ -464,6 +681,13 @@ onMounted(async () => { await refreshData() })
       h4 { margin: 0 0 6px; font-size: 13px; color: #1F2937; }
       ul { margin: 0; padding-left: 18px; font-size: 12px; color: #6B7280; line-height: 1.8; } }
     .import-result { margin-top: 12px; }
+    // 预演清单：两行式（任务名 + 时段），比单行挤九个字段好认
+    .preview-block { margin: 8px 0 4px; }
+    .preview-table { margin-top: 10px; }
+    .pv-task { font-size: 13px; font-weight: 600; color: #1F2937; }
+    .pv-time { font-size: 12px; color: #6B7280; margin-top: 2px; }
+    .pv-conflict { font-size: 12px; color: #6B7280; margin-top: 6px; line-height: 1.7; }
+    .pv-empty { margin-top: 10px; font-size: 13px; color: #6B7280; }
   }
 }
 </style>

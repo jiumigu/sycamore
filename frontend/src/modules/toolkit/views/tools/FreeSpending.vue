@@ -96,6 +96,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiErrorText } from '@/shared/utils/apiError'
 import { ref, reactive, onMounted } from 'vue'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -148,8 +149,8 @@ async function handleCalculate() {
     await createFreeSpending(payload)
     ElMessage.success('已保存')
     await fetchHistory()
-  } catch {
-    ElMessage.error('计算保存失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '计算保存失败'))
   } finally {
     saving.value = false
   }

@@ -1,4 +1,10 @@
 <template>
+  <!--
+    ⚠️ 已退役（v3.62.43）：总分解散后「各模块贡献占比」不再有意义，
+        总览页改用 `CoverageTable.vue`（覆盖率 + 强度）。
+        文件保留未删（删文件由人执行），所以这里仍需跟类型保持同步。
+        `percent` 字段（占全年的比例）已随总分一起移除 —— 别再往 ModulePoint 上补字段。
+  -->
   <div class="module-bars">
     <div
       v-for="item in sortedModules"
@@ -22,7 +28,11 @@
       <div class="bar-value">
         <span class="bar-points">{{ item.points }}</span>
         <span class="bar-unit" v-if="showUnit">点</span>
-        <span class="bar-percent" v-if="showPercent">({{ item.percent }}%)</span>
+        <span
+          v-if="zeroReasonText(item.zero_reason)"
+          class="bar-flag"
+          :title="zeroReasonHint(item.zero_reason)"
+        >{{ zeroReasonText(item.zero_reason) }}</span>
       </div>
     </div>
   </div>
@@ -31,14 +41,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ModulePoint } from '../types/summaryTypes'
+import { zeroReasonText, zeroReasonHint } from '../constants/zeroReason'
 
 const props = withDefaults(defineProps<{
   modules: ModulePoint[]
   showUnit?: boolean
-  showPercent?: boolean
 }>(), {
   showUnit: true,
-  showPercent: false,
 })
 
 defineEmits<{ 'view-module': [module: string] }>()
@@ -108,10 +117,23 @@ const sortedModules = computed(() => [...props.modules].sort((a, b) => b.points 
   display: flex;
   align-items: baseline;
   gap: 2px;
-  width: 80px;
+  min-width: 80px;
   text-align: right;
   justify-content: flex-end;
   flex-shrink: 0;
+}
+
+/* 原因码标记：说明「0 分」是取不到还是净流出，而不是假装它真是 0 */
+.bar-flag {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--el-fill-color);
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  align-self: center;
 }
 
 .bar-points {

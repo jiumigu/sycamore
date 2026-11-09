@@ -4,7 +4,7 @@
       <div class="pt-head">
         <span class="pt-title">按期修订</span>
         <span class="pt-hint">
-          每周 / 每月都可以在这里改**下一周、下一月**的目标 —— 改的是「那一期拿什么尺子」，
+          每周 / 每月都可以在这里改<b>下一周、下一月</b>的目标 —— 改的是「那一期拿什么尺子」，
           不动阶段默认值。
         </span>
         <span class="pt-spacer" />
@@ -39,7 +39,7 @@
           {{ payload.period_key }} · {{ payload.period_start }} ~ {{ lastDay(payload.period_end) }}
         </span>
         <span v-if="payload.is_past" class="pt-hint">
-          改过去那一期是「补记当时该拿的尺子」，会留痕；**已经归档**的期改不动（后端会拦）。
+          改过去那一期是「补记当时该拿的尺子」，会留痕；<b>已经归档</b>的期改不动（后端会拦）。
         </span>
         <span v-else-if="!payload.is_current" class="pt-hint">
           这一期还没到 —— 现在定好，到那一期就按这个算。
@@ -97,8 +97,8 @@
       </el-table>
 
       <div class="pt-foot">
-        「阶段默认」是这条 KPI 建阶段时定的值；「这一期生效」是**这一期真的会拿来判的**值。
-        归档之后，当时的「这一期生效」会被**冻进快照** —— 之后再改（如果有）不会回头改写已归档的结论。
+        「阶段默认」是这条 KPI 建阶段时定的值；「这一期生效」是<b>这一期真的会拿来判的</b>值。
+        归档之后，当时的「这一期生效」会被<b>冻进快照</b> —— 之后再改（如果有）不会回头改写已归档的结论。
       </div>
     </template>
 
@@ -212,8 +212,8 @@ async function cancelPlan(row: TargetRow) {
   if (!row.plan_id) return
   try {
     await ElMessageBox.confirm(
-      `「${row.name}」在 ${selectedKey.value} 的设定会被**删掉**（回到上一层口径：更早的「从这一期起」或阶段默认）。`
-      + `\n\n⚠️ 这一条是**配置**不是流水，所以是真的删除；留痕由变更记录承担。`,
+      `「${row.name}」在 ${selectedKey.value} 的设定会被删掉（回到上一层口径：更早的「从这一期起」或阶段默认）。`
+      + `\n\n⚠️ 这一条是配置不是流水，所以是真的删除；留痕由变更记录承担。`,
       '取消这一期的设定？',
       { confirmButtonText: '取消设定', cancelButtonText: '算了', type: 'warning' },
     )

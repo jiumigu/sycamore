@@ -51,10 +51,10 @@
           </el-radio-group>
           <div class="tp-hint">
             <template v-if="form.scope === 'single'">
-              `{{ periodLabel }}` 用完就完 —— 下一期自动落回默认（或更晚的那条「从这一期起」）。
+              <b>{{ periodLabel }}</b> 用完就完 —— 下一期自动落回默认（或更晚的那条「从这一期起」）。
             </template>
             <template v-else>
-              🔴 **它会一直生效**，直到出现一条更晚的「从这一期起」为止 ——
+              <b>它会一直生效</b>，直到出现一条更晚的「从这一期起」为止 ——
               不是只改这一期。想只改一期请选左边。
             </template>
           </div>

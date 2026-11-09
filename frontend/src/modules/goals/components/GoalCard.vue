@@ -97,6 +97,16 @@
         </div>
 
         <el-progress :percentage="goal.progress_percentage" :stroke-width="4" class="goal-progress-bar" />
+
+        <!-- 🔴 进度有两个数：手填的、账本算的。两个数并存时人一定相信更乐观的那个，
+             所以把来源与对照值一起摆出来（§114.3）。 -->
+        <div class="progress-source">
+          <span class="ps-tag">手填</span>
+          <span class="ps-ledger" :class="{ 'ps-gap': ledgerGap }">
+            账本 {{ goal.progress_ledger === null || goal.progress_ledger === undefined ? '—' : `${goal.progress_ledger}%` }}
+            <template v-if="ledgerGap">（差 {{ ledgerGap }} 个点）</template>
+          </span>
+        </div>
       </div>
 
       <!-- 展开区 -->
@@ -194,6 +204,14 @@ const dimensionTag = computed(() =>
   DIMENSION_OPTIONS.find(d => d.value === props.goal.life_dimension)
 )
 
+/** 手填进度与账本进度的差距（百分点）；无账本或差 < 10 点时返回 0（不打扰）。 */
+const ledgerGap = computed(() => {
+  const ledger = props.goal.progress_ledger
+  if (ledger === null || ledger === undefined) return 0
+  const diff = Math.abs(props.goal.progress_percentage - ledger)
+  return diff >= 10 ? diff : 0
+})
+
 const circumference = 2 * Math.PI * 16
 const ringCircumference = `${circumference}`
 const ringOffset = computed(() => circumference - (props.goal.progress_percentage / 100) * circumference)
@@ -262,6 +280,26 @@ function handleMilestoneToggle(m: Milestone, status: string) {
   }
 
   .goal-progress-bar { margin-top: 2px; }
+
+  .progress-source {
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--el-text-color-secondary);
+
+    .ps-tag {
+      padding: 0 4px;
+      border-radius: 3px;
+      background: var(--el-fill-color-light, #f4f4f5);
+      color: var(--el-text-color-secondary);
+    }
+
+    .ps-ledger {
+      &.ps-gap { color: var(--el-color-warning, #e6a23c); }
+    }
+  }
 
   .card-expanded {
     .actions-section { margin-top: 4px; }

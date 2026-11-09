@@ -4,8 +4,8 @@
          一条点不动的进度条，读起来就是「找不到配置 KPI 的入口」。 -->
     <el-steps :active="step" align-center finish-status="success" class="sw-steps">
       <el-step
-        v-for="(s, i) in STEPS"
-        :key="s.title"
+        v-for="(s, i) in steps"
+        :key="s.key"
         :title="s.title"
         :description="s.description"
         class="sw-step"
@@ -14,42 +14,101 @@
     </el-steps>
 
     <!-- ══ STEP 1 · 阶段 ══════════════════════════════════════ -->
-    <el-card v-if="step === 0" shadow="never" class="sw-card">
-      <el-form :model="form" label-width="110px" style="max-width: 560px">
-        <el-form-item label="阶段名称">
-          <el-input v-model="form.name" maxlength="100" placeholder="例如：离职后第一季" />
+    <el-card v-if="curKey === 'stage'" shadow="never" class="sw-card">
+      <el-form :model="form" label-width="110px" style="max-width: 620px">
+        <!-- 形态是**第一个要回答的问题**：它决定后面还有几步、写几张表。
+             从前它由「有没有 KPI」倒推 ⇒ 忘填 KPI 会静默得到一个永不判定的阶段。 -->
+        <el-form-item label="形态">
+          <div class="sw-shape">
+            <div
+              v-for="o in SHAPES" :key="o.value"
+              class="sw-shape-opt" :class="{ 'is-on': form.shape === o.value }"
+              @click="pickShape(o.value)"
+            >
+              <div class="sw-shape-name">{{ o.label }}</div>
+              <div class="sw-shape-desc">{{ o.desc }}</div>
+            </div>
+          </div>
         </el-form-item>
+
+        <el-form-item label="阶段名称">
+          <el-input v-model="form.name" maxlength="100" placeholder="例如：赎回第一季 / 三年赎回期" />
+        </el-form-item>
+
+        <el-form-item v-if="form.shape === 'child'" label="上级阶段">
+          <el-select
+            v-model="form.parent" placeholder="选一个长阶段" style="width: 100%"
+            @change="onParentChange"
+          >
+            <el-option
+              v-for="p in longStageOptions" :key="p.id"
+              :label="`${p.name}（${p.range_label}）`" :value="p.id"
+            />
+          </el-select>
+          <div class="sw-hint">
+            只有<b>长阶段</b>能挂在上面。最高两层 —— 小阶段不能再往下挂。
+          </div>
+          <!-- 🔴 「选不到不解释」= 死路：没有长阶段时直接给出口，让人在第一步就知道该先做什么 -->
+          <div v-if="!longStageOptions.length" class="sw-hint sw-hint-warn">
+            现在还没有可用的长阶段 —— 先回到「形态」里选<b>长阶段</b>建一段路，
+            再来这里切小阶段。
+          </div>
+          <div v-else-if="busyChild" class="sw-hint sw-hint-warn">
+            上级阶段下已有「{{ busyChild.name }}」在跑 —— 同一时间每个长阶段只能有一个小阶段，
+            先去<router-link :to="{ name: 'selfrun-summary' }" class="sw-link">收尾它</router-link>再回来开下一段。
+          </div>
+        </el-form-item>
+
         <el-form-item label="起点">
           <el-date-picker v-model="form.start_date" type="date" value-format="YYYY-MM-DD" />
           <div class="sw-hint">
-            默认给你填的是**本周一** —— 起点落在周中，第一个周期就是残缺周
-            （它参与展示、但不进阶段达标率）。
+            默认填<b>本周一</b>；选了上级阶段后会自动接到「上一段终点次日」。
+            起点落在周中，第一个周期就是残缺周（它参与展示、但不进阶段达标率）。
           </div>
         </el-form-item>
+
         <el-form-item label="终点（可选）">
           <el-date-picker v-model="form.end_date" type="date" value-format="YYYY-MM-DD" clearable />
-          <div class="sw-hint">不填就一直跑，直到你手动收尾。</div>
+          <div class="sw-hint">
+            {{ form.shape === 'child'
+              ? '小阶段的终点不能晚于上级阶段的终点。不填就一直跑，直到你手动收尾。'
+              : '不填就一直跑，直到你手动收尾。' }}
+          </div>
         </el-form-item>
+
+        <!-- 本金只在长阶段问：它是「这段路带多少钱」的**输入**，小阶段不重复带钱 -->
+        <el-form-item v-if="form.shape === 'long'" label="本金（可选）">
+          <el-input-number
+            v-model="form.principal" :min="0" :step="10000" :precision="2"
+            controls-position="right" style="width: 220px"
+          />
+          <div class="sw-hint">
+            余额 = 本金 + 中途注入 − 为自己净消耗。现在不填也行，账本页可以随时改；
+            不填时「撑到哪天」显示「还没设本金」，<b>不是 0</b>。
+          </div>
+        </el-form-item>
+
         <el-form-item label="备注">
           <el-input v-model="form.note" maxlength="200" placeholder="可选：这一阶段你想验证什么" />
         </el-form-item>
       </el-form>
 
       <el-alert
-        v-if="closedStages.length" type="info" :closable="false" show-icon
+        v-if="copyableStages.length" type="info" :closable="false" show-icon
         title="已经跑过一个阶段了？直接用它的配置开新的"
-        description="KPI 清单、口径、双档都会带过来 —— 但**目标值仍然是上一阶段的**，需要你逐条重设。历史结论不会复制。"
+        description="KPI 清单、口径、双档都会带过来 —— 但目标值仍然是上一阶段的，需要你逐条重设。历史结论不会复制。"
       />
-      <div v-if="closedStages.length" class="sw-copy">
+      <div v-if="copyableStages.length" class="sw-copy">
         <el-button size="small" @click="copyVisible = true">复制上一阶段配置</el-button>
       </div>
     </el-card>
 
+
     <!-- ══ STEP 2 · 选 KPI ════════════════════════════════════ -->
-    <el-card v-else-if="step === 1" shadow="never" class="sw-card">
+    <el-card v-else-if="curKey === 'pick'" shadow="never" class="sw-card">
       <div class="sw-section-head">
         <span>从模板库挑（当前 {{ templates.length }} 条：周 {{ weeklyTplCount }} + 月 {{ templates.length - weeklyTplCount }}）</span>
-        <span class="sw-hint">模板只是**起点** —— 抄进你的阶段之后就与模板脱钩了，以后改模板不会回头改你</span>
+        <span class="sw-hint">模板只是<b>起点</b> —— 抄进你的阶段之后就与模板脱钩了，以后改模板不会回头改你</span>
       </div>
       <div v-if="!store.templates.length" class="sw-empty-tpl">
         模板库是空的 —— 去「制定配置」上区的模板库加一条，或者直接
@@ -81,11 +140,11 @@
     </el-card>
 
     <!-- ══ STEP 3 · 配 KPI ════════════════════════════════════ -->
-    <el-card v-else-if="step === 2" shadow="never" class="sw-card">
+    <el-card v-else-if="curKey === 'config'" shadow="never" class="sw-card">
       <div class="sw-section-head">
         <span>逐条设定目标与底线</span>
         <span class="sw-hint">
-          每条都可以先**试算**：拿最近 11 个已过去的周期跑一遍，看看这个数在你的真实历史里落在哪
+          每条都可以先<b>试算</b>：拿最近 11 个已过去的周期跑一遍，看看这个数在你的真实历史里落在哪
         </span>
       </div>
 
@@ -171,13 +230,23 @@
     <el-card v-else shadow="never" class="sw-card">
       <div class="sw-section-head"><span>确认一下，然后生效</span></div>
       <el-descriptions :column="2" border size="small">
+        <el-descriptions-item label="形态">{{ shapeLabel }}</el-descriptions-item>
+        <el-descriptions-item label="上级阶段">
+          {{ form.shape === 'child' ? (parentStage?.name ?? '（未选）') : '—（顶级）' }}
+        </el-descriptions-item>
         <el-descriptions-item label="阶段">{{ form.name || '（未命名）' }}</el-descriptions-item>
         <el-descriptions-item label="起点">{{ form.start_date }}</el-descriptions-item>
         <el-descriptions-item label="终点">{{ form.end_date || '不设（手动收尾）' }}</el-descriptions-item>
-        <el-descriptions-item label="KPI 条数">{{ drafts.length }}（周 {{ weeklyCount }} · 月 {{ drafts.length - weeklyCount }}）</el-descriptions-item>
+        <el-descriptions-item label="KPI 条数">
+          <template v-if="form.shape === 'long'">0（长阶段只汇总，不跑 KPI）</template>
+          <template v-else>{{ drafts.length }}（周 {{ weeklyCount }} · 月 {{ drafts.length - weeklyCount }}）</template>
+        </el-descriptions-item>
+        <el-descriptions-item v-if="form.shape === 'long'" label="本金">
+          {{ form.principal > 0 ? `¥${form.principal}` : '不填（账本页随时可改）' }}
+        </el-descriptions-item>
       </el-descriptions>
 
-      <el-table :data="drafts" size="small" class="sw-confirm-table">
+      <el-table v-if="form.shape !== 'long'" :data="drafts" size="small" class="sw-confirm-table">
         <el-table-column prop="name" label="KPI" min-width="110" />
         <el-table-column label="周期" width="56">
           <template #default="{ row }">{{ row.period_type === 'weekly' ? '周' : '月' }}</template>
@@ -195,8 +264,10 @@
 
       <el-alert
         type="info" :closable="false" show-icon class="sw-write-note"
-        title="点「生效」会写这三张表"
-        description="selfrun_stage（阶段 1 行）· selfrun_metric（KPI 各 1 行）· selfrun_metric_log（**创建也算一次配置变更**，各 1 行）。一个事务里写完；任何一条校验不过就整批不落库。"
+        :title="form.shape === 'long' ? '点「生效」会写一张表' : '点「生效」会写这三张表'"
+        :description="form.shape === 'long'
+          ? 'selfrun_stage（阶段 1 行）。长阶段只做账本与汇总 —— 周/月的判定留给它下面的小阶段。'
+          : 'selfrun_stage（阶段 1 行）· selfrun_metric（KPI 各 1 行）· selfrun_metric_log（创建也算一次配置变更，各 1 行）。一个事务里写完；任何一条校验不过就整批不落库。'"
       />
     </el-card>
 
@@ -207,8 +278,8 @@
       <el-button v-if="step > 0" @click="step--">上一步</el-button>
       <span v-if="navHint" class="sw-nav-hint">{{ navHint }}</span>
       <span class="sw-nav-spacer" />
-      <el-button v-if="step < 3" type="primary" @click="next">
-        下一步 · {{ STEPS[step + 1].title }}
+      <el-button v-if="step < steps.length - 1" type="primary" @click="next">
+        下一步 · {{ steps[step + 1].title }}
       </el-button>
       <el-button v-else type="primary" :loading="submitting" @click="submit">生效</el-button>
     </div>
@@ -217,7 +288,7 @@
     <el-dialog v-model="copyVisible" title="复制哪个阶段的配置？" width="460px">
       <el-radio-group v-model="copyFromId" class="sw-copy-list">
         <el-radio v-for="s in closedStages" :key="s.id" :value="s.id" class="sw-copy-item">
-          {{ s.name }}（{{ s.start_date }} ~ {{ s.end_date ?? '—' }}）
+          {{ s.name }}（{{ s.range_label }}）
         </el-radio>
       </el-radio-group>
       <el-alert
@@ -235,6 +306,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import * as api from '../api/selfrunApi'
 import { useSelfRunStore } from '../stores/selfrunStore'
@@ -261,17 +333,44 @@ interface DraftMetric {
 
 const emit = defineEmits<{ (e: 'created'): void }>()
 
-/** 四步的标题与说明：步骤条与「下一步」按钮文案都念这一份，不写两遍 */
-const STEPS = [
-  { title: '阶段', description: '叫什么、从哪天起' },
-  { title: '选 KPI', description: '从模板库挑' },
-  { title: '配 KPI', description: '设目标和底线' },
-  { title: '生效', description: '写进三张表' },
+/** 三种形态。**必须由创建者显式选** —— 后端也按显式声明判，两边同一把尺子 */
+type Shape = 'leaf' | 'child' | 'long'
+
+const SHAPES: { value: Shape; label: string; desc: string }[] = [
+  { value: 'leaf', label: '独立阶段', desc: '自己跑 KPI，不挂在谁下面' },
+  { value: 'child', label: '长阶段下的小阶段', desc: '长阶段只汇总，KPI 挂在这一层' },
+  { value: 'long', label: '长阶段（只汇总）', desc: '钱 / 时间 / 作品，不跑 KPI' },
 ]
 
+const SHAPE_LABEL: Record<Shape, string> = {
+  leaf: '独立阶段（自己跑 KPI）',
+  child: '长阶段下的小阶段',
+  long: '长阶段（只汇总）',
+}
+
+/** 四步的标题与说明：步骤条与「下一步」按钮文案都念这一份，不写两遍 */
+type StepKey = 'stage' | 'pick' | 'config' | 'confirm'
+
+const STAGE_STEP = { key: 'stage' as StepKey, title: '阶段', description: '形态、叫什么、从哪天起' }
+const PICK_STEP = { key: 'pick' as StepKey, title: '选 KPI', description: '从模板库挑' }
+const CONFIG_STEP = { key: 'config' as StepKey, title: '配 KPI', description: '设目标和底线' }
+const CONFIRM_STEP = { key: 'confirm' as StepKey, title: '生效', description: '写进库' }
+
+/**
+ * 长阶段只有两步：它不配 KPI（配了后端 400），中间两步走过去也是空的。
+ * 🔴 步骤条**必须跟着形态变**，不能固定四步 —— 一步永远走不到的进度条，
+ *    读起来就是「还有配置没填」。
+ */
+const steps = computed(() =>
+  form.shape === 'long' ? [STAGE_STEP, CONFIRM_STEP] : [STAGE_STEP, PICK_STEP, CONFIG_STEP, CONFIRM_STEP],
+)
+
 const store = useSelfRunStore()
+const route = useRoute()
 
 const step = ref(0)
+/** 当前这一步「是什么」（不是第几步）。形态会改步数，按序号判会指错那一屏 */
+const curKey = computed<StepKey>(() => steps.value[step.value]?.key ?? 'stage')
 /**
  * 模板列表**读 store**（不自己拉一份）。
  *
@@ -286,6 +385,8 @@ const previews = reactive<Record<number, PreviewResult | null>>({})
 const previewingIdx = ref(-1)
 const submitting = ref(false)
 const closedStages = ref<SelfRunStage[]>([])
+/** 全部阶段（含长阶段与小阶段）—— 判「父阶段下有没有在跑的小阶段」要两边都在手上 */
+const stagesAll = ref<SelfRunStage[]>([])
 const copyVisible = ref(false)
 const copyFromId = ref<number | null>(null)
 const copying = ref(false)
@@ -295,14 +396,102 @@ const form = reactive({
   start_date: '',
   end_date: '' as string | null,
   note: '',
+  shape: 'leaf' as Shape,
+  /** 上级阶段 id（仅 `shape === 'child'` 时有值） */
+  parent: null as number | null,
+  /** 本金（仅 `shape === 'long'` 时问） */
+  principal: 0,
 })
+
+/** 复制配置只对**带过 KPI 的已收尾阶段**有意义 —— 长阶段复制出来是空壳 */
+const copyableStages = computed(() => closedStages.value.filter(s => s.metric_count > 0))
+
+/** 能挂小阶段的长阶段：不是长阶段的不列，已收尾的也不列（后端会 400） */
+const longStageOptions = computed(() =>
+  stagesAll.value.filter(s => s.is_long_stage && s.status !== 'closed'),
+)
+
+const parentStage = computed(() =>
+  stagesAll.value.find(s => s.id === form.parent) ?? null,
+)
+
+/** 选中的父阶段下已经在跑的那个小阶段（有 ⇒ 开不了第二个，得先收尾） */
+const busyChild = computed(() => {
+  // 🔴 没选父阶段时**不能**按 `parent === null` 去找：
+  //    长阶段自己的 `parent` 就是 null，会被当成「父下那个在跑的小阶段」，
+  //    于是提示变成「上级阶段下已有「三年赎回期」在跑」—— 自己挡自己。
+  if (!form.parent) return null
+  return stagesAll.value.find(
+    s => s.parent === form.parent && (s.status === 'active' || s.status === 'paused'),
+  ) ?? null
+})
+
+const shapeLabel = computed(() => SHAPE_LABEL[form.shape])
+
+const p2 = (n: number) => String(n).padStart(2, '0')
+
+/** 本地日期串。🔴 不用 `toISOString()` —— 那是 UTC，在 UTC+8 的凌晨会差一天 */
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`
+}
+
+function todayStr(): string {
+  return ymd(new Date())
+}
+
+/** 日期串 +N 天。按**本地年月日**构造：`new Date('2026-11-01')` 会被当成 UTC 零点 */
+function addDays(iso: string, n: number): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return ymd(new Date(y, m - 1, d + n))
+}
 
 /** 本周一 —— 起点对齐周一，避免第一个周期天生是残缺周。 */
 function thisMonday(): string {
   const d = new Date()
   const day = (d.getDay() + 6) % 7          // 周一 = 0
   d.setDate(d.getDate() - day)
-  return d.toISOString().slice(0, 10)
+  return ymd(d)
+}
+
+/**
+ * 换形态 ⇒ 步骤条跟着变，当前步可能指到**不存在的那一步**（四步 → 两步）。
+ * 🔴 必须夹回去：不夹就是 `steps[step] === undefined` ⇒ `curKey` 落到 'stage'，
+ *    而模板四屏全不命中 ⇒ 整屏空白，且**不报错**。
+ */
+function pickShape(v: Shape) {
+  form.shape = v
+  if (v === 'child') {
+    // 只有一个长阶段时自动选中：让人再去一个不可能选错的列表里挑一次，只会多一次错的机会。
+    // ⚠️ 必须在这里也调 `onParentChange()` —— 否则起点还停在「本周一」，
+    //    而上一段的终点可能在未来（起点落在上一段里，两段区间重叠）。
+    if (form.parent === null && longStageOptions.value.length === 1) {
+      form.parent = longStageOptions.value[0].id
+      onParentChange()
+    }
+  } else {
+    form.parent = null
+  }
+  if (step.value > steps.value.length - 1) step.value = steps.value.length - 1
+}
+
+/**
+ * 换上级阶段 ⇒ 起点给一个「接上一段」的建议值。
+ * 只在**换父阶段这个动作**里动起点：用户自己填的起点不许被悄悄覆盖。
+ */
+function onParentChange() {
+  const p = parentStage.value
+  if (!p) return
+  const ends = stagesAll.value
+    .filter(s => s.parent === p.id && s.end_date)
+    .map(s => s.end_date as string)
+    .sort()
+  const lastEnd = ends[ends.length - 1]
+  // 父下最晚一个终点 + 1 天；不早于今天 —— 把起点放在过去会立刻生成一串残缺周
+  const base = lastEnd ? addDays(lastEnd, 1) : todayStr()
+  const today = todayStr()
+  form.start_date = base < today ? today : base
+  // 换了父阶段，旧终点可能越界 —— 清掉，别留一个后端一定会拒的值
+  form.end_date = null
 }
 
 onMounted(async () => {
@@ -314,30 +503,66 @@ onMounted(async () => {
     ElMessage.error('加载模板库失败')
   }
   try {
-    const res = await api.listStages({ status: 'closed' })
-    closedStages.value = res.data
+    const res = await api.listStages()
+    stagesAll.value = res.data
+    closedStages.value = res.data.filter(s => s.status === 'closed')
   } catch {
+    stagesAll.value = []
     closedStages.value = []
+  }
+  // 从长阶段账本「+ 开下一个小阶段」进来：预填形态与父阶段
+  const q = Number(route.query.parent)
+  if (Number.isFinite(q) && q > 0) {
+    form.shape = 'child'
+    form.parent = q
+    onParentChange()
+  } else if (longStageOptions.value.length) {
+    // 🔴 有长阶段开着时，「独立阶段」根本建不了（顶级已有一个 open，后端直接拒）——
+    //    默认落到唯一可行的那条路上，省得人填完一屏才撞墙。
+    form.shape = 'child'
+    form.parent = longStageOptions.value[0].id
+    onParentChange()
   }
 })
 
 const weeklyCount = computed(() => drafts.value.filter(d => d.period_type === 'weekly').length)
 
 /**
- * 第 i 步「过不去」的原因（null = 能过）。
+ * 这一步「过不去」的原因（null = 能过）。参数是**步骤的 key**，不是序号 ——
+ * 形态会让步数从四步变成两步，序号会指到别的屏。
  *
  * 🔴 同一份判据喂三个地方：按钮的拦截、步骤条的拦截、导航栏那行小字 ——
  *    写三遍就一定会有一天只改了其中一处（而且不报错）。
  * 🔴 校验的是**最终生效值**：两条数都在时，目标不能比底线松。
  *    某条只填了目标、没填底线是**合法**的 —— 那是「没有底线」，不是「填错了」。
  */
-function blockReasonAt(i: number): string | null {
-  if (i === 0) {
+function blockReasonAt(key: StepKey): string | null {
+  if (key === 'stage') {
     if (!form.name.trim()) return '先给这个阶段起个名字'
+    if (form.shape === 'child') {
+      if (!form.parent) return '先选这个小阶段挂在哪个长阶段下'
+      if (!longStageOptions.value.length) return '还没有可挂的长阶段 —— 先把形态改成「长阶段」建一段路'
+      // 🔴 同一 parent 下只允许一个 open（后端也判）。这里先说清楚，
+      //    而不是让人填完一屏、点「生效」才被 400 挡住。
+      if (busyChild.value) {
+        return `上级阶段下已有「${busyChild.value.name}」在跑 —— 先收尾它才能开下一段`
+      }
+    }
     if (!form.start_date) return '先选一个起点（默认已填本周一）'
+    if (form.shape === 'child' && parentStage.value) {
+      if (form.start_date < parentStage.value.start_date) {
+        return `起点不能早于上级阶段的起点 ${parentStage.value.start_date}`
+      }
+      if (parentStage.value.end_date && form.start_date > parentStage.value.end_date) {
+        return `起点不能晚于上级阶段的终点 ${parentStage.value.end_date}`
+      }
+      if (parentStage.value.end_date && form.end_date && form.end_date > parentStage.value.end_date) {
+        return `终点不能晚于上级阶段的终点 ${parentStage.value.end_date}`
+      }
+    }
     return null
   }
-  if (i === 1) {
+  if (key === 'pick') {
     // 🔴 这一步要判的是「**勾选**了几条」，不是「草稿里有几条」——
     //    `drafts` 要等离开这一步（`watch(step)` → `syncDrafts()`）才被填上，
     //    在第二步读 `drafts.length` 永远是 0 ⇒ 勾了一屏也会说「一条都没挑」，
@@ -350,7 +575,7 @@ function blockReasonAt(i: number): string | null {
     }
     return null
   }
-  if (i === 2) {
+  if (key === 'config') {
     const nameless = drafts.value.find(d => !d.name.trim())
     if (nameless) return '有个 KPI 还没填名称'
     const loose = drafts.value.find((d) => {
@@ -372,14 +597,14 @@ function blockReasonAt(i: number): string | null {
 }
 
 /** 常驻小字：现在还差什么。不差就不渲染（不占地方，也不说废话） */
-const navHint = computed(() => blockReasonAt(step.value))
+const navHint = computed(() => blockReasonAt(curKey.value))
 
 /**
  * 下一步：缺东西**不拦按钮**，点了才说。
  * 🔴 出口控件不得关闭自己 —— 恒灰的按钮不解释自己，读起来就是「没入口」。
  */
 function next() {
-  const miss = blockReasonAt(step.value)
+  const miss = blockReasonAt(curKey.value)
   if (miss) {
     ElMessage.warning(miss)
     return
@@ -395,7 +620,7 @@ function gotoStep(i: number) {
     return
   }
   for (let j = step.value; j < i; j++) {
-    const miss = blockReasonAt(j)
+    const miss = blockReasonAt(steps.value[j].key)
     if (miss) {
       step.value = j
       ElMessage.warning(miss)
@@ -529,7 +754,7 @@ async function runPreview(i: number) {
 }
 
 async function doCopy() {
-  const src = closedStages.value.find(s => s.id === copyFromId.value)
+  const src = copyableStages.value.find(s => s.id === copyFromId.value)
   if (!src || !form.name.trim()) {
     ElMessage.warning('先在上面填好新阶段的名称')
     return
@@ -552,30 +777,42 @@ async function doCopy() {
 async function submit() {
   submitting.value = true
   try {
+    const isLong = form.shape === 'long'
     const res = await api.createStage({
       name: form.name.trim(),
       start_date: form.start_date,
       end_date: form.end_date || null,
       note: form.note,
-      metrics: drafts.value.map(d => ({
-        template_key: d.template_key,
-        name: d.name,
-        period_type: d.period_type,
-        unit: d.unit,
-        direction: d.direction,
-        goal_value: d.goal_value,
-        floor_value: d.floor_value,
-        goal_why: d.goal_why,
-        floor_why: d.floor_why,
-        agg: d.agg,
-        source_kind: d.source_kind,
-        source_config: d.source_config,
-      })),
+      // 形态**显式声明**：后端据此判「该不该有 KPI」，不靠有没有 metrics 猜
+      is_long_stage: isLong,
+      parent: form.shape === 'child' ? form.parent : null,
+      // 🔴 长阶段**不带 metrics 键**（连空数组都不带）：后端见到非空就 400，
+      //    而「带了空数组」与「没带」在别处会被读成两种意思，留一种最省心。
+      ...(isLong
+        ? { ledger_config: { pool_principal: Number(form.principal) || 0 } }
+        : {
+          metrics: drafts.value.map(d => ({
+            template_key: d.template_key,
+            name: d.name,
+            period_type: d.period_type,
+            unit: d.unit,
+            direction: d.direction,
+            goal_value: d.goal_value,
+            floor_value: d.floor_value,
+            goal_why: d.goal_why,
+            floor_why: d.floor_why,
+            agg: d.agg,
+            source_kind: d.source_kind,
+            source_config: d.source_config,
+          })),
+        }),
     })
     const w = res.data.written
-    ElMessage.success(
-      `已生效 —— 写了 ${Object.entries(w).map(([k, v]) => `${k} ${v} 行`).join(' · ')}`,
-    )
+    // 只念**真写了**的行数：长阶段那三张表里有两张是 0 行，念出来像出了错
+    const parts = Object.entries(w)
+      .filter(([, v]) => Number(v) > 0)
+      .map(([k, v]) => `${k} ${v} 行`)
+    ElMessage.success(parts.length ? `已生效 —— 写了 ${parts.join(' · ')}` : '已生效')
     emit('created')
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail ?? '生效失败')
@@ -588,8 +825,10 @@ async function submit() {
 // 把模板值抄进草稿之后，草稿与模板就脱钩了（模板以后改了不影响你已经配好的）。
 // 已经是第二次进这一步的条目按「模板 key + 名称」保留原编辑，不覆盖你的输入。
 watch(step, (v, old) => {
-  if (old === 1 && v === 2) syncDrafts()
-  if (v === 3) {
+  const from = steps.value[old]?.key
+  const to = steps.value[v]?.key
+  if (from === 'pick' && to === 'config') syncDrafts()
+  if (to === 'confirm') {
     // 进最后一步时把「试算面板」收起来，避免被误读成最终结果
     Object.keys(previews).forEach(k => delete previews[Number(k)])
   }
@@ -620,7 +859,28 @@ defineExpose({ focusStart })
 .sw-step:hover :deep(.el-step__title) { color: var(--el-color-primary); }
 .sw-card { border-radius: 10px; }
 .sw-hint { font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.6; }
+.sw-hint-warn { color: var(--el-color-warning); margin-top: 4px; }
+.sw-link { color: var(--el-color-primary); text-decoration: none; }
+.sw-link:hover { text-decoration: underline; }
 .sw-muted { font-size: 12px; color: var(--el-text-color-regular); }
+
+/* ── 形态三选一 ────────────────────────────────────────────────
+   形态决定「后面还有几步」与「写几张表」，所以它排在名称前面。
+   用卡片不用 radio：每个选项都要能带上半句解释，否则「长阶段」四个字
+   读不出「它不跑 KPI」。 */
+.sw-shape { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.sw-shape-opt {
+  padding: 10px 12px; cursor: pointer; border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  transition: border-color .15s, background .15s;
+}
+.sw-shape-opt:hover { border-color: var(--el-color-primary-light-5); }
+.sw-shape-opt.is-on {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.sw-shape-name { font-weight: 600; font-size: 13px; }
+.sw-shape-desc { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 2px; line-height: 1.5; }
 
 .sw-section-head {
   display: flex; align-items: baseline; justify-content: space-between;

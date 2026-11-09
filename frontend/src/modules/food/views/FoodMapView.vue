@@ -1,17 +1,21 @@
 <template>
   <div class="food-dashboard">
-    <!-- 归档提示（仅在当前仍处于归档状态时显示，重新启用后自动消失） -->
-    <el-alert v-if="ready && isArchived" title="此模块已归档，随时可重新启用" type="info" show-icon :closable="false" class="archive-banner" />
-    <!-- 页面头部 -->
+    <!-- 页面头部：v3.63.8 起不再占菜单项，是「旅行足迹」的页内子页 ⇒ 必须有回程，
+         否则用户进来只能靠浏览器后退（菜单项已撤，没有别的出口） -->
     <div class="page-header">
       <div class="page-title">
         <span class="title-icon">🍜</span>
         <h1>美食地图</h1>
       </div>
-      <el-button type="primary" @click="openAddDialog">
-        <el-icon><Plus /></el-icon>
-        添加美食
-      </el-button>
+      <div class="header-actions">
+        <el-button @click="$router.push('/travel')">
+          <el-icon><ArrowLeft /></el-icon> 旅行足迹
+        </el-button>
+        <el-button type="primary" @click="openAddDialog">
+          <el-icon><Plus /></el-icon>
+          添加美食
+        </el-button>
+      </div>
     </div>
 
     <!-- 统计卡片 -->
@@ -142,14 +146,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Search, Picture } from '@element-plus/icons-vue'
+import { Plus, Search, Picture, ArrowLeft } from '@element-plus/icons-vue'
 import { useFoodStore } from '../stores/foodStore'
 import { CATEGORY_OPTIONS, TASTE_LEVELS } from '../types/foodTypes'
 import type { FoodFormData, FoodRecord, FoodRecordList } from '../types/foodTypes'
-import { useMenuArchive } from '@/shared/composables/useMenuArchive'
-
-// 归档横幅的判据唯一实现在 useMenuArchive（存档态含用户偏好，非写死的 defaultArchived）
-const { ready, isArchived } = useMenuArchive('food')
 import * as foodApi from '../api/foodApi'
 import { formatAmount } from '@/shared/utils/format'
 import FoodStatsCards from '../components/stats/FoodStatsCards.vue'
@@ -272,6 +272,13 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+
+  // 回程 + 主操作收在右侧一组：space-between 只留「标题 / 按钮组」两段
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
   .page-title {
     display: flex;

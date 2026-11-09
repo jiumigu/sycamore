@@ -4,32 +4,63 @@
     <div class="page-header">
       <div class="header-left">
         <!-- 🔴 子页面里给一条**回得去**的路（页头最左）。
-             少了它，点进「KPI 模板库」之后就只剩侧边栏 —— 而侧边栏会把
-             你送回「制定配置」的**主视图**，看着像「子页丢了」。 -->
+             v3.64.0 起自我运转不占侧边栏菜单项（入口是页头那个下拉），
+             所以这条回程**更要紧**：少了它，点进「KPI 模板库」之后页面上
+             再没有任何一处能回到「制定配置」的主视图，看着像「子页丢了」。 -->
         <el-button v-if="isSetupSub" link class="sh-back" @click="goSetupView('kpi')">
           <el-icon><ArrowLeft /></el-icon>制定配置
         </el-button>
-        <!-- 🔴 标题**永远跟当前子页走**（与侧边栏菜单项同字）。
-             曾经在没有阶段时回落成模块名「自我运转」，结果是三个菜单点下去
+        <!-- 🔴 标题**永远跟当前子页走**（与页签、页头入口下拉同字）。
+             曾经在没有阶段时回落成模块名「自我运转」，结果是几个入口点下去
              连标题都一样 —— 看着就像「点哪个都一样」。 -->
         <h1 class="page-title">{{ pageTitle }}</h1>
-        <el-tag v-if="stage" size="small" :type="stageTagType" effect="plain">{{ stage.status_display }}</el-tag>
-        <span v-if="stage" class="sh-sub">
-          {{ stage.name }} · 第 {{ stage.elapsed_days }} 天 · {{ stage.metric_count }} 条 KPI
+        <!-- ⚠️ 账本页不显示这个状态标签：页头此刻说的是要看的那个**长阶段**，
+             而 `stage` 指的是「正在跑的那个小阶段」—— 两者不是一回事，
+             并排放在一行会被读成同一个阶段的两个状态。长阶段自己的状态在账本卡里。 -->
+        <el-tag v-if="stage && !isLedger" size="small" :type="stageTagType" effect="plain">{{ stage.status_display }}</el-tag>
+        <!-- 🔴 区间必须在页头：它下面每一块的数字都落在这一段里
+             （「计入 2 周 + 2 残缺」就是阶段起于周中造成的）。
+             曾经这里只印 `days_label`，而那时它的未开始分支是「未开始 · 11-01 起」
+             —— 整页**只有起点、没有终点**。 -->
+        <span v-if="stage && !isLedger" class="sh-sub">
+          {{ stage.name }} · {{ stage.range_label }} · {{ stage.days_label }} · {{ stage.metric_count }} 条 KPI
         </span>
       </div>
       <div class="header-actions">
-        <el-button v-if="heartbeat?.message" text size="small" @click="doHeartbeat">
+        <el-button v-if="heartbeat?.message && !isLedger" text size="small" @click="doHeartbeat">
           <el-icon><Bell /></el-icon>{{ heartbeat.message }}
         </el-button>
-        <el-button v-if="stage && stage.status === 'active'" size="small" @click="pauseVisible = true">
+        <!-- 暂停/恢复是对「正在跑的那个阶段」的动作，账本页不提供：那页不碰 KPI，也不碰阶段状态 -->
+        <el-button v-if="!isLedger && stage && stage.status === 'active'" size="small" @click="pauseVisible = true">
           暂停阶段
         </el-button>
-        <el-button v-else-if="stage && stage.status === 'paused'" size="small" type="success" @click="doResume">
+        <el-button v-else-if="!isLedger && stage && stage.status === 'paused'" size="small" type="success" @click="doResume">
           恢复
         </el-button>
         <el-button size="small" @click="reload">刷新</el-button>
       </div>
+    </div>
+
+    <!-- ══ 阶段账本（长阶段详情页）══════════════════════════════════
+         整页只讲一件事：钱 / 时间 / 作品 / 它下面的小阶段。
+         🔴 它**不是页签里的第六格**：长阶段不产生 `SelfRunPeriod`，所以这一页
+            没有「本周 / 本月 / 按期修订 / 归档周期」—— 那四件事一件都做不了，
+            摆出页签只会让人点进去看到空。
+         ⚠️ 与上面那 8 条路由指向同一个组件，但走的是 `v-if` 的另一支：
+            页签整体不渲染（见下方 `<template v-else>`）。 -->
+    <StageLedgerPanel v-if="isLedger" ref="ledgerRef" />
+
+    <template v-else>
+    <!-- ── 父级面包屑（阶段分两层之后，v3.64.19）───────────────
+         🔴 走**显式路由**，禁 `router.back()`：从页头下拉直接进来时没有历史，
+            `back()` 会把人送出模块（本项目老坑）。
+         ⚠️ 只有在 `parent` 存在时才出现 —— 顶级阶段没有上级，
+            印一句「属于：无」比不印更糊涂。 -->
+    <div v-if="stage?.parent" class="sh-parent">
+      <el-button link size="small" class="sh-parent-back" @click="goParent">
+        <el-icon><ArrowLeft /></el-icon>返回「{{ stage.parent_name }}」
+      </el-button>
+      <span class="sh-parent-hint">这段路属于一个长阶段 —— 钱 / 时间 / 作品在那页汇总，这一页管 KPI</span>
     </div>
 
     <!-- ── 暂停横幅（休耕不是失败，用中性色）───────────────── -->
@@ -59,13 +90,13 @@
     </template>
 
     <!-- ══ 生命周期页签 ═══════════════════════════════════════
-         页签与路由**同源**（`route.name` 的后缀）：点侧边栏进来，
+         页签与路由**同源**（`route.name` 的后缀）：从页头入口下拉进来，
          页签自己就停在正确那一格 —— 另存一份 ref 的话迟早分家，
-         从侧边栏点「本月状态」进来却还停在上次点的「本周状态」，看着就像点错了。
+         从下拉点「本月状态」进来却还停在上次点的「本周状态」，看着就像点错了。
 
          🔴 **每一格都是一个真页面**：没有阶段时，只有「制定配置」渲染向导，
             其余各页各自说清自己为什么空（见 EmptyPane），
-            不让三项菜单落到同一屏上。
+            不让几个入口落到同一屏上。
          ⚠️ `lazy`：面板首次被切到才挂载（之后常驻，状态不丢）——
             否则一进页面 6 个面板会把接口全打一遍。
     -->
@@ -156,9 +187,11 @@
               <template #title>
                 <div class="sh-collapse-head">
                   <span class="sh-collapse-title">
-                    {{ stage ? '用别的配置开一个新阶段' : '从零开一个新阶段（四步）' }}
+                    {{ stage ? '开一个新阶段' : '从零开一个新阶段' }}
                   </span>
-                  <span v-if="stage" class="sh-hint">同一时间只能有一个阶段 —— 要先收尾当前这个</span>
+                  <span v-if="stage" class="sh-hint">
+                    同一时间每个长阶段下只能跑一个小阶段 —— 要开下一段，先收尾当前这个
+                  </span>
                 </div>
               </template>
               <SetupWizard ref="wizardRef" @created="reload" />
@@ -167,10 +200,14 @@
 
           <el-card v-if="closedStages.length" shadow="never" class="sh-gap">
             <template #header><span class="sh-card-title">已收尾的阶段</span></template>
-            <el-table :data="closedStages" size="small">
-              <el-table-column prop="name" label="阶段" min-width="140" />
-              <el-table-column label="区间" width="200">
-                <template #default="{ row }">{{ row.start_date }} ~ {{ row.end_date ?? '—' }}</template>
+              <el-table :data="closedStages" size="small">
+                <el-table-column prop="name" label="阶段" min-width="140" />
+                <!-- 分层之后这张表里既有顶级阶段也有小阶段 —— 不给上级列就分不出谁是谁 -->
+                <el-table-column label="上级阶段" width="140">
+                  <template #default="{ row }">{{ row.parent_name ?? '—（顶级）' }}</template>
+                </el-table-column>
+              <el-table-column label="区间" width="240">
+                <template #default="{ row }">{{ row.range_label }}</template>
               </el-table-column>
               <el-table-column label="KPI" width="80">
                 <template #default="{ row }">{{ row.metric_count }} 条</template>
@@ -253,6 +290,7 @@
         <EmptyPane v-else :title="empty.summary.title" :desc="empty.summary.desc" />
       </el-tab-pane>
     </el-tabs>
+    </template>
 
     <!-- ── 暂停弹窗 ─────────────────────────────────────────── -->
     <el-dialog v-model="pauseVisible" title="暂停整个阶段（休耕）" width="440px">
@@ -292,6 +330,7 @@ import PeriodPanel from './PeriodPanel.vue'
 import PeriodTargetsPanel from './PeriodTargetsPanel.vue'
 import ReviewPanel from './ReviewPanel.vue'
 import StageSummaryPanel from './StageSummaryPanel.vue'
+import StageLedgerPanel from './StageLedgerPanel.vue'
 import SetupWizard from './SetupWizard.vue'
 import ConfigChangeLog from '../components/ConfigChangeLog.vue'
 import EmptyPane from '../components/EmptyPane.vue'
@@ -300,7 +339,7 @@ import TemplateLibrary from '../components/TemplateLibrary.vue'
 import * as api from '../api/selfrunApi'
 import { useSelfRunStore } from '../stores/selfrunStore'
 import {
-  FALLBACK_COLOR, PAUSE_REASON_LABEL, PERIOD_STATUS_LABEL,
+  FALLBACK_COLOR, MONTHLY_QUESTION_COUNT, PAUSE_REASON_LABEL, periodStatusLabel,
 } from '../types/selfrunTypes'
 import type { SelfRunStage } from '../types/selfrunTypes'
 
@@ -362,6 +401,17 @@ const setupView = computed<SetupView>(
 /** 正处在三个子页面之一（页头据此给出「回制定配置」的路） */
 const isSetupSub = computed(() => setupView.value !== 'kpi')
 
+/**
+ * 现在在「阶段账本」那一页（长阶段详情）。
+ *
+ * 🔴 这一页与其余 8 条路由**不是同一类**：它不渲染页签、不出两把尺子。
+ *    判据只读路由名 —— 另存一个 ref 就会和地址栏分家（从下拉点进来还停在上次的页）。
+ */
+const isLedger = computed(() => route.name === 'selfrun-stage')
+
+/** 账本面板的刷新入口（页头那个「刷新」按钮转给它，两处各刷各的必然有一半是旧的） */
+const ledgerRef = ref<InstanceType<typeof StageLedgerPanel> | null>(null)
+
 const closedStages = ref<SelfRunStage[]>([])
 const wizardRef = ref<InstanceType<typeof SetupWizard> | null>(null)
 const pauseVisible = ref(false)
@@ -382,6 +432,8 @@ const pauseForm = ref({ reason: 'fallow', resume_at: '', note: '' })
  */
 const openPanels = ref<string[]>([])
 let panelSeeded = false
+/** 「从账本跳过来开小阶段」只自动展开一次 —— 之后用户自己收起，不再覆盖他 */
+let fromLedgerHandled = false
 
 const stage = computed(() => store.stage)
 const heartbeat = computed(() => store.heartbeatInfo)
@@ -407,6 +459,18 @@ function goTab(tab: string) {
 function goSetupView(v: SetupView) {
   const name = ROUTE_OF_SETUP_VIEW[v]
   if (route.name !== name) router.push({ name })
+}
+
+/**
+ * 回上级阶段（长阶段）的账本页。
+ *
+ * 🔴 显式带 `id`：账本页不带 id 时会取「正在跑的那个长阶段」，
+ *    而一个已收尾的长阶段**不是**「正在跑的」—— 不带 id 的返回会跳到另一段路上。
+ */
+function goParent() {
+  const pid = stage.value?.parent
+  if (!pid) return
+  router.push({ name: 'selfrun-stage', params: { id: String(pid) } })
 }
 
 /**
@@ -457,18 +521,38 @@ function startWizard() {
 }
 
 const stageTagType = computed(() => {
-  const s = stage.value?.status
-  if (s === 'active') return 'success'
-  if (s === 'paused') return 'warning'
+  const s = stage.value
+  if (!s) return 'info'
+  if (s.status === 'paused') return 'warning'
+  // 🔴 `active` 但还没到起点 ⇒ 中性色：此时文案是「未开始」，
+  //    上绿色会被读成「已经在跑了」。
+  if (s.status === 'active') return s.elapsed_days > 0 ? 'success' : 'info'
   return 'info'
 })
 
-/** 两把尺子**并列**显示在页头（不是藏在 tab 里 —— 藏起来就会只看一边） */
+/** 月度这格的分数：三问几比几（**不显示 KPI 达标数** —— 那不是判定依据） */
+const monthlyFrac = computed(() => {
+  const ex = store.monthly.explain
+  if (!ex) return '—'
+  const total = ex.monthly_question_count ?? MONTHLY_QUESTION_COUNT
+  if (ex.awaiting_answers) return `三问 0/${total} 未答`
+  return `三问 ${ex.yes ?? 0}/${total}`
+})
+
+/** 两把尺子**并列**显示在页头（不是藏在 tab 里 —— 藏起来就会只看一边）
+ *
+ * 🔴 每格的分母**必须与本格档位同源**（v3.64.6）：
+ *    周 = `达标 ok / 计入 counted`（KPI 尺子）；
+ *    月 = `三问 yes / 3`（三问尺子）。
+ *    原来月度也写 `达标 4/4`，而档位来自三问 2/3 —— 同一格里 100% 配「合格」，
+ *    读起来就是「4/4 才合格」。两把尺子的数不许并排放。
+ */
 const rulers = computed(() => [
   {
     type: 'week',
     label: '本周',
-    statusText: viewStatusText(store.weekly.explain?.value),
+    statusText: store.weekly.explain?.label_text
+      || viewStatusText(store.weekly.explain?.value, 'weekly'),
     frac: store.weekly.explain ? `达标 ${store.weekly.explain.ok}/${store.weekly.explain.counted}` : '—',
     key: store.weekly.period?.period_key || store.weekly.key || '—',
     color: store.colors.period[store.weekly.explain?.value ?? ''] ?? FALLBACK_COLOR,
@@ -476,16 +560,17 @@ const rulers = computed(() => [
   {
     type: 'month',
     label: '本月',
-    statusText: viewStatusText(store.monthly.explain?.value),
-    frac: store.monthly.explain ? `达标 ${store.monthly.explain.ok}/${store.monthly.explain.counted}` : '—',
+    statusText: store.monthly.explain?.label_text
+      || viewStatusText(store.monthly.explain?.value, 'monthly'),
+    frac: monthlyFrac.value,
     key: store.monthly.period?.period_key || store.monthly.key || '—',
     color: store.colors.period[store.monthly.explain?.value ?? ''] ?? FALLBACK_COLOR,
   },
 ])
 
-function viewStatusText(v?: string) {
+function viewStatusText(v?: string, periodType?: string) {
   if (!v) return '—'
-  return PERIOD_STATUS_LABEL[v] ?? v
+  return periodStatusLabel(v, periodType)
 }
 
 async function reload() {
@@ -495,12 +580,27 @@ async function reload() {
     openPanels.value = store.stage ? [] : ['wizard']
     panelSeeded = true
   }
-  // 回访即握手（**不判好坏、不改任何 KPI**，同一天最多写一次）
-  try {
-    await api.heartbeat(true)
-    await store.loadPeriod('weekly')
-  } catch {
-    // 握手失败不该影响页面
+  // 从长阶段账本「+ 开下一个小阶段」进来（带 `?parent=`）：
+  // 🔴 必须把向导**展开并滚过去** —— 折叠面板在有阶段时默认收起，
+  //    不展开的话跳过来只看到一片主视图，读起来就是「那个按钮没反应」。
+  if (!fromLedgerHandled && route.query.parent) {
+    fromLedgerHandled = true
+    startWizard()
+  }
+  // 账本页：只刷账本，**不做握手** —— 握手是「我回来看这一周了」的仪式，
+  // 而账本讲的是这段路，不是这一周。
+  // ⚠️ 但 `bootstrap()` / 模板库 / 已收尾阶段这三样照拉：页签随时可能被切走，
+  //    只拉一半的话切过去就是「没有阶段」「模板 0 条」——静默的空。
+  if (isLedger.value) {
+    await ledgerRef.value?.refresh()
+  } else {
+    // 回访即握手（**不判好坏、不改任何 KPI**，同一天最多写一次）
+    try {
+      await api.heartbeat(true)
+      await store.loadPeriod('weekly')
+    } catch {
+      // 握手失败不该影响页面
+    }
   }
   // 模板库：**每页都要有一份**（向导第 2 步、模板库子页、
   // 主视图右侧那个「N 条」角标共用同一份）
@@ -609,6 +709,16 @@ onMounted(reload)
 /* 子页面页头最左那条「回制定配置」—— 做小、压暗，别跟标题抢 */
 .sh-back { font-size: 13px; color: var(--el-text-color-secondary); }
 .sh-back:hover { color: var(--el-color-primary); }
+
+/* 父级面包屑：一行「返回上级」+ 一句它为什么在这
+   ⚠️ 与 `.sh-back` 同一档视觉（小、压暗）：这是**回程**，不是主操作。 */
+.sh-parent {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.sh-parent-back { font-size: 13px; color: var(--el-text-color-secondary); }
+.sh-parent-back:hover { color: var(--el-color-primary); }
+.sh-parent-hint { font-size: 12px; color: var(--el-text-color-placeholder); }
 
 /* 无阶段时那条「为什么空」—— 它留在页面上，不进气泡 */
 .sh-lead { margin: 14px 0 0; }

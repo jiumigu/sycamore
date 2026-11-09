@@ -19,6 +19,7 @@
         :data="graphData"
         :min-year="minYear"
         :max-year="maxYear"
+        :default-years="3"
         :title="title"
         :unit-label="unitLabel"
         :positive-negative="posNeg"
