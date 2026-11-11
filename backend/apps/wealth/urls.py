@@ -113,7 +113,8 @@ urlpatterns = [
     path('regular/update_status/', views.RegularUpdateStatusView.as_view(), name='regular-update-status'),
     path('regular/<int:pk>/', views.RegularDetailView.as_view(), name='regular-detail'),
     path('regular/<int:pk>/mature/', views.RegularMatureView.as_view(), name='regular-mature'),
-    # CSV 导入
+    # CSV 导入（预演只读 → 落库）——v3.65 改成按列名映射，预演是新增端点
+    path('import/preview/', views.BillImportPreviewView.as_view(), name='bill-import-preview'),
     path('import/csv/', views.BillImportView.as_view(), name='bill-import-csv'),
     # 🔴 路由器放**最后**（理由见本列表首行注释）：静态路径优先，动态路由兜底
     path('', include(router.urls)),

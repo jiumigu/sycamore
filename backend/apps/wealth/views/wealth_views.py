@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timedelta
 
 from django.conf import settings
@@ -879,140 +880,156 @@ class RegularUpdateStatusView(APIView):
 # ═══════════════════════════════════════════════
 
 
-class BillImportView(APIView):
-    """导入随手记 CSV 账单"""
+def _json_field(value):
+    """multipart 里的 JSON 字段是字符串；JSON 请求体里已经是对象。
+
+    解析失败**返回 None 而不是 400**：`mapping` 传坏了应当退回自动识别
+    （用户至少还能看见预演），而不是整份文件导不进来。
+    """
+    if value is None or isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
+class BillImportPreviewView(APIView):
+    """账单 CSV 预演（只读，v3.65）：先看这份文件会新增多少、重复多少、几行有问题。
+
+    🔴 预演**不写库**。前端在用户调整列映射时会反复调用它 ——
+       任何一次写，都等于「只是看一眼」就多出几百条账。
+    """
 
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
 
     def post(self, request):
+        from ..services.bill_import_service import (
+            BillCsvFormatError, build_preview, decode_csv_bytes, parse_bill_csv,
+        )
+
         file = request.FILES.get('file')
         if not file:
             return Response({'error': '请上传文件'}, status=status.HTTP_400_BAD_REQUEST)
 
-        import csv
-        import io
-        from datetime import datetime
+        try:
+            text = decode_csv_bytes(file.read())
+            parsed = parse_bill_csv(
+                text,
+                default_type=(request.data.get('default_type') or '').strip(),
+                # 用户在界面上把列名指对之后重跑预演 —— 传了就整份取代自动识别，
+                # 这样「预览看到的新增数」与「确认后写入数」才是同一份映射算出来的
+                user_mapping=_json_field(request.data.get('mapping')),
+            )
+        except BillCsvFormatError as exc:
+            # 400 里必须带「哪一列没认出来」，否则用户只能瞎试文件格式
+            return Response(
+                {
+                    'error': str(exc),
+                    'code': exc.code,
+                    'missing_required': exc.missing_required,
+                    'columns': exc.columns,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        file_data = file.read().decode('utf-8-sig')
-        reader = csv.reader(io.StringIO(file_data))
-        rows = list(reader)
+        preview = build_preview(parsed)
+        return Response({
+            'header_row': preview.header_row,
+            'columns': preview.columns,
+            'needs_default_type': preview.needs_default_type,
+            'summary': {
+                'total': preview.total,
+                'new': preview.new,
+                'duplicate': preview.duplicate,
+                'error': preview.error,
+                'inner_duplicate': preview.inner_duplicate,
+            },
+            'rows': preview.rows,
+        })
 
-        if len(rows) < 3:
-            return Response({'error': 'CSV 文件格式不正确'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user_id = request.data.get('user_id', 1)
-        created = 0
-        skipped = 0
-        duplicated = 0
-        errors = []
+class BillImportView(APIView):
+    """导入账单 CSV（随手记，或任何能配列名的导出源）
 
-        from collections import Counter
-        from datetime import timedelta
-        from decimal import Decimal, InvalidOperation
+    v3.65：解析、判重、落库全部改走 `bill_import_service`，与预演端点
+    共用同一份实现。旧版本按**列位置**取值（`row[0]` 类型 / `row[7]` 金额）
+    并固定跳过前 2 行 —— 换一个导出源，列就错位，而且不报错。
 
-        from django.db import connection
+    请求（multipart）：`file`、`default_type`（可选）、`mapping`（可选）、
+    `skip_rows`（可选）、`user_id`（可选）
+    """
 
-        def _amount_key(value) -> str:
-            """金额归一成两位小数的字符串 —— 浮点 `==` 比不出「30 还是 30.0」。"""
-            try:
-                return str(Decimal(str(value)).quantize(Decimal('0.01')))
-            except (InvalidOperation, TypeError, ValueError):
-                return str(value)
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [AllowAny]
 
-        # ── 第一遍：解析（先把能出错的都出完，再动库）──────────────
-        records = []
-        for i, row in enumerate(rows[2:], start=3):
-            if len(row) < 8:
-                skipped += 1
-                continue
+    def post(self, request):
+        from ..services.bill_import_service import (
+            BillCsvFormatError, commit_records, decode_csv_bytes,
+            normalize_type, parse_bill_csv,
+        )
 
-            try:
-                transaction_type = row[0].strip()
-                date_str = row[1].strip()
-                category = row[2].strip() if len(row) > 2 else ''
-                subcategory = row[3].strip() if len(row) > 3 else ''
-                account = row[5].strip() if len(row) > 5 else ''
-                amount_str = row[7].strip() if len(row) > 7 else ''
-                merchant = row[9].strip() if len(row) > 9 else ''
-                notes = row[10].strip() if len(row) > 10 else ''
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'error': '请上传文件'}, status=status.HTTP_400_BAD_REQUEST)
 
-                if not date_str or not amount_str:
-                    skipped += 1
-                    continue
+        default_type = (request.data.get('default_type') or '').strip()
+        user_mapping = _json_field(request.data.get('mapping'))
+        skip_rows = _json_field(request.data.get('skip_rows')) or []
+        if not isinstance(skip_rows, list):
+            # 传成对象/字符串就当没勾 —— 类型不对时报在计数上，用户看不出所以然
+            skip_rows = []
 
-                dt = datetime.strptime(date_str[:19], '%Y-%m-%d %H:%M:%S')
-                amount = abs(float(amount_str))
-                records.append({
-                    'row': i, 'dt': dt, 'type': transaction_type,
-                    'category': category, 'subcategory': subcategory,
-                    'account': account, 'merchant': merchant, 'notes': notes,
-                    'amount': amount,
-                })
-            except Exception as e:
-                skipped += 1
-                errors.append(f'第{i}行: {str(e)}')
+        try:
+            text = decode_csv_bytes(file.read())
+            parsed = parse_bill_csv(
+                text,
+                default_type=default_type,
+                user_mapping=user_mapping,
+            )
+        except BillCsvFormatError as exc:
+            return Response(
+                {
+                    'error': str(exc),
+                    'code': exc.code,
+                    'missing_required': exc.missing_required,
+                    'columns': exc.columns,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # ── 判重口径：**按天**（半开区间），不按秒 ──────────────────
-        # 🔴 旧写法 `WHERE date = %s` 是**秒级**比对：同一笔账只要导出时秒数
-        #    抖一下（10:00:00 vs 10:00:01，或 CSV 从别的时区导出），
-        #    就会重复入库 ⇒ 支出被记两遍，而且**不会报错**（DQ-1）。
-        #    现在按「这一整天」比对，并用 **Counter 计重数**：
-        #    所以「同一天两笔 15 元咖啡」仍然能各插一条，不会误判成重复。
-        remaining = Counter()
-        if records:
-            lo = min(r['dt'] for r in records).date()
-            hi = max(r['dt'] for r in records).date() + timedelta(days=1)
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    'SELECT DATE(date), amount, transaction_type '
-                    'FROM wealth_bill_list WHERE date >= %s AND date < %s',
-                    [lo, hi],
-                )
-                for day, amt, ttype in cursor.fetchall():
-                    remaining[(day, _amount_key(amt), ttype)] += 1
+        # 没有类型列又没给默认值 ⇒ 不能猜方向。猜错不会报错，
+        # 只会让「收入」变成「支出」，月底对账才发现。
+        if parsed.needs_default_type and not normalize_type(default_type):
+            return Response(
+                {
+                    'error': '这份文件没有「交易类型」列，请指定这批账是收入还是支出',
+                    'code': 'needs_default_type',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # ── 第二遍：按序插入，重数用完即视为重复 ────────────────────
-        for rec in records:
-            dt = rec['dt']
-            key = (dt.date(), _amount_key(rec['amount']), rec['type'])
-            if remaining[key] > 0:
-                remaining[key] -= 1
-                duplicated += 1
-                continue
+        try:
+            user_id = int(request.data.get('user_id') or 1)
+        except (TypeError, ValueError):
+            user_id = 1
 
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        INSERT INTO wealth_bill_list
-                            (transaction_type, category, subcategory, project, account,
-                             merchant, notes, amount, date, user_id,
-                             year, month, day, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                    """, [
-                        rec['type'],
-                        rec['category'],
-                        rec['subcategory'],
-                        '',
-                        rec['account'],
-                        rec['merchant'],
-                        rec['notes'],
-                        rec['amount'],
-                        dt,
-                        user_id,
-                        dt.year, dt.month, dt.day,
-                    ])
-                created += 1
-            except Exception as e:
-                skipped += 1
-                errors.append(f"第{rec['row']}行: {str(e)}")
+        result = commit_records(parsed, skip_rows=skip_rows, user_id=user_id)
 
         return Response({
-            'created': created,
-            'skipped': skipped,
-            'duplicated': duplicated,
-            'total': created + skipped + duplicated,
-            'errors': errors[:10],
+            'created': result.created,
+            # `skipped` 沿用旧键名与旧口径：解析失败 + 写入失败的行数
+            'skipped': result.error,
+            'duplicated': result.duplicate,
+            'skipped_by_user': result.skipped_by_user,
+            'total': result.total,
+            # 旧前端只读 `created`；`error_rows` 给新对话框逐行显示
+            'errors': [f"第{e['row_no']}行: {e['reason']}" for e in result.errors][:10],
+            'error_rows': result.errors[:50],
+            'error_total': len(result.errors),
         })
 
 

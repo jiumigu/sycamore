@@ -113,16 +113,34 @@ def test_import_rejects_file_with_less_than_3_rows() -> None:
 
 
 @pytest.mark.django_db
-def test_import_invalid_date_format_counts_as_skipped() -> None:
-    """边界：非法日期格式的行跳过且不中断"""
+def test_import_slash_date_format_accepted() -> None:
+    """口径放宽：`2025/01/07` 也是合法日期（随手记换版本会这么导）。
+
+    v3.65 之前只认 `%Y-%m-%d %H:%M:%S`，斜杠格式整行被判 skipped ——
+    用户看到「导 0 条」，却不知道为什么。
+    """
     content = (
         CSV_HEADER + CSV_HEADER2 +
         '支出,2025/01/07,餐饮,午餐,,支付宝,CNY,30.00,,麦当劳,午饭\n'
         '收入,2025-01-08 09:00:00,工资,,,银行卡,CNY,5000,,,月薪\n'
     )
     result = _upload(content)
+    assert result['skipped'] == 0
+    assert result['created'] == 2
+
+
+@pytest.mark.django_db
+def test_import_unparsable_date_counts_as_skipped() -> None:
+    """边界：真正认不出的日期仍是 skipped，且理由带行号"""
+    content = (
+        CSV_HEADER + CSV_HEADER2 +
+        '支出,2025年1月7日,餐饮,午餐,,支付宝,CNY,30.00,,麦当劳,午饭\n'
+        '收入,2025-01-08 09:00:00,工资,,,银行卡,CNY,5000,,,月薪\n'
+    )
+    result = _upload(content)
     assert result['skipped'] == 1
     assert result['created'] == 1
+    assert '第3行' in result['errors'][0]
 
 
 # ══════════════════════════════════════════════════════════
