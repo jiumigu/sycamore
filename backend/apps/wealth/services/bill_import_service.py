@@ -54,6 +54,23 @@ BILL_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
 #: 缺这两列就没法入库 —— 其余都可以空着
 BILL_REQUIRED_FIELDS: tuple[str, ...] = ('date', 'amount')
 
+
+def bill_field_options() -> list[dict]:
+    """列映射下拉的候选项。
+
+    字段名与中文标签**只来自上面的别名表**（`aliases[0]` 就是它的正式名字），
+    前端不持有一份字段常量 —— 否则加一个字段要改两处，漏一处的表现是
+    「下拉里选不到」，而不是报错。
+    """
+    return [
+        {
+            'value': field_name,
+            'label': aliases[0],
+            'required': field_name in BILL_REQUIRED_FIELDS,
+        }
+        for field_name, aliases in BILL_COLUMN_ALIASES.items()
+    ]
+
 # 日期格式：由严到宽。秒级排前面，避免 `2025-01-07 12:00:00` 被 `%Y-%m-%d` 截断。
 BILL_DATE_FORMATS: tuple[str, ...] = (
     '%Y-%m-%d %H:%M:%S',

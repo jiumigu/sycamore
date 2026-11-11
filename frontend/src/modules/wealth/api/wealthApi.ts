@@ -212,14 +212,41 @@ export function getCurrentAgeWeek() {
   return request<CurrentAgeWeek>({ url: '/wealth/age-week/', method: 'get' })
 }
 
-/** 导入随手记 CSV 账单 */
-export function importCSV(file: File) {
+/** 导入 CSV 的可选参数：列映射 / 勾掉的行 / 无类型列时的方向 */
+export interface BillImportParams {
+  /** `{源列名: 字段名}`，改过列映射时必须整份回传（服务端不再重新推断） */
+  mapping?: Record<string, string>
+  /** 预览里勾掉不导的物理行号 */
+  skipRows?: number[]
+  /** 文件没有「交易类型」列时必填：支出 / 收入 */
+  defaultType?: string
+}
+
+function buildImportForm(file: File, params: BillImportParams = {}) {
   const formData = new FormData()
   formData.append('file', file)
-  return request({
+  if (params.mapping) formData.append('mapping', JSON.stringify(params.mapping))
+  if (params.skipRows?.length) formData.append('skip_rows', JSON.stringify(params.skipRows))
+  if (params.defaultType) formData.append('default_type', params.defaultType)
+  return formData
+}
+
+/** 预演账单 CSV（只读）：会新增几条、重复几条、哪几行有问题 */
+export function previewImportCSV(file: File, params?: BillImportParams) {
+  return request<import('../types/wealthTypes').BillImportPreview>({
+    url: '/wealth/import/preview/',
+    method: 'post',
+    data: buildImportForm(file, params),
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+/** 导入账单 CSV 账单 */
+export function importCSV(file: File, params?: BillImportParams) {
+  return request<import('../types/wealthTypes').BillImportResult>({
     url: '/wealth/import/csv/',
     method: 'post',
-    data: formData,
+    data: buildImportForm(file, params),
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }

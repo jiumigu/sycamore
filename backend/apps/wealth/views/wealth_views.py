@@ -908,7 +908,8 @@ class BillImportPreviewView(APIView):
 
     def post(self, request):
         from ..services.bill_import_service import (
-            BillCsvFormatError, build_preview, decode_csv_bytes, parse_bill_csv,
+            BillCsvFormatError, bill_field_options, build_preview,
+            decode_csv_bytes, parse_bill_csv,
         )
 
         file = request.FILES.get('file')
@@ -931,7 +932,9 @@ class BillImportPreviewView(APIView):
                     'error': str(exc),
                     'code': exc.code,
                     'missing_required': exc.missing_required,
+                    # 认不出列名的文件也要能手动指认 —— 下拉候选缺了就没法救
                     'columns': exc.columns,
+                    'field_options': bill_field_options(),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -940,6 +943,7 @@ class BillImportPreviewView(APIView):
         return Response({
             'header_row': preview.header_row,
             'columns': preview.columns,
+            'field_options': bill_field_options(),
             'needs_default_type': preview.needs_default_type,
             'summary': {
                 'total': preview.total,
@@ -968,7 +972,7 @@ class BillImportView(APIView):
 
     def post(self, request):
         from ..services.bill_import_service import (
-            BillCsvFormatError, commit_records, decode_csv_bytes,
+            BillCsvFormatError, bill_field_options, commit_records, decode_csv_bytes,
             normalize_type, parse_bill_csv,
         )
 
@@ -997,6 +1001,7 @@ class BillImportView(APIView):
                     'code': exc.code,
                     'missing_required': exc.missing_required,
                     'columns': exc.columns,
+                    'field_options': bill_field_options(),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )

@@ -181,7 +181,7 @@
 | GET | /daily_detail/ | 单日收支明细 |
 | GET | /monthly_summary/ | 月度汇总统计 |
 | POST | /bill/create/ | 快速记账 |
-| POST | /import/preview/ | **账单 CSV 预演**（v3.65，只读）：按列名映射解析，返回「认出哪些列 / 新增几条 / 重复几条 / 哪几行有问题」。判重口径与落库逐字一致，**不写库** |
+| POST | /import/preview/ | **账单 CSV 预演**（v3.65，只读）：按列名映射解析，返回「认出哪些列 / 新增几条 / 重复几条 / 哪几行有问题」，另给 `field_options`（映射下拉候选，唯一来源是别名表）。判重口径与落库**逐字一致**（同一个 `split_records()`），**不写库**。前端入口：月度日历页「导入CSV」→ 选文件即预演 → 确认才落库（`components/monthly/BillImportDialog.vue`） |
 | POST | /import/csv/ | 账单 CSV 落库（v3.65）：与 `/import/preview/` **同一份解析器**，按列名识别；可选 `mapping`（手工指认列）与 `skip_rows`（勾掉的行，单独计 `skipped_by_user`）；无类型列且无 `default_type` ⇒ 400；去重键 = 同一天 + 同金额 + 同类型，文件内完全相同的两行**各插一条**（`Counter` 计重数）。🔴 回归基线：15 行随手记原格式 → `created 13 / skipped 2 / duplicated 0`，改解析器时这三个数必须不变（`tests/test_bill_import_regression.py`） |
 | GET | /regular/stats/ | 定期存款统计 |
 | GET | /regular/expiring/ | 到期提醒 |

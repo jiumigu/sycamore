@@ -284,6 +284,34 @@ def test_blank_rows_are_ignored() -> None:
     assert resp['summary']['error'] == 0
 
 
+@pytest.mark.django_db
+def test_field_options_are_served_for_the_mapping_dropdown() -> None:
+    """映射下拉的候选由后端给：成功与 400 两条路径都要带。
+
+    前端不持有字段名常量 —— 缺了这份候选，界面上就选不到字段，
+    而报错是「下拉是空的」，看不出是接口少了一个字段。
+    """
+    ok = _preview('日期,金额,交易类型\n2025-01-07 12:00:00,30.00,支出\n')
+    options = {o['value']: o for o in ok['field_options']}
+    assert set(options) == {
+        'date', 'amount', 'transaction_type', 'category', 'subcategory',
+        'project', 'account', 'account_currency', 'member', 'merchant', 'notes',
+    }
+    assert options['date']['label'] == '日期'
+    assert options['date']['required'] is True
+    assert options['notes']['required'] is False
+
+    # 400 也要带：认不出列名的文件正是最需要这份候选的时候
+    client = APIClient()
+    bad = client.post(
+        PREVIEW_URL,
+        {'file': SimpleUploadedFile('x.csv', '花销日,花销钱\n2026-05-01,30\n'.encode('utf-8-sig'))},
+        format='multipart',
+    )
+    assert bad.status_code == 400
+    assert len(bad.json()['field_options']) == 11
+
+
 # ── 判重：口径必须与落库一致 ──────────────────────────────
 
 @pytest.mark.django_db

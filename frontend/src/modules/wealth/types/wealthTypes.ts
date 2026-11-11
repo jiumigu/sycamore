@@ -1314,3 +1314,72 @@ export interface NetworthBridge {
   summary: NetworthBridgeSummary
   thresholds: { material_amount: number }
 }
+
+// ── 账单 CSV 导入（v3.65：先预演，再落库）──────────────────────
+
+/** 列映射下拉项 —— 候选来自后端别名表，前端不持有字段名常量 */
+export interface BillFieldOption {
+  value: string
+  label: string
+  required: boolean
+}
+
+/** 预演里的一列：`raw` 是源文件列名，`mapped` 是认成的字段（空 = 没认出来） */
+export interface BillImportColumn {
+  raw: string
+  mapped: string
+  sample: string
+}
+
+export type BillImportVerdict = 'new' | 'duplicate' | 'error'
+
+/** 预演里的一行（样例行 / 重复行 / 出错行） */
+export interface BillImportRow {
+  row_no: number
+  date: string
+  type: string
+  amount: number | null
+  category: string
+  subcategory: string
+  verdict: BillImportVerdict
+  reason: string
+}
+
+export interface BillImportSummary {
+  total: number
+  /** 会新增的条数 */
+  new: number
+  /** 库中已有（同一天、同金额、同类型） */
+  duplicate: number
+  error: number
+  /** `new` 的子集：同一文件里出现两次以上，仍会各插一条 */
+  inner_duplicate: number
+}
+
+export interface BillImportPreview {
+  header_row: number
+  columns: BillImportColumn[]
+  field_options: BillFieldOption[]
+  /** 文件里没有「交易类型」列 ⇒ 落库前必须指定方向 */
+  needs_default_type: boolean
+  summary: BillImportSummary
+  rows: BillImportRow[]
+}
+
+export interface BillImportErrorRow {
+  row_no: number
+  reason: string
+}
+
+export interface BillImportResult {
+  created: number
+  /** 解析失败 + 写入失败的行数（旧键名，口径未变） */
+  skipped: number
+  duplicated: number
+  /** 预览里勾掉不导的行 */
+  skipped_by_user: number
+  total: number
+  errors: string[]
+  error_rows: BillImportErrorRow[]
+  error_total: number
+}
