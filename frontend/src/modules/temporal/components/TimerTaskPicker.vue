@@ -3,16 +3,17 @@
   <div class="timer-task-picker">
     <div v-if="loadingNames" class="picker-hint">正在读取最近常用任务…</div>
     <div v-else-if="names.length" class="chips">
-      <el-tooltip
+      <!-- 不加 tooltip：候选是一排密排的按钮，浮层会把旁边的项盖住，反而点不到 -->
+      <el-button
         v-for="n in names"
         :key="n.task_name"
-        :content="`${n.record_count} 次 · ${n.total_hours} 小时`"
-        placement="top"
+        class="chip"
+        size="small"
+        :disabled="starting"
+        @click="begin(n.task_name)"
       >
-        <el-button class="chip" size="small" :disabled="starting" @click="begin(n.task_name)">
-          {{ n.task_name }}
-        </el-button>
-      </el-tooltip>
+        {{ n.task_name }}
+      </el-button>
     </div>
     <div v-else-if="namesError" class="picker-hint picker-warn">
       常用任务没读出来，可直接输入任务名

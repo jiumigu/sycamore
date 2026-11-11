@@ -232,18 +232,14 @@
               <div v-if="frequentLoading" class="freq-hint">正在读取最近常用任务…</div>
               <div v-else-if="frequentNames.length" class="freq-row">
                 <span class="freq-label">近{{ frequentMonths }}个月常用</span>
-                <el-tooltip
+                <!-- 不加 tooltip：标签是密排的，浮层会盖住旁边的项 -->
+                <el-check-tag
                   v-for="n in frequentNames"
                   :key="n.task_name"
-                  :content="`${n.record_count} 次 · ${n.total_hours} 小时`"
-                  placement="top"
-                >
-                  <el-check-tag
-                    class="freq-tag"
-                    :checked="pickedName === n.task_name"
-                    @change="togglePick(n.task_name)"
-                  >{{ n.task_name }}</el-check-tag>
-                </el-tooltip>
+                  class="freq-tag"
+                  :checked="pickedName === n.task_name"
+                  @change="togglePick(n.task_name)"
+                >{{ n.task_name }}</el-check-tag>
               </div>
               <div v-else-if="frequentError" class="freq-hint freq-warn">
                 常用任务没读出来，可直接手动输入
