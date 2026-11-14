@@ -1,5 +1,14 @@
 import request from '@/shared/utils/request'
-import type { ConsolidatePayload, PlanFromRouteInput, TravelFormData, TravelPlanInput, TravelWish } from '../types/travelTypes'
+import type {
+  ConsolidatePayload,
+  PlanFromRouteInput,
+  TravelFormData,
+  TravelPlanInput,
+  TravelPlanItemInput,
+  TravelPlanPatch,
+  TravelPlanStopInput,
+  TravelWish,
+} from '../types/travelTypes'
 
 export function getTravelRecords(params?: Record<string, unknown>) {
   return request({ url: '/travel/records/', method: 'get', params })
@@ -49,12 +58,62 @@ export function createTravelPlan(data: TravelPlanInput) {
   return request({ url: '/travel/plans/', method: 'post', data })
 }
 
-export function updateTravelPlan(id: number, data: TravelPlanInput) {
-  return request({ url: `/travel/plans/${id}/`, method: 'put', data })
+/**
+ * 改计划基本信息用 **PATCH**，不用 PUT。
+ *
+ * 🔴 PUT 是非 partial 的：没传的字段会被当成「传了默认值」——
+ *    只改名会把 `status` 悄悄重置成「计划中」、`notes` 清空（模型 `default` 生效）。
+ *    这正是「看着保存成功、实际改了别的东西」的典型。
+ */
+export function updateTravelPlan(id: number, data: TravelPlanPatch) {
+  return request({ url: `/travel/plans/${id}/`, method: 'patch', data })
 }
 
 export function deleteTravelPlan(id: number) {
   return request({ url: `/travel/plans/${id}/`, method: 'delete' })
+}
+
+// ===== 站点（路线上的有序城市） =====
+export function addPlanStop(planId: number, data: TravelPlanStopInput) {
+  return request({ url: `/travel/plans/${planId}/stops/`, method: 'post', data })
+}
+
+export function updatePlanStop(
+  planId: number,
+  stopId: number,
+  data: Partial<TravelPlanStopInput>,
+) {
+  return request({ url: `/travel/plans/${planId}/stops/${stopId}/`, method: 'patch', data })
+}
+
+export function deletePlanStop(planId: number, stopId: number) {
+  return request({ url: `/travel/plans/${planId}/stops/${stopId}/`, method: 'delete' })
+}
+
+/**
+ * 重排站点：`order` 必须是**该计划全部站点的 id**（整份给）。
+ *
+ * 只给一半会留下空洞顺序（1,3,7），下一次加站又要猜一次该用什么 order。
+ */
+export function reorderPlanStops(planId: number, order: number[]) {
+  return request({ url: `/travel/plans/${planId}/stops/reorder/`, method: 'post', data: { order } })
+}
+
+export function addPlanItem(planId: number, data: TravelPlanItemInput) {
+  return request({ url: `/travel/plans/${planId}/items/`, method: 'post', data })
+}
+
+export function deletePlanItem(planId: number, itemId: number) {
+  return request({ url: `/travel/plans/${planId}/items/${itemId}/`, method: 'delete' })
+}
+
+/** 把条目挪到别站 / 挪到「路上」（`stop: null`，必须显式传） */
+export function movePlanItem(planId: number, itemId: number, stop: number | null) {
+  return request({
+    url: `/travel/plans/${planId}/items/${itemId}/move/`,
+    method: 'post',
+    data: { stop },
+  })
 }
 
 export function getTravelPlanItems(id: number) {

@@ -79,6 +79,46 @@ class TravelPlan(models.Model):
         return f'{self.name} ({self.destination})'
 
 
+class TravelPlanStop(models.Model):
+    """旅行计划站点 —— 一条路线上的一个城市（有序）
+
+    一条路线（`TravelPlan`）由若干站点按 `order` 串起来：
+    宁德(1) → 泉州(2) → 漳州(3) → 潮州(4) → 广州(5)。
+
+    🔴 为什么必须单独一张表、而不是给 `TravelPlan` 加个 `cities` 字符串：
+       路线顺序、每站天数、每站费用都要参与计算（本站合计、到达日期、地图连线），
+       字符串能存不能算。历史上路线顺序曾被写进 `TravelPlan.notes`
+       （`由路线推演生成：宁德 → 泉州 → …`），前端只能靠正则反解 —— 改一个字就丢。
+
+    ⚠️ 坐标与到达日期**不落库**：坐标由 `services.resolve_place()` 现算
+       （城市改名后表里的旧坐标就是幽灵数据）；到达日期 = 出发日期 + 前面各站天数，
+       能重算就不要存（「派生不落库，例外快照」）。
+    """
+
+    plan = models.ForeignKey(
+        TravelPlan, on_delete=models.CASCADE, related_name='stops', verbose_name='所属计划',
+    )
+    city = models.CharField(max_length=100, verbose_name='城市')
+    province = models.CharField(max_length=50, blank=True, default='', verbose_name='省份')
+    order = models.PositiveSmallIntegerField(verbose_name='行程顺序')
+    days = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name='停留天数',
+    )
+    notes = models.TextField(blank=True, default='', verbose_name='备注')
+
+    class Meta:
+        db_table = 'travel_plan_stop'
+        db_table_comment = '旅行计划站点：一条路线上的有序城市，每站挂自己的条目'
+        ordering = ['order', 'id']
+        verbose_name = '旅行计划站点'
+        constraints = [
+            models.UniqueConstraint(fields=['plan', 'order'], name='uniq_travel_stop_plan_order'),
+        ]
+
+    def __str__(self):
+        return f'{self.order}. {self.city}'
+
+
 class TravelPlanItem(models.Model):
     """旅行计划子项"""
 
@@ -90,6 +130,10 @@ class TravelPlanItem(models.Model):
     ]
 
     plan = models.ForeignKey(TravelPlan, on_delete=models.CASCADE, related_name='items', verbose_name='所属计划')
+    stop = models.ForeignKey(
+        TravelPlanStop, null=True, blank=True, on_delete=models.PROTECT,
+        related_name='items', verbose_name='所属站点',
+    )
     wish = models.ForeignKey(
         'TravelWish', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='plan_items', verbose_name='关联心愿',

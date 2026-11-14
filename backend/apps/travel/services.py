@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
-from django.db.models import Avg, Count, Q, Sum
+from django.db.models import Avg, Count, Max, Q, Sum
 
-from .models import TravelPlan, TravelRecord, TravelWish
+from .models import TravelPlan, TravelPlanItem, TravelPlanStop, TravelRecord, TravelWish
 
 # ── 中国城市坐标库（省份→城市→经纬度）────────────────────────────
 # 覆盖主要城市 + 数据中已有的具体地点
@@ -256,6 +258,15 @@ def resolve_place(city_name: str, province: str = '') -> tuple[str, float, float
         if name in cities:
             lat, lng = cities[name]
             return (name, lat, lng)
+    # 兜底表只收了「市」结尾的全称（`泉州市`），用户嘴上说的是「泉州」——
+    # 补一次后缀再找，与权威表索引「全称 + 去后缀」两种写法都收的口径对齐。
+    # ⚠️ 这只是**写法归一**，不是猜坐标：找不到还是返回 None。
+    if name and not name.endswith('市'):
+        for _prov, cities in CITY_COORDS.items():
+            full = name + '市'
+            if full in cities:
+                lat, lng = cities[full]
+                return (full, lat, lng)
     if name in DISTRICT_TO_CITY:
         parent = DISTRICT_TO_CITY[name]
         for _prov, cities in CITY_COORDS.items():
@@ -543,15 +554,162 @@ class TravelStatsService:
 
 
 class TravelPlanService:
-    """旅行计划业务逻辑"""
+    """旅行计划业务逻辑
+
+    🔴 金额三层，**只在这里算一次**（别处不许再聚合一遍）：
+       本站合计 = Σ 本站条目的 `estimate_cost`
+       城际交通 = Σ `stop IS NULL` 的条目（「路上」，不属于任何城市）
+       计划总额 = Σ 各站合计 + 城际交通  ⇒ 写进 `TravelPlan.total_estimate`（派生、禁手填）
+
+    ⚠️ 站点顺序、到达日期、坐标都是**现算**的（派生不落库）：
+       坐标由 `resolve_place()` 查，到达日期由出发日期 + 前面各站天数累加。
+       存下来就会在「城市改名 / 用户改了天数」以后变成幽灵数据。
+    """
+
+    #: 重排时的临时偏移：`order` 是 unsigned，不能先置负数，只能先整体推高再落位。
+    _REORDER_OFFSET = 1000
+
+    # ── 金额 ────────────────────────────────────────────────
+    @staticmethod
+    def stop_subtotal(stop) -> Decimal:
+        """本站合计"""
+        return stop.items.aggregate(total=Sum('estimate_cost'))['total'] or Decimal('0')
 
     @staticmethod
-    def recalculate_total(plan: TravelPlan) -> float:
-        """重新计算计划总费用（全部子项预估费用之和）"""
-        total = plan.items.aggregate(total=Sum('estimate_cost'))['total'] or 0
+    def subtotals(plan) -> dict[int | None, Decimal]:
+        """按站点分组求和，**一次查询算完全部站**（键 `None` = 不归属任何城市）
+
+        🔴 三层金额都从这一份分组派生，不许再各写一次 `filter(stop__isnull=...)`
+           —— 两处聚合迟早会在某个分支上分叉（比如将来加「已取消」过滤）。
+        """
+        rows = (
+            TravelPlanItem.objects.filter(plan=plan)
+            .values('stop_id')
+            .annotate(total=Sum('estimate_cost'))
+        )
+        return {r['stop_id']: (r['total'] or Decimal('0')) for r in rows}
+
+    @staticmethod
+    def totals(plan) -> dict[str, Decimal]:
+        """三层金额一次算齐（前端只查表，不再自己加）"""
+        grouped = TravelPlanService.subtotals(plan)
+        transfer_total = grouped.get(None, Decimal('0'))
+        stops_total = sum(
+            (v for k, v in grouped.items() if k is not None), Decimal('0'),
+        )
+        return {
+            'stops_total': stops_total,
+            'transfer_total': transfer_total,
+            'total': stops_total + transfer_total,
+        }
+
+    @staticmethod
+    def recalculate_total(plan) -> float:
+        """重算计划总额（三层之和），并同步派生的 `destination`"""
+        total = TravelPlanService.totals(plan)['total']
         plan.total_estimate = total
-        plan.save(update_fields=['total_estimate', 'updated_at'])
+        TravelPlanService.sync_destination(plan, save=False)
+        plan.save(update_fields=['total_estimate', 'destination', 'updated_at'])
         return float(total)
+
+    @staticmethod
+    def sync_destination(plan, save: bool = True) -> str:
+        """`destination` 降级为派生值 = 最后一站的城市名
+
+        🔴 判据：`destination` 与 `stops` 说的是同一件事，两个都能手填就必然打架。
+           站点为准，`destination` 只是给「列表页 / 老接口 / 导出」留的兼容字段。
+        ⚠️ 只在**确有站点**时才覆盖：没有站点的老计划保持原值，不被清成空串。
+        """
+        last = plan.stops.order_by('-order', '-id').first()
+        if not last:
+            return plan.destination
+        plan.destination = last.city
+        if save:
+            plan.save(update_fields=['destination', 'updated_at'])
+        return plan.destination
+
+    # ── 站点 ────────────────────────────────────────────────
+    @staticmethod
+    def next_order(plan) -> int:
+        current = plan.stops.aggregate(top=Max('order'))['top'] or 0
+        return current + 1
+
+    @staticmethod
+    def add_stop(plan, city: str, province: str = '', days: int | None = None, notes: str = ''):
+        """追加一站到路线末尾"""
+        stop = TravelPlanStop.objects.create(
+            plan=plan, city=(city or '').strip(), province=province or '',
+            order=TravelPlanService.next_order(plan), days=days, notes=notes or '',
+        )
+        TravelPlanService.recalculate_total(plan)
+        return stop
+
+    @staticmethod
+    def reorder_stops(plan, ordered_ids: list[int]) -> list:
+        """按给定的 id 序列重排，**必须整份给**
+
+        🔴 只给一半会留下空洞顺序（1,3,7），下一站该用哪个 order 就又要猜一次；
+           所以这里要求 `set(ordered_ids) == 现有站点全集`，否则直接报错。
+
+        实现用两趟写入（先整体 +1000，再落 1..n）：`order` 上有
+        `(plan, order)` 唯一约束，直接一个个改成目标值必然中途撞车。
+        """
+        stops = list(plan.stops.order_by('order', 'id'))
+        existing = {s.pk for s in stops}
+        if set(ordered_ids) != existing:
+            raise ValueError('重排必须给出该计划全部站点的 id')
+        index = {s.pk: s for s in stops}
+        for i, pk in enumerate(ordered_ids, start=1):
+            index[pk].order = i + TravelPlanService._REORDER_OFFSET
+        TravelPlanStop.objects.bulk_update(stops, ['order'])
+        for i, pk in enumerate(ordered_ids, start=1):
+            index[pk].order = i
+        TravelPlanStop.objects.bulk_update(stops, ['order'])
+        TravelPlanService.sync_destination(plan)
+        return list(plan.stops.order_by('order', 'id'))
+
+    @staticmethod
+    def arrive_dates(plan) -> dict[int, Any]:
+        """每站到达日期 = 出发日期 + 前面各站天数之和
+
+        ⚠️ 任一前置站点 `days` 为空 ⇒ 后面全部为 `None`（「算不出来」），
+           **不许拿 0 顶替**：把「还不知道」当成「当天走」，日历会凭空少几天。
+        """
+        result: dict[int, Any] = {}
+        cursor = plan.start_date
+        for stop in plan.stops.order_by('order', 'id'):
+            result[stop.pk] = cursor
+            if cursor is None or stop.days is None:
+                cursor = None
+            else:
+                cursor = cursor + timedelta(days=stop.days)
+        return result
+
+    @staticmethod
+    def sole_stop(plan):
+        """计划**只有一站**时返回它，否则 `None`
+
+        用途：前端录条目没写 `stop` 时，单站计划的那一站就是它的归属 ——
+        单站出行是「多站路线」的特例，迁移把老计划条目全挂到唯一一站上也是这条口径。
+        ⚠️ 两站以上无从判断该挂谁，一律留空（「不归属任何城市」），不猜。
+        """
+        stops = list(plan.stops.all()[:2])
+        return stops[0] if len(stops) == 1 else None
+
+    @staticmethod
+    def total_days(plan) -> int | None:
+        """全程天数 = Σ 各站 `days`
+
+        🔴 任一站天数未知 ⇒ 返回 `None`（「算不出来」），**不许把 null 当 0 加**：
+           那会让「5 站 8 天」在少填一站时静默变成「5 站 6 天」，数字看着合理。
+        ⚠️ 0 站返回 0 —— 那是「没排站」，不是「天数未知」，前端按 `stops.length` 分流。
+        """
+        days = [s.days for s in plan.stops.all()]
+        if not days:
+            return 0
+        if any(d is None for d in days):
+            return None
+        return sum(days)
 
     @staticmethod
     def get_stats() -> dict[str, Any]:

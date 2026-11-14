@@ -186,8 +186,10 @@ def test_create_plan_from_route_with_wishes(client, db):
     assert resp.data['destination'] == '杭州'
     assert resp.data['start_date'] == '2026-10-01'
     assert '由路线推演生成' in resp.data['notes']
-    assert len(resp.data['items']) == 2
-    assert {i['wish'] for i in resp.data['items']} == {w1.id, w2.id}
+    # 条目已按站点下发（v3.64.52 起顶层不再有平铺 `items`）
+    items = [i for stop in resp.data['stops'] for i in stop['items']]
+    assert len(items) == 2
+    assert {i['wish'] for i in items} == {w1.id, w2.id}
 
     w1.refresh_from_db()
     w2.refresh_from_db()
@@ -201,8 +203,9 @@ def test_create_plan_from_route_without_wishes(client, db):
         'origin': '福州', 'destinations': ['南京', '杭州'],
     }, format='json')
     assert resp.status_code == 201, resp.data
-    assert [i['name'] for i in resp.data['items']] == ['南京', '杭州']
-    assert all(i['wish'] is None for i in resp.data['items'])
+    items = [i for stop in resp.data['stops'] for i in stop['items']]
+    assert [i['name'] for i in items] == ['南京', '杭州']
+    assert all(i['wish'] is None for i in items)
     assert resp.data['name'] == '南京等 2 站'
 
 

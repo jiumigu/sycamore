@@ -245,9 +245,11 @@
           <el-form-item label="计划名称">
             <el-input v-model="newPlan.name" placeholder="如：云南之旅" />
           </el-form-item>
-          <el-form-item label="目的地">
-            <el-input v-model="newPlan.destination" placeholder="如：大理" />
-          </el-form-item>
+          <!--
+            刻意没有「目的地」：计划的城市由站点决定（`destination` 已是只读派生），
+            这一站就是这条心愿所在的城市。摆一个填了也不生效的输入框，
+            比不摆更糟 —— 用户会以为计划建在了他填的那座城。
+          -->
           <el-form-item label="出发日期">
             <el-date-picker v-model="newPlan.start_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
           </el-form-item>
@@ -267,7 +269,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import betterEchartsMaps from 'better-echarts-maps/dist/china.js'
+import { registerChinaProvinceMap, PROVINCE_MAP_NAME } from '../utils/chinaProvinceMap'
 import {
   getWishes, createWish, updateWish, deleteWish,
   getWishStats, markWishVisited, recordWishVisit, addWishToPlan, getTravelPlans,
@@ -377,7 +379,7 @@ function renderMap() {
       },
     },
     geo: {
-      map: 'china',
+      map: PROVINCE_MAP_NAME,
       roam: true,
       ...focusOf(located),
       itemStyle: { areaColor: '#f5f7fa', borderColor: '#dcdfe6' },
@@ -618,7 +620,7 @@ const planWish = ref<TravelWish | null>(null)
 const planMode = ref<'existing' | 'new'>('existing')
 const planId = ref<number | null>(null)
 const plans = ref<TravelPlanOption[]>([])
-const newPlan = ref({ name: '', destination: '', start_date: '' })
+const newPlan = ref({ name: '', start_date: '' })
 
 const activePlans = computed(() => plans.value.filter(p => p.status === '计划中' || p.status === '进行中'))
 
@@ -628,7 +630,6 @@ async function openAddToPlan(w: TravelWish) {
   planId.value = null
   newPlan.value = {
     name: w.city ? `${w.city}之旅` : '未命名行程',
-    destination: w.city || w.province || '',
     start_date: '',
   }
   try {
@@ -668,10 +669,8 @@ async function confirmAddToPlan() {
 }
 
 onMounted(async () => {
-  // 与 ChinaHeatmap 一致：提取 GeoJSON 再注册（直接注册模块对象会导致边界碎裂）
-  const chinaPkg = betterEchartsMaps as unknown as { China?: Array<[string, object]> }
-  const chinaGeoJSON = chinaPkg.China?.[0]?.[1] ?? (betterEchartsMaps as unknown as object)
-  echarts.registerMap('china', chinaGeoJSON as never)
+  // 「取 GeoJSON 再注册」的唯一实现在 utils/chinaProvinceMap（直接注册模块对象会让边界碎裂）
+  registerChinaProvinceMap()
   chart = echarts.init(mapRef.value!)
   window.addEventListener('resize', onResize)
   await loadAll()

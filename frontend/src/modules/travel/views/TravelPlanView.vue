@@ -6,7 +6,7 @@
     <div class="page-header">
       <div class="header-left">
         <h1><span class="header-icon">🧳</span> 旅行计划</h1>
-        <p class="header-desc">出发前做好预算，旅行中逐项打卡</p>
+        <p class="header-desc">一条路线串起几座城：每站各自的预算、要吃要看的清单</p>
       </div>
       <div class="header-actions">
         <!-- v3.63.8：这两个都不再占菜单项，改成「旅行计划」页内入口 -->
@@ -55,157 +55,158 @@
       </div>
       <div v-for="plan in plans" :key="plan.id" class="plan-card">
         <div class="plan-header">
-          <div class="plan-info" @click="togglePlan(plan.id)">
+          <div class="plan-info" @click="togglePlan(plan)">
             <span class="plan-name">{{ plan.name }}</span>
-            <span class="plan-destination">📍 {{ plan.destination }}</span>
+            <!-- 路线串：站点顺序就是这条路线，不再是单个「目的地」 -->
+            <el-tooltip :content="fullRoute(plan)" :disabled="plan.stops.length <= 3" placement="top">
+              <span class="plan-route">{{ routeText(plan) }}</span>
+            </el-tooltip>
             <el-tag :type="getStatusType(plan.status)" size="small">{{ plan.status }}</el-tag>
-            <span class="plan-cost">¥{{ fmt(plan.total_estimate) }}</span>
+            <span class="plan-meta">{{ metaText(plan) }}</span>
             <span class="plan-date">{{ plan.start_date || '未定日期' }}</span>
             <el-icon class="expand-icon" :class="{ expanded: expandedPlanId === plan.id }"><ArrowDown /></el-icon>
           </div>
           <div class="plan-actions" @click.stop>
-            <el-button size="small" @click="viewRoute(plan)">🚂 路线</el-button>
+            <el-button size="small" @click="openPlanMap(plan)">🗺 地图</el-button>
             <el-button size="small" @click="editPlan(plan)">✏️ 编辑</el-button>
-            <el-button size="small" @click="copyPlan(plan)">📋 复制</el-button>
+            <el-button size="small" :loading="copyingId === plan.id" @click="copyPlan(plan)">📋 复制</el-button>
             <el-button size="small" type="danger" @click="deletePlan(plan.id)">🗑️ 删除</el-button>
           </div>
         </div>
 
-        <!-- 展开的明细 -->
-        <div v-if="expandedPlanId === plan.id" class="plan-items">
-          <div v-for="item in plan.items" :key="item.id" class="item-row" :class="{ completed: item.is_completed }">
-            <el-checkbox :model-value="item.is_completed" @change="toggleItem(plan, item)" />
-            <span class="item-icon">{{ getItemIcon(item.item_type) }}</span>
-            <span class="item-name" :class="{ 'text-done': item.is_completed }">{{ item.name }}</span>
-            <span class="item-cost">¥{{ fmt(item.estimate_cost) }}</span>
-          </div>
-          <div v-if="plan.items.length === 0" class="no-items">暂无明细项</div>
+        <!-- 展开：站点层（每站自己的预算与清单 + 路上） -->
+        <div v-if="expandedPlanId === plan.id" v-loading="expandedLoading" class="plan-detail">
+          <PlanStopList v-if="expandedPlan" :plan="expandedPlan" @changed="refreshExpanded" />
         </div>
       </div>
     </el-card>
 
-    <!-- 计划内打卡录入弹窗 -->
-    <el-dialog v-model="visitDialogVisible" title="打卡记录" width="460px" :close-on-click-modal="false">
-      <div v-if="visitItem" class="visit-item-name">
-        {{ getItemIcon(visitItem.item_type) }} {{ visitItem.name }}
-        <span v-if="visitPlan" class="visit-plan-name">{{ visitPlan.name }}</span>
-      </div>
-      <p class="visit-tip">记录后会自动写入「旅行足迹 → 行程日志」，也可跳过只打卡。</p>
-      <el-form label-width="90px">
-        <el-form-item label="打卡日期">
-          <el-date-picker
-            v-model="visitForm.visited_at"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="默认今天"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="评分">
-          <el-rate v-model="visitForm.visit_rating" :texts="RATE_TEXTS" show-text clearable />
-        </el-form-item>
-        <el-form-item label="打卡评价">
-          <el-input
-            v-model="visitForm.visit_notes"
-            type="textarea"
-            :rows="3"
-            maxlength="500"
-            show-word-limit
-            placeholder="味道 / 体验 / 值不值得排队的真实感受…"
-          />
-        </el-form-item>
-        <el-form-item label="值得反复">
-          <el-switch v-model="visitForm.worth_revisit" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="visitDialogVisible = false">取消</el-button>
-        <el-button :loading="visitSaving" @click="confirmVisit(false)">只打卡</el-button>
-        <el-button type="primary" :loading="visitSaving" @click="confirmVisit(true)">打卡并记录</el-button>
-      </template>
-    </el-dialog>
-
     <!-- 新建/编辑弹窗 -->
-    <el-dialog v-model="showCreateDialog" :title="editingPlanId ? '编辑旅行计划' : '新建旅行计划'" width="680px" append-to-body>
+    <el-dialog
+      v-model="showCreateDialog"
+      :title="editingPlanId ? '编辑旅行计划' : '新建旅行计划'"
+      width="680px"
+      append-to-body
+    >
       <el-form :model="createForm" label-width="90px">
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="计划名称" required>
-              <el-input v-model="createForm.name" placeholder="如：泉州2日游" />
+              <el-input v-model="createForm.name" placeholder="如：闽粤沿海线" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="目的地" required>
-              <el-input v-model="createForm.destination" placeholder="如：泉州" />
+            <el-form-item label="出发日期">
+              <el-date-picker
+                v-model="createForm.start_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="决定每站到达日期"
+                style="width: 100%"
+              />
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item label="出发日期">
-          <el-date-picker v-model="createForm.start_date" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" />
-        </el-form-item>
 
-        <!-- 添加明细项 -->
-        <el-divider>计划明细</el-divider>
-        <div v-for="(item, index) in createForm.items" :key="index" class="item-edit-row">
-          <el-select v-model="item.item_type" size="small" class="item-type-select">
-            <el-option v-for="t in TRAVEL_PLAN_ITEM_TYPES" :key="t.value" :label="t.label" :value="t.value" />
-          </el-select>
-          <el-input v-model="item.name" size="small" placeholder="名称" class="item-edit-name" />
-          <el-input-number v-model="item.estimate_cost" :min="0" :precision="2" size="small" class="item-cost-input" controls-position="right" />
-          <span class="cost-suffix">元</span>
-          <el-button size="small" type="danger" circle @click="createForm.items.splice(index, 1)">✕</el-button>
-        </div>
-        <el-button size="small" class="add-item-btn" @click="addItem">
-          <el-icon><Plus /></el-icon> 添加明细
-        </el-button>
+        <!-- 站点只在新建时填：建完以后在列表里就地加/改/调序（一处入口） -->
+        <template v-if="!editingPlanId">
+          <el-divider>路线（按顺序填，出发地不用填）</el-divider>
+          <div v-for="(s, index) in createForm.stops" :key="index" class="stop-edit-row">
+            <span class="stop-index">{{ index + 1 }}</span>
+            <el-input
+              v-model="s.city"
+              size="small"
+              placeholder="城市，如：泉州"
+              class="stop-city-input"
+              @keyup.enter="addStopRow"
+            />
+            <el-input-number
+              v-model="s.days"
+              :min="0"
+              :precision="0"
+              size="small"
+              controls-position="right"
+              placeholder="待几天"
+              class="stop-days-input"
+            />
+            <el-button
+              size="small"
+              type="danger"
+              circle
+              :disabled="createForm.stops.length === 1"
+              @click="createForm.stops.splice(index, 1)"
+            >✕</el-button>
+          </div>
+          <el-button size="small" class="add-item-btn" @click="addStopRow">
+            <el-icon><Plus /></el-icon> 加一站
+          </el-button>
+          <p class="form-hint">天数可以留空（显示「天数待定」），0 表示路过不过夜。</p>
+        </template>
+        <p v-else class="form-hint">站点调整在列表里做：展开计划后可加站、改天数、上下移、删站。</p>
       </el-form>
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="savePlan">{{ editingPlanId ? '保存' : '创建计划' }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 计划内地图：按站序连线，点城市看这一站的预算与清单 -->
+    <el-drawer
+      v-model="mapVisible"
+      :title="mapTitle"
+      size="82%"
+      append-to-body
+      destroy-on-close
+      class="map-drawer"
+    >
+      <div v-loading="mapLoading" class="map-body">
+        <PlanRouteMap v-if="mapPlan" :plan="mapPlan" />
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { apiErrorText } from '@/shared/utils/apiError'
-import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, ArrowDown } from '@element-plus/icons-vue'
 import * as api from '../api/travelApi'
 import { formatAmount } from '@/shared/utils/format'
 import { useMenuArchive } from '@/shared/composables/useMenuArchive'
+import PlanStopList from '../components/plan/PlanStopList.vue'
+import PlanRouteMap from '../components/plan/PlanRouteMap.vue'
+import type { TravelPlan, TravelPlanInput, TravelPlanItemInput, TravelPlanStats } from '../types/travelTypes'
 
 // 归档横幅的判据唯一实现在 useMenuArchive（存档态含用户偏好，非写死的 defaultArchived）
 const { ready, isArchived } = useMenuArchive('travel')
-import {
-  TRAVEL_PLAN_ITEM_TYPES,
-  type TravelPlan,
-  type TravelPlanItem,
-  type TravelPlanItemInput,
-  type TravelPlanStats,
-} from '../types/travelTypes'
 
-const router = useRouter()
 const plans = ref<TravelPlan[]>([])
 const stats = ref<TravelPlanStats | null>(null)
 const loading = ref(false)
 const expandedPlanId = ref<number | null>(null)
+/** 展开的那条计划的**详情**（带站点条目）；列表数据里没有条目 */
+const expandedPlan = ref<TravelPlan | null>(null)
+const expandedLoading = ref(false)
+const copyingId = ref<number | null>(null)
+
+/** 计划地图抽屉（点「🗺 地图」）：详情单独持有一份，与展开面板互不影响 */
+const mapVisible = ref(false)
+const mapLoading = ref(false)
+const mapPlan = ref<TravelPlan | null>(null)
+const mapTitle = computed(() => (mapPlan.value ? `🗺 ${mapPlan.value.name}` : '🗺 路线地图'))
 
 const showCreateDialog = ref(false)
 const saving = ref(false)
 const editingPlanId = ref<number | null>(null)
 const createForm = reactive<{
   name: string
-  destination: string
   start_date: string | null
-  items: TravelPlanItemInput[]
+  stops: { city: string; days: number | null }[]
 }>({
   name: '',
-  destination: '',
   start_date: null,
-  items: [],
+  stops: [],
 })
 
 function fmt(n: unknown): string {
@@ -219,58 +220,149 @@ function getStatusType(status: string): string {
   return ''
 }
 
-function getItemIcon(type: string): string {
-  const t = TRAVEL_PLAN_ITEM_TYPES.find((x) => x.value === type)
-  return t ? t.label.split(' ')[0] : '📌'
+/** 完整路线串（悬浮提示用） */
+function fullRoute(plan: TravelPlan): string {
+  const cities = plan.stops.map((s) => s.city_input)
+  if (!cities.length) return plan.destination || '还没排站'
+  return cities.join(' → ')
 }
 
-function addItem() {
-  createForm.items.push({ item_type: 'food', name: '', estimate_cost: 0 })
+/** 折叠后的路线串：超过 3 站只留首尾 —— 一行塞 5 个城市会把状态标签挤走 */
+function routeText(plan: TravelPlan): string {
+  const cities = plan.stops.map((s) => s.city_input)
+  if (cities.length === 0) return plan.destination || '还没排站'
+  if (cities.length <= 3) return cities.join(' → ')
+  return `${cities[0]} → ${cities[1]} → … → ${cities[cities.length - 1]}`
+}
+
+/** `5 站 · 8 天 · ¥4,860`；某站天数没填时「天数待定」，不把 null 当 0 加 */
+function metaText(plan: TravelPlan): string {
+  const stops = `${plan.stops.length} 站`
+  const days = plan.total_days === null ? '天数待定' : `${plan.total_days} 天`
+  return `${stops} · ${days} · ¥${fmt(plan.total_estimate)}`
+}
+
+// ===== 弹窗 =====
+function addStopRow() {
+  createForm.stops.push({ city: '', days: null })
 }
 
 function resetCreateForm() {
   createForm.name = ''
-  createForm.destination = ''
   createForm.start_date = null
-  createForm.items = []
+  createForm.stops = []
 }
 
 function openCreateDialog() {
   resetCreateForm()
   editingPlanId.value = null
-  addItem()
+  addStopRow()
   showCreateDialog.value = true
-}
-
-function fillItemInputs(items: TravelPlanItemInput[]) {
-  createForm.items = (items || []).map((item) => ({
-    item_type: item.item_type,
-    name: item.name,
-    estimate_cost: item.estimate_cost,
-  }))
-  if (createForm.items.length === 0) addItem()
 }
 
 function editPlan(plan: TravelPlan) {
+  resetCreateForm()
   editingPlanId.value = plan.id
   createForm.name = plan.name
-  createForm.destination = plan.destination
   createForm.start_date = plan.start_date
-  fillItemInputs(plan.items)
   showCreateDialog.value = true
 }
 
-function copyPlan(plan: TravelPlan) {
-  editingPlanId.value = null
-  createForm.name = `${plan.name}（副本）`
-  createForm.destination = plan.destination
-  createForm.start_date = plan.start_date
-  fillItemInputs(plan.items)
-  showCreateDialog.value = true
+/**
+ * 复制计划：一次请求把整条路线（站 + 条目）带过去。
+ *
+ * ⚠️ 刻意**不弹表单**让你改一遍再存：复制是最不需要思考的动作，
+ *    而弹窗里改站点会让条目的 `stop_index` 与站点错位（400 或挂错城市）。
+ *    想改名复制完点「编辑」即可。
+ */
+async function copyPlan(plan: TravelPlan) {
+  copyingId.value = plan.id
+  try {
+    const detail = (await api.getTravelPlanDetail(plan.id)).data as TravelPlan
+    const stops = detail.stops.map((s) => ({ city: s.city_input, days: s.days }))
+    const items: TravelPlanItemInput[] = []
+    detail.stops.forEach((stop, index) => {
+      ;(stop.items || []).forEach((it) => {
+        items.push({
+          item_type: it.item_type,
+          name: it.name,
+          estimate_cost: it.estimate_cost,
+          notes: it.notes,
+          stop_index: index,
+        })
+      })
+    })
+    // 城际交通（`stop: null`）：新建时没有站点 id 可指，只能落到「路上」
+    detail.transfer_items.forEach((it) => {
+      items.push({ item_type: it.item_type, name: it.name, estimate_cost: it.estimate_cost, notes: it.notes })
+    })
+    const payload: TravelPlanInput = {
+      name: `${detail.name}（副本）`,
+      start_date: detail.start_date,
+      stops,
+      items,
+    }
+    await api.createTravelPlan(payload)
+    ElMessage.success('已复制')
+    await refreshAfterChange()
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '复制失败'))
+  } finally {
+    copyingId.value = null
+  }
 }
 
-async function fetchAll() {
-  loading.value = true
+async function savePlan() {
+  if (!createForm.name.trim()) {
+    ElMessage.warning('请填写计划名称')
+    return
+  }
+  const stops = createForm.stops
+    .map((s) => ({ city: s.city.trim(), days: s.days }))
+    .filter((s) => s.city)
+
+  saving.value = true
+  try {
+    if (editingPlanId.value) {
+      // 🔴 用 PATCH：非 partial 的 PUT 会把没传的 `status` / `notes` 重置成默认值
+      await api.updateTravelPlan(editingPlanId.value, {
+        name: createForm.name.trim(),
+        start_date: createForm.start_date,
+      })
+      ElMessage.success('已更新')
+    } else {
+      if (stops.length === 0) {
+        ElMessage.warning('至少填一站')
+        saving.value = false
+        return
+      }
+      await api.createTravelPlan({
+        name: createForm.name.trim(),
+        start_date: createForm.start_date,
+        stops,
+      })
+      ElMessage.success('已创建')
+    }
+    showCreateDialog.value = false
+    editingPlanId.value = null
+    resetCreateForm()
+    await refreshAfterChange()
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '保存失败'))
+  } finally {
+    saving.value = false
+  }
+}
+
+// ===== 列表 =====
+/**
+ * 拉计划列表 + 统计。
+ *
+ * `silent` 用于「改完某条计划后刷新」：不带 loading 遮罩 —— 列表页的
+ * loading 会在顶部插一块占位，每勾一次条目就跳一下，比不刷新还难看。
+ */
+async function fetchAll(silent = false) {
+  if (!silent) loading.value = true
   try {
     const [planRes, statsRes] = await Promise.all([api.getTravelPlans(), api.getTravelPlanStats()])
     plans.value = planRes.data?.results ?? planRes.data ?? []
@@ -282,66 +374,77 @@ async function fetchAll() {
   }
 }
 
-function togglePlan(id: number) {
-  expandedPlanId.value = expandedPlanId.value === id ? null : id
-}
-
-/** 打开路线推演：优先复用计划生成时记录的完整站点序列 */
-function viewRoute(plan: TravelPlan) {
-  const matched = /^由路线推演生成：(.+)$/.exec(plan.notes || '')
-  let origin = ''
-  let dests: string[] = []
-  if (matched) {
-    const seq = matched[1].split('→').map(s => s.trim()).filter(Boolean)
-    origin = seq[0] || ''
-    dests = seq.slice(1)
-  }
-  if (!dests.length) dests = [plan.destination].filter(Boolean)
-  if (!dests.length) {
-    ElMessage.warning('该计划还没有目的地')
+/**
+ * 展开计划时才取详情。
+ *
+ * 🔴 列表接口**不带站点条目**（省掉 100+ 条子项的查询）：直接拿列表数据展开，
+ *    每一站都是「还没有条目」，看着像数据丢了。详情与列表是两个接口，别混用。
+ */
+async function togglePlan(plan: TravelPlan) {
+  if (expandedPlanId.value === plan.id) {
+    expandedPlanId.value = null
+    expandedPlan.value = null
     return
   }
-  router.push({ path: '/travel/route', query: { origin, destinations: dests.join(',') } })
-}
-
-async function savePlan() {
-  if (!createForm.name.trim()) {
-    ElMessage.warning('请填写计划名称')
-    return
-  }
-  if (!createForm.destination.trim()) {
-    ElMessage.warning('请填写目的地')
-    return
-  }
-  const data = {
-    name: createForm.name.trim(),
-    destination: createForm.destination.trim(),
-    start_date: createForm.start_date,
-    items: createForm.items.filter((i) => i.name.trim()),
-  }
-  saving.value = true
+  expandedPlanId.value = plan.id
+  expandedPlan.value = null
+  expandedLoading.value = true
   try {
-    if (editingPlanId.value) {
-      await api.updateTravelPlan(editingPlanId.value, data)
-      ElMessage.success('已更新')
-    } else {
-      await api.createTravelPlan(data)
-      ElMessage.success('已创建')
-    }
-    showCreateDialog.value = false
-    editingPlanId.value = null
-    resetCreateForm()
-    await fetchAll()
-  } catch (err) {
-    ElMessage.error(apiErrorText(err, '保存失败'))
+    expandedPlan.value = (await api.getTravelPlanDetail(plan.id)).data as TravelPlan
+  } catch {
+    ElMessage.error('加载计划详情失败')
+    expandedPlanId.value = null
   } finally {
-    saving.value = false
+    expandedLoading.value = false
+  }
+}
+
+/** 计划内改完（加站/改天数/勾条目/删条目）⇒ 列表汇总与详情一起刷新 */
+async function refreshExpanded() {
+  const id = expandedPlanId.value
+  await fetchAll(true)
+  if (id == null) return
+  try {
+    expandedPlan.value = (await api.getTravelPlanDetail(id)).data as TravelPlan
+  } catch {
+    ElMessage.error('刷新计划详情失败')
+  }
+}
+
+/** 新建/编辑/复制/删除之后：展开中的那条连详情一起刷，否则只刷列表 */
+async function refreshAfterChange() {
+  if (expandedPlanId.value != null) await refreshExpanded()
+  else await fetchAll(true)
+}
+
+/**
+ * 打开计划地图：按站序连线，点城市看这一站的预算与清单。
+ *
+ * 🔴 详情**单独取**，不复用 `expandedPlan`：列表对象里根本没有 `items`，
+ *    而展开面板可能压根没打开（拿列表数据画图 ⇒ 每一站都「还没排条目」）。
+ *    两处各取一份也更安全 —— 地图只读，改数据仍走清单。
+ */
+async function openPlanMap(plan: TravelPlan) {
+  if (!plan.stops.length) {
+    ElMessage.warning('该计划还没有站点，先排上城市再看地图')
+    return
+  }
+  mapPlan.value = null
+  mapVisible.value = true
+  mapLoading.value = true
+  try {
+    mapPlan.value = (await api.getTravelPlanDetail(plan.id)).data as TravelPlan
+  } catch {
+    ElMessage.error('加载计划详情失败')
+    mapVisible.value = false
+  } finally {
+    mapLoading.value = false
   }
 }
 
 async function deletePlan(id: number) {
   try {
-    await ElMessageBox.confirm('确定删除这个旅行计划吗？', '确认删除', {
+    await ElMessageBox.confirm('确定删除这个旅行计划吗？站点与条目会一起删除。', '确认删除', {
       confirmButtonText: '删除',
       cancelButtonText: '取消',
       type: 'warning',
@@ -351,89 +454,15 @@ async function deletePlan(id: number) {
   }
   try {
     await api.deleteTravelPlan(id)
+    // 删的正是展开中的那条 ⇒ 一起收起，否则详情面板挂在一条已不存在的计划上
+    if (expandedPlanId.value === id) {
+      expandedPlanId.value = null
+      expandedPlan.value = null
+    }
     ElMessage.success('已删除')
-    await fetchAll()
+    await fetchAll(true)
   } catch {
     ElMessage.error('删除失败')
-  }
-}
-
-async function toggleItem(plan: TravelPlan, item: TravelPlanItem) {
-  // 未完成 → 完成：有关联心愿时先录入打卡详情（可跳过），保证行程日志字段完整
-  if (!item.is_completed && item.wish) {
-    openVisitDialog(plan, item)
-    return
-  }
-  await doToggleItem(plan, item)
-}
-
-async function doToggleItem(plan: TravelPlan, item: TravelPlanItem) {
-  try {
-    const res = await api.toggleTravelPlanItem(plan.id, item.id)
-    const updated = res.data as TravelPlanItem
-    const target = plan.items.find((i) => i.id === updated.id)
-    if (target) {
-      target.is_completed = updated.is_completed
-      target.completed_at = updated.completed_at
-    }
-  } catch {
-    ElMessage.error('操作失败')
-  }
-}
-
-// ===== 计划内打卡录入 =====
-const RATE_TEXTS = ['踩雷', '一般', '还行', '不错', '值得专程去']
-const visitDialogVisible = ref(false)
-const visitSaving = ref(false)
-const visitPlan = ref<TravelPlan | null>(null)
-const visitItem = ref<TravelPlanItem | null>(null)
-const visitForm = ref({
-  visited_at: '',
-  visit_rating: 0,
-  visit_notes: '',
-  worth_revisit: false,
-})
-
-function todayStr() {
-  const d = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
-
-function openVisitDialog(plan: TravelPlan, item: TravelPlanItem) {
-  visitPlan.value = plan
-  visitItem.value = item
-  visitForm.value = {
-    visited_at: todayStr(),
-    visit_rating: 0,
-    visit_notes: '',
-    worth_revisit: false,
-  }
-  visitDialogVisible.value = true
-}
-
-async function confirmVisit(withRecord: boolean) {
-  const plan = visitPlan.value
-  const item = visitItem.value
-  if (!plan || !item) return
-  visitSaving.value = true
-  try {
-    if (withRecord && item.wish) {
-      await api.recordWishVisit(item.wish, {
-        visited_at: visitForm.value.visited_at || todayStr(),
-        visit_rating: visitForm.value.visit_rating || null,
-        visit_notes: visitForm.value.visit_notes,
-        worth_revisit: visitForm.value.worth_revisit,
-      })
-    }
-    await doToggleItem(plan, item)
-    visitDialogVisible.value = false
-    ElMessage.success(withRecord ? '已打卡并记录' : '已打卡')
-  } catch (e: unknown) {
-    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
-    ElMessage.error(msg || '打卡失败')
-  } finally {
-    visitSaving.value = false
   }
 }
 
@@ -537,14 +566,32 @@ onMounted(fetchAll)
           cursor: pointer;
           flex: 1;
 
-          .plan-name { font-size: 15px; font-weight: 600; color: #1F2937; }
-          .plan-destination { font-size: 13px; color: #6B7280; }
-          .plan-cost { font-size: 16px; font-weight: 700; color: #E6A23C; }
-          .plan-date { font-size: 12px; color: #9CA3AF; }
+          .plan-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #1F2937;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 220px;
+          }
+
+          // 路线串是内容不是链接：用蓝色会被当成「点这里看路线」（真的点整行是展开）
+          .plan-route {
+            font-size: 13px;
+            color: #606266;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          .plan-meta { font-size: 13px; color: #6b7280; white-space: nowrap; }
+          .plan-date { font-size: 12px; color: #9CA3AF; white-space: nowrap; }
 
           .expand-icon {
             color: #9CA3AF;
             transition: transform 0.2s;
+            flex-shrink: 0;
 
             &.expanded { transform: rotate(180deg); }
           }
@@ -558,98 +605,63 @@ onMounted(fetchAll)
         }
       }
 
-      .plan-items {
-        border-top: 1px solid #f0f0f0;
-        background: #fafbfc;
-        padding: 8px 0;
-
-        .item-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 8px 16px;
-
-          &.completed .item-name { color: #9CA3AF; }
-          &.completed .item-cost { color: #C0C4CC; }
-
-          .item-icon { font-size: 15px; }
-          .item-name {
-            flex: 1;
-            font-size: 14px;
-            color: #1F2937;
-
-            &.text-done { text-decoration: line-through; }
-          }
-          .item-cost { font-size: 13px; font-weight: 600; color: #606266; }
-        }
-
-        .no-items {
-          padding: 16px;
-          text-align: center;
-          font-size: 13px;
-          color: #9CA3AF;
-        }
+      // 详情拉取中的占位：不留高度的话，展开瞬间会先塌一下再撑开
+      .plan-detail {
+        min-height: 64px;
       }
     }
   }
 }
 
-/* 明细行在 append-to-body 弹窗内（teleport 到 body），不能依赖 .travel-plan 祖先，需顶层作用域 */
-.item-edit-row {
+/* 站点行在 append-to-body 弹窗内（teleport 到 body），不能依赖 .travel-plan 祖先，需顶层作用域 */
+.stop-edit-row {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  flex-wrap: nowrap;
 
-  .item-type-select {
-    width: 90px;
+  .stop-index {
     flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    text-align: center;
+    border-radius: 50%;
+    background: #ecf5ff;
+    color: #409eff;
+    font-size: 12px;
+    font-weight: 600;
   }
 
-  .item-edit-name {
-    flex: 1;
-    min-width: 150px;
-  }
-
-  .item-cost-input {
-    width: 120px;
-    flex-shrink: 0;
-  }
-
-  .cost-suffix {
-    font-size: 13px;
-    color: #666;
-    white-space: nowrap;
-  }
+  .stop-city-input { flex: 1; min-width: 140px; }
+  .stop-days-input { width: 130px; flex-shrink: 0; }
 }
 
 .add-item-btn {
   margin-top: 4px;
 }
 
-/* ===== 计划内打卡录入 ===== */
-.visit-item-name {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 15px;
-  font-weight: 500;
-  color: #1F2937;
-
-  .visit-plan-name {
-    font-size: 12px;
-    font-weight: 400;
-    color: #6B7280;
-    background: #F3F4F6;
-    padding: 2px 8px;
-    border-radius: 10px;
-  }
+.form-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #9ca3af;
 }
 
-.visit-tip {
-  margin: 6px 0 16px;
-  font-size: 12px;
-  color: #9CA3AF;
+/* 地图抽屉 append-to-body（挂到 body 上），样式作用域不能嵌在 .travel-plan 里 */
+.map-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+</style>
+
+<style>
+/* 🔴 抽屉是 teleport 到 body 的，scoped 的 `:deep(.el-drawer__body)` 够不到
+   （.map-drawer 上根本没有 data-v 属性 ⇒ 规则静默失效，画布高度塌成 400px）。
+   所以单独一段**非 scoped** 样式，选择器收窄到 .map-drawer，不污染全局。 */
+.map-drawer .el-drawer__body {
+  padding: 0;
+  display: flex;
+  overflow: hidden;
 }
 </style>

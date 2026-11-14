@@ -3,7 +3,7 @@
 import pytest
 from rest_framework.test import APIClient
 
-from apps.travel.models import TravelPlan, TravelPlanItem, TravelWish
+from apps.travel.models import TravelPlan, TravelPlanItem, TravelPlanStop, TravelWish
 
 WISHES_URL = '/api/travel/wishes/'
 PLANS_URL = '/api/travel/plans/'
@@ -78,6 +78,23 @@ def test_add_to_plan_creates_plan_and_item(client, db):
     refreshed = TravelWish.objects.get(id=wish['id'])
     assert refreshed.status == '已列入计划'
     assert TravelPlanItem.objects.filter(wish_id=wish['id']).count() == 1
+
+
+def test_add_to_plan_honours_given_name_and_makes_one_stop(client, db):
+    """新建计划时**填的名称要生效**，城市只认心愿自己的那座城（并落成一站）。
+
+    以前这个接口收下 `name` 却不用（一律叫「成都之旅」），前端那个输入框
+    填了也没用 —— 静默丢参数，界面上还看不出。
+    """
+    wish = _create_wish(client, name='蛋烘糕', category='美食', city='成都')
+    resp = client.post(
+        f"{WISHES_URL}{wish['id']}/add_to_plan/", {'name': '川西小环线'}, format='json',
+    )
+    assert resp.status_code == 200, resp.data
+    assert resp.data['plan']['name'] == '川西小环线'
+    assert resp.data['plan']['destination'] == '成都'
+    plan_id = resp.data['plan']['id']
+    assert TravelPlanStop.objects.filter(plan_id=plan_id, city='成都').count() == 1
 
 
 def test_add_to_existing_plan_and_duplicate_guard(client, db):

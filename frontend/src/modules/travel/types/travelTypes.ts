@@ -105,11 +105,49 @@ export interface TravelPlanItem {
   notes: string
   sort_order: number
   wish: number | null
+  /** 所属站点 id；`null` = 「路上」（城际交通，不属于任何城市） */
+  stop?: number | null
+}
+
+/** 站点四类条目计数（键固定四类，值为 0 也要在） */
+export interface TravelPlanStopCounts {
+  food: number
+  scenic: number
+  transport: number
+  hotel: number
+}
+
+/**
+ * 路线上的一个站点。
+ *
+ * 🔴 `city` 是坐标表里的规范名（泉州 → 泉州市），`city_input` 才是用户填的原样。
+ *    编辑表单回填必须用 `city_input`，用 `city` 会把「泉州」悄悄改成「泉州市」。
+ * 🔴 `days = null` 是「还定不下来」，不是 0；0 是「路过不过夜」。
+ * 🔴 `located = false` ⇒ 城市名没在坐标表里找到：照常列出来，但地图上不画
+ *    （猜坐标会落到海里）。
+ */
+export interface TravelPlanStop {
+  id: number
+  order: number
+  city: string
+  city_input: string
+  province: string
+  days: number | null
+  arrive_date: string | null
+  located: boolean
+  lat: number | null
+  lng: number | null
+  subtotal: number
+  counts: TravelPlanStopCounts
+  notes: string
+  /** 列表接口**不下发这个键**（省 106 条子项的查询），不是给了空数组 */
+  items?: TravelPlanItem[]
 }
 
 export interface TravelPlan {
   id: number
   name: string
+  /** 派生值 = 最后一站的城市名（只读，别再往里写） */
   destination: string
   start_date: string | null
   status: string
@@ -117,22 +155,50 @@ export interface TravelPlan {
   notes: string
   created_at: string
   updated_at: string
-  items: TravelPlanItem[]
+  /** 按 order 排好的站点；`items` 只在详情接口才有 */
+  stops: TravelPlanStop[]
+  /** 「路上」—— 城际交通，不归属任何城市 */
+  transfer_items: TravelPlanItem[]
+  stops_total: number
+  transfer_total: number
+  /** 全程天数；任一站天数未知 ⇒ `null`，0 站 ⇒ 0 */
+  total_days: number | null
+}
+
+/** 新建计划时随请求带上的站点（此刻站点 id 还不存在） */
+export interface TravelPlanStopInput {
+  city: string
+  province?: string
+  days?: number | null
+  notes?: string
 }
 
 export interface TravelPlanItemInput {
   item_type: TravelPlanItemType
   name: string
   estimate_cost: number
+  notes?: string
+  /** 新建计划时用下标指认归属站（站点 id 还不存在） */
+  stop_index?: number
+  /** 已有计划里用 id 指认（`null` = 路上） */
+  stop?: number | null
+}
+
+/** 编辑已有计划时提交的形状：站点改动走独立的站点端点，不在这里整份替换 */
+export interface TravelPlanPatch {
+  name?: string
+  start_date?: string | null
+  status?: string
+  notes?: string
 }
 
 export interface TravelPlanInput {
   name: string
-  destination: string
   start_date: string | null
   status?: string
   notes?: string
-  items: TravelPlanItemInput[]
+  stops?: TravelPlanStopInput[]
+  items?: TravelPlanItemInput[]
 }
 
 export interface TravelPlanStats {

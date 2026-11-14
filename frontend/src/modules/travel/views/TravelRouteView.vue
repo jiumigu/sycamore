@@ -183,11 +183,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import betterEchartsMaps from 'better-echarts-maps/dist/china.js'
 import draggable from 'vuedraggable'
 
 import * as api from '../../toolkit/api/toolkitApi'
 import * as travelApi from '../api/travelApi'
+import { registerChinaProvinceMap, PROVINCE_MAP_NAME } from '../utils/chinaProvinceMap'
+import { fitRouteView } from '../utils/routeView'
 import type { CityCoordinate, TravelRoutePreset } from '../../toolkit/types/toolkitTypes'
 import type { RouteStation } from '../types/travelTypes'
 
@@ -239,6 +240,9 @@ async function loadCities() {
     // 静默失败，无坐标时使用默认值
   } finally {
     loadingCities.value = false
+    // 🔴 坐标表是异步来的：从 query 直接推演时，站点往往在它到位之前就画上去了，
+    //    全部站点挤在兜底坐标上（看起来「只画了一个城市」）。到位后补画一次。
+    if (started.value) updateMap()
   }
 }
 
@@ -359,41 +363,9 @@ function getCoords(name: string): [number, number] {
   return c ? [c.lng, c.lat] : [118.3, 25.5]
 }
 
-function calcCenter(): [number, number] {
-  const coords: [number, number][] = []
-  for (const s of stops.value) {
-    const c = getCoords(s)
-    if (c[0] !== 118.3 || c[1] !== 25.5 || findCity(s)) {
-      coords.push(c)
-    }
-  }
-  if (coords.length === 0) return [118.3, 25.5]
-  const avgLng = coords.reduce((s, c) => s + c[0], 0) / coords.length
-  const avgLat = coords.reduce((s, c) => s + c[1], 0) / coords.length
-  return [avgLng, avgLat]
-}
-
-function calcZoom(): number {
-  const coords: [number, number][] = []
-  for (const s of stops.value) {
-    const c = getCoords(s)
-    if (c[0] !== 118.3 || c[1] !== 25.5 || findCity(s)) {
-      coords.push(c)
-    }
-  }
-  if (coords.length < 2) return 8
-
-  const lngs = coords.map(c => c[0])
-  const lats = coords.map(c => c[1])
-  const lngRange = Math.max(...lngs) - Math.min(...lngs)
-  const latRange = Math.max(...lats) - Math.min(...lats)
-  const maxRange = Math.max(lngRange, latRange)
-
-  if (maxRange < 0.5) return 15
-  if (maxRange < 2) return 10
-  if (maxRange < 5) return 5
-  if (maxRange < 15) return 3
-  return 1.5
+/** 能定位到的站点坐标：查不到城市名的站不进取景（否则视野被兜底点拽到闽东） */
+function locatedCoords(): [number, number][] {
+  return stops.value.filter((s) => !!findCity(s)).map((s) => getCoords(s))
 }
 
 function startJourney() {
@@ -424,11 +396,8 @@ function reset() {
 
 function initMap() {
   if (!chartRef.value) return
-
-  const chinaPkg = (betterEchartsMaps as any)
-  const chinaGeoJSON = chinaPkg.China?.[0]?.[1] || chinaPkg
-  echarts.registerMap('china', chinaGeoJSON)
-
+  // 取 GeoJSON 再注册的写法统一在 utils/chinaProvinceMap（计划地图共用同一份）
+  registerChinaProvinceMap()
   chart = echarts.init(chartRef.value)
 }
 
@@ -445,8 +414,7 @@ function getTrainPos(): [number, number] {
 }
 
 function buildOption() {
-  const center = calcCenter()
-  const zoom = calcZoom()
+  const { center, zoom } = fitRouteView(locatedCoords())
 
   const series: any[] = []
 
@@ -582,7 +550,7 @@ function buildOption() {
 
   return {
     geo: {
-      map: 'china',
+      map: PROVINCE_MAP_NAME,
       roam: true,
       center,
       zoom,
