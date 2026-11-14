@@ -115,7 +115,12 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
+import { todayLocal } from '@/shared/utils/datetime'
 import { useClassifyStore } from '../../stores/classifyStore'
+import {
+  pickSubcategoryOptions,
+  subcategoryPlaceholder as subPlaceholder,
+} from '../../utils/billCategoryOptions'
 import type { BillCategoryOption, BillCreateData } from '../../types/wealthTypes'
 
 const emit = defineEmits<{
@@ -146,28 +151,16 @@ const categoryOptions = computed<BillCategoryOption[]>(
 /**
  * 子分类候选：选了分类就只给该分类下的，没选（或该分类还没历史）就给全局。
  *
- * ⚠️ **该分类没有历史时必须回退全局**，不能给空列表：分类可以在口径配置里先行
- *    登记（那时账本里一条记录都没有），此时若只给空列表，用户会觉得
- *    「刚建好的分类一个子分类都选不了」。
- *
- * 🔴 回退用的是后端下发的 `subcategories_all`，**不是**把 `subcategories` 自己拍平 ——
- *    拍平就得在前端再决定一次顺序，那又是一份局部口径（第一版就踩了：
- *    按各分类键序拼接，把「早午晚餐（3026 笔）」排到了「公交（134 笔）」后面）。
+ * 🔴 联动规则本身在 `utils/billCategoryOptions.ts` —— 与页头「快速记录」的记账页签
+ *    **共用同一份**。两边各写一遍的话，同一个分类在两个入口会给出不同的子分类候选，
+ *    而且不报错、只有用户觉得「怎么这里选不到」。
  */
-const subcategoryOptions = computed<BillCategoryOption[]>(() => {
-  const options = classifyStore.billOptions
-  if (!options) return []
-
-  if (form.category) {
-    const grouped = options.subcategories[form.category]
-    if (grouped && grouped.length) return grouped
-  }
-
-  return options.subcategories_all ?? []
-})
+const subcategoryOptions = computed<BillCategoryOption[]>(() =>
+  pickSubcategoryOptions(classifyStore.billOptions, form.category),
+)
 
 /** 未选分类时说明「这是全部子分类」，省得有人以为候选丢了 */
-const subcategoryPlaceholder = computed(() => (form.category ? '可选' : '可选（全部）'))
+const subcategoryPlaceholder = computed(() => subPlaceholder(form.category))
 
 const form = reactive<BillCreateData>({
   transaction_type: '支出',
@@ -178,7 +171,9 @@ const form = reactive<BillCreateData>({
   account: '',
   merchant: '',
   notes: '',
-  date: props.defaultDate || new Date().toISOString().slice(0, 10),
+  // 🔴 必须用本地日期：`new Date().toISOString().slice(0,10)` 取的是 UTC，
+  //    北京时间 00:00–07:59 会得到昨天（v3.64.48 修，唯一实现在 shared/utils/datetime.ts）
+  date: props.defaultDate || todayLocal(),
 })
 
 /**

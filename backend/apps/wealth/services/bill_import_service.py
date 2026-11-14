@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -41,8 +42,8 @@ BILL_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     'date': ('日期', '交易日期', '时间', '交易时间', 'date'),
     'amount': ('金额', '交易金额', '发生金额', 'amount'),
     'transaction_type': ('交易类型', '收支类型', '类型', '收/支', '收支', 'type'),
-    'category': ('分类', '一级分类', 'category'),
-    'subcategory': ('子分类', '二级分类', 'subcategory'),
+    'category': ('分类', '一级分类', '类目', '类别', 'category'),
+    'subcategory': ('子分类', '二级分类', '小类', '细类', 'subcategory'),
     'project': ('项目', 'project'),
     'account': ('账户', '账号', '支付方式', 'account'),
     'account_currency': ('币种', '账户币种', 'currency'),
@@ -50,6 +51,36 @@ BILL_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     'merchant': ('商户', '商家', '交易对方', 'merchant'),
     'notes': ('备注', '说明', 'notes'),
 }
+
+#: 精确别名都没命中时，按「名字里带这些词」兜底再认一次。
+#:
+#: 🔴 为什么必须有这一层：换成按列名识别之后，列名对不上就**静默丢列** ——
+#:    `消费分类` / `支出分类` / `分类(一级)` 这类同义写法全都不在别名表里，
+#:    导进去分类是空的，而接口照旧返回「新增 N 条」。按位置取值的老实现
+#:    反而不会出这个问题（列名随便叫，位置是对的），所以这是一次真实的回归。
+#:
+#: 🔴 顺序有意义：`子分类` 里含 `分类`，必须先判子分类，否则前者永远认不出来。
+#:    同理 `交易类型` 不能放进 `分类` 的关键词里（它含「类型」不含「分类」，
+#:    但 `类别` 与 `类型` 只差一个字，别顺手把 `类型` 加进分类）。
+BILL_FUZZY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ('subcategory', (
+        '子分类', '二级分类', '小类', '细类', '子类目',
+        # 导出工具对「第二级」的叫法五花八门，穷举一定漏；但只要是「子/二级/细」
+        # 开头或含「二级」，就是它。下面还有一条结构性兜底（见 `_match_header`），
+        # 两列分类挤在同义词表外面时也不至于丢。
+        '子类别', '细分类', '子级', '二级', '次级', '子类', 'subcategory',
+    )),
+    ('category', ('分类', '类目', '类别')),
+    ('transaction_type', ('交易类型', '收支类型', '收支', '方向')),
+    ('account_currency', ('币种', 'currency')),
+    ('amount', ('金额', '发生额', 'amount')),
+    ('date', ('日期', '交易时间', '记账时间', '时间')),
+    ('account', ('账户', '账号', '支付方式')),
+    ('merchant', ('商家', '商户', '交易对方')),
+    ('notes', ('备注', '说明')),
+    ('member', ('成员',)),
+    ('project', ('项目',)),
+)
 
 #: 缺这两列就没法入库 —— 其余都可以空着
 BILL_REQUIRED_FIELDS: tuple[str, ...] = ('date', 'amount')
@@ -165,6 +196,9 @@ class BillRowError:
 class BillParseResult:
     header_row: int = 0                       # 1-based，给前端显示
     columns: list[dict] = field(default_factory=list)   # [{raw, mapped, sample}]
+    #: 没认出来、但**确实有值**的列：[{raw, sample, filled}]
+    #: 🔴 这份清单存在的唯一目的：不让「列名没对上」变成静默丢数据
+    ignored_columns: list[dict] = field(default_factory=list)
     needs_default_type: bool = False
     records: list[BillRecord] = field(default_factory=list)
     errors: list[BillRowError] = field(default_factory=list)
@@ -184,9 +218,23 @@ def _norm(cell: str) -> str:
     return (cell or '').replace('\ufeff', '').replace('\u3000', '').strip().lower()
 
 
+#: 括号里的单位/注释：`金额（元）`、`分类[必填]`、`日期(YYYY-MM-DD)`
+_BRACKET_RE = re.compile(r'[（(\[{【][^）)\]】]*[）)\]】]')
+
+
+def _clean_name(cell: str) -> str:
+    """在 `_norm` 之上再去掉括号注释、星号与空格 —— `*金额（元）` 就是「金额」。
+
+    导出工具很喜欢给列名加装饰：必填星号、单位括号、全角空格。
+    这些都和「这一列是什么」无关，加进来只会让精确匹配落空。
+    """
+    text = _BRACKET_RE.sub('', _norm(cell))
+    return text.replace('*', '').replace(' ', '').replace('\u200b', '').strip()
+
+
 #: 预先拍平的别名，避免每次比对都遍历字典（表头不超过 20 列，但这个更直观）
 _ALIAS_INDEX: dict[str, str] = {
-    _norm(alias): field_name
+    _clean_name(alias): field_name
     for field_name, aliases in BILL_COLUMN_ALIASES.items()
     for alias in aliases
 }
@@ -206,17 +254,49 @@ def decode_csv_bytes(raw: bytes) -> str:
     raise BillCsvFormatError('文件编码认不出来，请另存为 UTF-8 或 GBK 再试')
 
 
+def _fuzzy_fields(name: str) -> list[str]:
+    """名字里带哪些关键词 ⇒ 可能是什么字段（按别名表顺序，先到先用）。"""
+    return [
+        field_name
+        for field_name, keywords in BILL_FUZZY_KEYWORDS
+        if any(kw in name for kw in keywords)
+    ]
+
+
 def _match_header(row: list[str]) -> dict[str, int]:
     """一行里能认出哪些字段，返回 {字段: 列下标}。
 
     认不出的列不在这里报 —— `_build_columns` 会把它们以 `mapped=''` 列出来，
     同一件事只说一遍。
+
+    🔴 分两轮：**先所有列走精确匹配，再用同义词兜底**。
+       一轮内边认边兜底的话，`创建时间` 排在前面的文件会把 `日期` 抢走 ——
+       兜底只能捡精确匹配剩下的，不能抢。
     """
+    cleaned = [_clean_name(cell) for cell in row]
     mapping: dict[str, int] = {}
-    for idx, cell in enumerate(row):
-        field_name = _ALIAS_INDEX.get(_norm(cell))
+
+    for idx, name in enumerate(cleaned):
+        field_name = _ALIAS_INDEX.get(name)
         if field_name and field_name not in mapping:
             mapping[field_name] = idx
+
+    for idx, name in enumerate(cleaned):
+        if not name or idx in mapping.values():
+            continue
+        candidates = _fuzzy_fields(name)
+        for field_name in candidates:
+            if field_name not in mapping:
+                mapping[field_name] = idx
+                break
+        else:
+            # 结构性兜底：两列分类挤在同义词表外面（`分类` + `分类2` /
+            # `分类(二级)` / `二级类别` …），第二列本来会被整列丢掉，
+            # 而接口照旧回「新增 N 条」—— 子分类全空且不报错。
+            # 判据：这一列最像分类、一级分类已被占、子分类还空着。
+            if candidates and candidates[0] == 'category' and 'subcategory' not in mapping:
+                mapping['subcategory'] = idx
+
     return mapping
 
 
@@ -285,15 +365,27 @@ def _apply_user_mapping(
 
     用户改过的映射**整份覆盖**自动识别结果，不与推断结果合并 ——
     合并的后果是「界面上明明清空了，导进去却还有值」。
+
+    先按**原始列名**精确对位，再退回清洗后的名字：前端回传的就是表头原文，
+    原文对得上就不该再走归一化（同名两列时归一化会一律指到第一列）。
     """
-    norm_header = [_norm(cell) for cell in header]
+    raw_header = [(cell or '').strip() for cell in header]
+    cleaned_header = [_clean_name(cell) for cell in header]
+
     result: dict[str, int] = {}
     for raw_name, field_name in user_mapping.items():
         if not field_name:
             continue
-        key = _norm(raw_name)
-        if key in norm_header and field_name not in result:
-            result[field_name] = norm_header.index(key)
+        key = (raw_name or '').strip()
+        if key in raw_header:
+            idx = raw_header.index(key)
+        else:
+            cleaned = _clean_name(raw_name)
+            if cleaned not in cleaned_header:
+                continue
+            idx = cleaned_header.index(cleaned)
+        if field_name not in result:
+            result[field_name] = idx
     return result
 
 
@@ -401,7 +493,36 @@ def parse_bill_csv(
             result.errors.append(BillRowError(row_no=row_no, reason=str(exc), content=content))
 
     result.columns = _build_columns(rows, header_idx, mapping)
+    result.ignored_columns = _ignored_columns(rows, header_idx, mapping, data_rows)
     return result
+
+
+def _ignored_columns(
+    rows: list[list[str]],
+    header_idx: int,
+    mapping: dict[str, int],
+    data_rows: list[list[str]],
+) -> list[dict]:
+    """没被认领、但**有值**的列。
+
+    🔴 这是「按列名识别」带来的一种新型静默失败：列名对不上就不再取值，
+    而接口照旧回「新增 N 条」—— 用户只会在月底对账时发现分类全空。
+    凡是这种列，一律摆到预演界面上，让用户在落库前看见。
+    """
+    used = set(mapping.values())
+    header = rows[header_idx]
+    out: list[dict] = []
+
+    for idx, raw_name in enumerate(header):
+        name = (raw_name or '').strip()
+        if not name or idx in used:
+            continue
+        values = [(row[idx] or '').strip() for row in data_rows if idx < len(row)]
+        filled = [v for v in values if v]
+        if not filled:
+            continue
+        out.append({'raw': name, 'sample': filled[0][:40], 'filled': len(filled)})
+    return out
 
 
 def _build_columns(
@@ -464,6 +585,7 @@ class BillPreview:
 
     header_row: int
     columns: list[dict]
+    ignored_columns: list[dict]
     needs_default_type: bool
     total: int
     new: int
@@ -554,6 +676,7 @@ def build_preview(parse: BillParseResult) -> BillPreview:
     return BillPreview(
         header_row=parse.header_row,
         columns=parse.columns,
+        ignored_columns=parse.ignored_columns,
         needs_default_type=parse.needs_default_type,
         total=parse.total,
         new=len(split.new),

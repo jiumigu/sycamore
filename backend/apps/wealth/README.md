@@ -180,8 +180,8 @@
 | GET | /monthly_calendar/ | 月度日历数据 |
 | GET | /daily_detail/ | 单日收支明细 |
 | GET | /monthly_summary/ | 月度汇总统计 |
-| POST | /bill/create/ | 快速记账 |
-| POST | /import/preview/ | **账单 CSV 预演**（v3.65，只读）：按列名映射解析，返回「认出哪些列 / 新增几条 / 重复几条 / 哪几行有问题」，另给 `field_options`（映射下拉候选，唯一来源是别名表）。判重口径与落库**逐字一致**（同一个 `split_records()`），**不写库**。前端入口：月度日历页「导入CSV」→ 选文件即预演 → 确认才落库（`components/monthly/BillImportDialog.vue`） |
+| POST | /bill/create/ | 快速记账（页头「记一笔」与月度页 `DayDetailModal` 共用）。必填 `transaction_type` + `amount`（**必须 > 0**，方向由类型表达，负数会让支出统计悄悄偏移）+ `date`（存**本地** 00:00，`year/month/day` 由它派生）；`category` 可空 —— 归属与必要程度本来就是后置归类。🔴 这条 INSERT 只写 15 列，**永远带不了** `period_tag` / `necessity` / `member` / `related_id` / `account_currency`，见视图 docstring |
+| POST | /import/preview/ | **账单 CSV 预演**（v3.65，只读）：按列名映射解析，返回「认出哪些列 / 新增几条 / 重复几条 / 哪几行有问题」，另给 `field_options`（映射下拉候选，唯一来源是别名表）。判重口径与落库**逐字一致**（同一个 `split_records()`），**不写库**。前端入口：月度日历页「导入CSV」→ 选文件即预演 → 确认才落库（`components/monthly/BillImportDialog.vue`）。🔴 列名认法：精确别名 → `_clean_name` 去装饰（`*金额（元）`）→ `BILL_FUZZY_KEYWORDS` 同义兜底（`消费分类`/`类目`→分类，`子分类` 先判；兜底**只在精确匹配剩下的列上**生效，否则 `创建时间` 会抢走「日期」）→ **结构性兜底**：某列最像分类、一级分类已被占、子分类还空着 ⇒ 认成子分类（两列分类的结构只有一种，名字有无数种，`子类别`/`分类2`/`分类(二级)` 都靠这条兜住，v3.64.47）。认不出**但有值**的列走 `ignored_columns`（`{raw,sample,filled}`）下发，前端黄色警告并自动展开列映射 —— 不列出来就是「导入成功、分类全空」（v3.64.46 的回归） |
 | POST | /import/csv/ | 账单 CSV 落库（v3.65）：与 `/import/preview/` **同一份解析器**，按列名识别；可选 `mapping`（手工指认列）与 `skip_rows`（勾掉的行，单独计 `skipped_by_user`）；无类型列且无 `default_type` ⇒ 400；去重键 = 同一天 + 同金额 + 同类型，文件内完全相同的两行**各插一条**（`Counter` 计重数）。🔴 回归基线：15 行随手记原格式 → `created 13 / skipped 2 / duplicated 0`，改解析器时这三个数必须不变（`tests/test_bill_import_regression.py`） |
 | GET | /regular/stats/ | 定期存款统计 |
 | GET | /regular/expiring/ | 到期提醒 |

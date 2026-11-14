@@ -25,6 +25,7 @@
 | `WeekDetailModal.vue` | 周明细弹窗（⚠️「明细加载失败」与「本周无账单记录」是**两个状态**，由 store 的 `weekDetailError` 区分 —— 取不到不许显示成「没有」；失败给重试） |
 | `monthly/` | 月度日历子组件（CalendarHeader/CalendarGrid/StatsFooter/DayDetailModal） |
 | `common/QuickBillForm.vue` | 快速记账表单（⚠️ 分类/子分类的候选**只有一个来源**：`GET /wealth/classify/bill-options/`。本组件**不自己取数、不持有任何分类常量** —— 取数时机由 `DayDetailModal` 决定；换分类会清空已选子分类） |
+| `common/QuickBillInlineForm.vue` | **页头「快速记录」的记账页签**（v3.64.48 起；五个字段：金额 / 类型 / 分类 / 子分类 / 日期）。子分类是「刻意精简」的**唯一例外** —— 它参与口径判定（见下方「分类规则与账单的边界」）。联动走 `utils/billCategoryOptions.ts`，与 `QuickBillForm` 共用同一份 |
 | `common/LunarUtil.js` | 农历/节气/节日计算 |
 | `regular/RegularStatsCards.vue` | 定期统计卡 |
 | `regular/ExpiringAlert.vue` | 到期提醒列表 |
@@ -196,16 +197,30 @@ Vite 的热更新只重建 `.vue` 组件，而 **Pinia 的 store 实例是按 id
 | 该管的事 | 谁管 |
 |---|---|
 | 候选有哪些值、什么顺序 | 后端（账本笔数 ∪ 口径配置登记值） |
-| 联动（分类 → 该分类下的子分类） | 后端下发 `subcategories` |
+| 联动（分类 → 该分类下的子分类） | 后端下发 `subcategories`；**取哪个桶的唯一实现在** `utils/billCategoryOptions.ts`（`QuickBillForm` 与 `QuickBillInlineForm` 共用，两边各写一遍 = 同一分类在两个入口给不同候选） |
 | 未选分类时的全局候选 | 后端下发 `subcategories_all`（🔴 **不许前端自己拍平 `subcategories`** —— 拍平就得再决定一次顺序，顺序也是口径） |
-| **什么时机取数** | 容器 `DayDetailModal` —— `watch(() => props.visible)` 每次打开刷一次 |
-| 只读与联动清空 | `QuickBillForm.vue`（换分类 ⇒ 清子分类） |
+| **什么时机取数** | ① 单日明细弹窗：容器 `DayDetailModal` —— `watch(() => props.visible)` 每次打开刷一次；② 页头面板：`QuickBillInlineForm` 自己 `onMounted`（它挂在 `v-if="isBill"` 后面，每切到「记账」就重新挂载一次，天然每次刷新） |
+| 只读与联动清空 | 两个表单都做（换分类 ⇒ 清子分类）；判据同上唯一实现 |
 
 🔴 **`el-dialog` 的插槽只在首次打开时渲染一次** ⇒ 弹窗内子组件的 `onMounted` 一生只跑一次，
 把取数挂在那里，第二次打开拿到的还是上一次的候选。必须挂容器的 `watch(visible)`。
 
 ⚠️ `filterable` + `allow-create` 两个都要留：① 被停用过的分类名历史账单还在用；
 ② 分类体系是长出来的，允许「先记账、后补规则」。
+
+### 为什么「随手记」里留了子分类（v3.64.49）
+
+页头录入口的原则是「字段越少越好，多一格就多一次决策、记账就往后拖」，
+所以账户 / 商户 / 项目 / 备注 / 必要程度 / 归属**一律不出现**。子分类是唯一的例外，
+理由不是「顺手」，而是它**参与口径判定**：
+
+| 事实 | 后果 |
+|---|---|
+| `CLASSIFY_RULE` 的匹配字段是 category / subcategory / merchant，且同优先级时**更具体的字段胜**（`subcategory` > `category`） | 没有子分类，「早午晚餐 → 品质支出」这类规则**永远打不中** |
+| 未归类候选按 `(category, subcategory)` 聚合 | 子分类为空只能按大类给建议，粗一档 |
+| CSV 导入本来就带子分类 | 手记的不带 ⇒ 同一张表两种数据质量，事后分不清「真没有」还是「录入口没给」 |
+
+判据：**会被规则或报表当作输入的字段，不能只在一个入口能填**；纯描述性字段才可以后置。
 
 ### 这一页的脱敏判据
 

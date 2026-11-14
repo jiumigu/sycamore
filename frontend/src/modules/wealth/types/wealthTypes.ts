@@ -1356,10 +1356,20 @@ export interface BillImportSummary {
   inner_duplicate: number
 }
 
+/** 没认出来、但确实有值的列 —— 不列出来就是「导完才发现分类全空」 */
+export interface BillIgnoredColumn {
+  raw: string
+  /** 该列第一个非空值，用来判断它是不是分类 */
+  sample: string
+  /** 该列有多少行有值 */
+  filled: number
+}
+
 export interface BillImportPreview {
   header_row: number
   columns: BillImportColumn[]
   field_options: BillFieldOption[]
+  ignored_columns: BillIgnoredColumn[]
   /** 文件里没有「交易类型」列 ⇒ 落库前必须指定方向 */
   needs_default_type: boolean
   summary: BillImportSummary

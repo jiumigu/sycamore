@@ -2,7 +2,7 @@
   <el-dialog
     v-model="visible"
     title="导入账单 CSV"
-    width="640px"
+    width="720px"
     class="bill-import"
     @close="handleClose"
   >
@@ -81,6 +81,27 @@
           </span>
         </div>
 
+        <!-- 没认出来的列只要有值就要摆出来：否则「导入成功、分类全空」，月底才发现 -->
+        <el-alert
+          v-if="preview.ignored_columns?.length"
+          class="ignored"
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <template #title>
+            <span>
+              有 {{ preview.ignored_columns.length }} 列有内容但不会导入：
+              <b v-for="(col, i) in preview.ignored_columns" :key="col.raw">
+                {{ col.raw }}<template v-if="col.sample">（例：{{ col.sample }}）</template><template v-if="i < preview.ignored_columns.length - 1">、</template>
+              </b>
+            </span>
+          </template>
+          <div class="ignored__hint">
+            要保留这些内容，展开下方「列映射」把每一列指到对应字段，指完会自动重新预演。
+          </div>
+        </el-alert>
+
         <!-- 没有类型列 ⇒ 必须由人指定方向，猜错不会报错，只会把收入记成支出 -->
         <div v-if="preview.needs_default_type" class="default-type">
           <span class="default-type__label">这份文件没有「交易类型」列，这批账是：</span>
@@ -133,6 +154,9 @@
             <span class="rows__date">{{ row.date || '—' }}</span>
             <span class="rows__type">{{ row.type || '—' }}</span>
             <span class="rows__amount">{{ row.amount == null ? '—' : `¥${row.amount.toFixed(2)}` }}</span>
+            <span class="rows__cat" :class="{ 'rows__cat--empty': !row.category && !row.subcategory }">
+              {{ row.category || '—' }}<template v-if="row.subcategory"> / {{ row.subcategory }}</template>
+            </span>
             <el-tag :type="verdictTag(row.verdict)" size="small">{{ verdictLabel(row.verdict) }}</el-tag>
             <span class="rows__reason">{{ row.reason }}</span>
           </div>
@@ -287,18 +311,22 @@ async function runPreview() {
     })
     preview.value = res.data
     fieldOptions.value = res.data.field_options
+    // 有「有值但没被认领」的列 ⇒ 直接把列映射摊开：警告挂在折叠区外面，
+    // 用户很容易点「确认导入」走人，然后在账单列表上才发现子分类是空的。
+    if (res.data.ignored_columns?.length) mappingOpen.value = true
   } catch (e: any) {
     const data = e?.response?.data
     preview.value = null
     formatError.value = data?.error || '这份文件读不了，请确认是 CSV'
     formatColumns.value = data?.columns ?? []
     fieldOptions.value = data?.field_options ?? []
-    // 认不出的列先全置空，等用户手动指认；不预填任何猜测。
-    // 🔴 只补「没有过的」列，**不能整份重置**：缺列时每指一列都会再拿一次 400，
-    //    整份重置等于把用户刚选的那一列冲掉 —— 三列永远指不完。
+    // 认不出的列先置空，等用户手动指认；但**已经认出来的列要留住**。
+    // 🔴 只补「没有过的」列，且用后端已经认出的结果兜底，不能整份置空：
+    //    缺列时每指一列都会再拿一次 400，整份置空等于把刚从 400 里带回来的
+    //    识别结果也一起冲掉 —— 用户补完日期和金额，分类就永久变成「未识别」。
     const init: Record<string, string> = { ...mapping.value }
     for (const col of formatColumns.value) {
-      if (!(col.raw in init)) init[col.raw] = ''
+      if (!(col.raw in init)) init[col.raw] = col.mapped ?? ''
     }
     mapping.value = init
     // 这份文件必须手动指认才有救，直接把映射摊开
@@ -475,6 +503,16 @@ function handleClose() {
   }
 }
 
+.ignored {
+  margin-top: 10px;
+
+  &__hint {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--el-color-warning-dark-2);
+  }
+}
+
 .mapping {
   margin-top: 12px;
   border: 1px solid var(--el-border-color-lighter);
@@ -578,6 +616,18 @@ function handleClose() {
   &__amount {
     min-width: 74px;
     font-variant-numeric: tabular-nums;
+  }
+
+  &__cat {
+    min-width: 116px;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &--empty {
+      color: var(--el-color-danger);
+    }
   }
 
   &__reason {

@@ -24,3 +24,19 @@ export function formatDateTime(iso?: string | null): string {
   if (!iso) return ''
   return iso.slice(0, 16).replace('T', ' ')
 }
+
+/**
+ * 今天（**本地时区**）的 `YYYY-MM-DD`。
+ *
+ * 🔴 禁用 `new Date().toISOString().slice(0, 10)`：`toISOString()` 永远输出 UTC，
+ *    北京时间 00:00–07:59 取到的是**昨天**。这个错不会报错、也不会让界面看着
+ *    奇怪 —— 只是「我早上记的账落到了昨天」，事后对账才发现（v3.64.48 修）。
+ *
+ * 只到天：日期控件的值就是天，不掺时间。
+ */
+export function todayLocal(): string {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}

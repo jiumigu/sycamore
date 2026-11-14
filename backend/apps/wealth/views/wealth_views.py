@@ -457,7 +457,13 @@ class MonthlySummaryView(APIView):
 
 
 class BillCreateView(CreateAPIView):
-    """快速记账"""
+    """快速记账
+
+    🔴 这条 INSERT 只写 15 列，**永远不会带** `period_tag` / `necessity` /
+       `member` / `related_id` / `account_currency`。不是懒，是实现上就没有这几列 ——
+       所以「记账时顺手标归属」做不到，归属只能事后在 `BillListView` 行内或批量标。
+       将来要改，必须换成按模型字段生成的列清单（见 `bill_import_service._insert_plan`）。
+    """
 
     serializer_class = BillCreateSerializer
 
@@ -944,6 +950,8 @@ class BillImportPreviewView(APIView):
             'header_row': preview.header_row,
             'columns': preview.columns,
             'field_options': bill_field_options(),
+            # 没认出来但有值的列 —— 不列出来就是「导完才发现分类全空」
+            'ignored_columns': preview.ignored_columns,
             'needs_default_type': preview.needs_default_type,
             'summary': {
                 'total': preview.total,

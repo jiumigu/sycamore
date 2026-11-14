@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 
 from rest_framework import serializers
 
@@ -156,9 +157,17 @@ class MonthlySummarySerializer(serializers.Serializer):
 
 
 class BillCreateSerializer(serializers.Serializer):
-    """快速记账"""
+    """快速记账
+
+    🔴 `amount` 必须大于 0：金额是**绝对数**，方向由 `transaction_type` 表达。
+       放任 0 或负数入库的后果不是报错 —— 是支出统计里混进 0 元账、
+       或者一笔「-5 元的支出」把当日净支出反向拉低，界面上看不出任何异常
+       （导入那条路已经在 `_parse_amount` 里取绝对值，这里补上另一端）。
+    """
     transaction_type = serializers.ChoiceField(choices=['收入', '支出'])
-    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal('0.01'),
+    )
     category = serializers.CharField(max_length=50, allow_blank=True)
     subcategory = serializers.CharField(max_length=50, allow_blank=True, required=False)
     project = serializers.CharField(max_length=100, allow_blank=True, required=False)

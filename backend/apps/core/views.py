@@ -110,6 +110,16 @@ class QuickRecordView(APIView):
                 status='pending',
                 source='manual',
             )
+        else:
+            # 🔴 未知 module 必须报错。原来的写法是落到函数末尾直接返回
+            #    `success: True`：前端把模块名拼错一次，用户看到「已记录」，
+            #    而库里什么都没写 —— 典型的静默失败，事后无从查起。
+            #    ⚠️ 记账（wealth）不走这里：它有自己的 `/wealth/bill/create/`，
+            #       这条通道只处理纯文本记录（日记 / 小确幸 / 待办）。
+            return Response(
+                {'error': f'不认识的记录类型「{module}」', 'code': 'unknown_module'},
+                status=400,
+            )
 
         return Response({'success': True, 'message': '记录成功'})
 
