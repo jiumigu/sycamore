@@ -143,6 +143,17 @@
       <span class="bulk-hint">按 task_name 生效：该任务名下的全部记录一次性归类</span>
     </div>
 
+    <!-- 幽灵行：有字典、没记录。多半是登记时名字没写完（「冥想」vs「心灵冥想」），
+         留着会让同一个活动在报表里分成两行。这里只提示，删/并都由右边那一列手动做。 -->
+    <el-alert
+      v-if="ghostNames.length"
+      type="info" :closable="false" show-icon class="hint-alert"
+      :title="`${ghostNames.length} 个任务名从没记过时间：${ghostNames.slice(0, 6).join('、')}${ghostNames.length > 6 ? ' 等' : ''}`"
+    >
+      通常是登记时没写完的名字（比如「冥想」和「心灵冥想」）。可以<b>删除</b>，
+      也可以<b>改名/合并</b>到同义的那个名字上 —— 合并后同一个活动只占一行。
+    </el-alert>
+
     <el-card class="panel-card table-card" shadow="never">
       <el-table
         ref="tableRef"
@@ -270,6 +281,26 @@
             </el-tooltip>
           </template>
         </el-table-column>
+
+        <!-- 改名 / 合并 / 删除（v3.64.55）。
+             🔴 三个操作都**只作用在任务名这一层**：改名连记录一起改（否则时长凭空归零），
+                删除只在名下 0 条时放行（有量时删了不是删数据，是让那 N 小时从台账消失）。 -->
+        <el-table-column label="操作" width="132" fixed="right">
+          <template #default="{ row }">
+            <span class="row-ops">
+              <el-button link type="primary" size="small" @click="openRename(row)">改名/合并</el-button>
+              <el-tooltip :disabled="!row.record_count" :content="deleteTip(row)" placement="top">
+                <span>
+                  <el-button
+                    link type="danger" size="small"
+                    :disabled="row.record_count > 0"
+                    @click="onDelete(row)"
+                  >删除</el-button>
+                </span>
+              </el-tooltip>
+            </span>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-empty
@@ -278,6 +309,79 @@
         :image-size="70"
       />
     </el-card>
+
+    <!-- 改名 / 合并（v3.64.55）—— 新名已存在就是合并，不用另开一个按钮：
+         那个「哪些名字已存在」的列表就在下面的表格里，让用户自己判断是多余的。 -->
+    <el-dialog v-model="renameVisible" title="改名 / 合并任务名" width="560px">
+      <el-form label-width="86px" size="small">
+        <el-form-item label="原任务名">
+          <span class="rn-old">{{ renameRow?.task_name }}</span>
+          <span class="rn-old-meta">
+            {{ renameRow?.record_count }} 条记录 · {{ (renameRow?.total_hours ?? 0).toFixed(1) }}h ·
+            最近 {{ renameRow?.last_used || '从未' }}
+          </span>
+        </el-form-item>
+        <el-form-item label="改成">
+          <el-autocomplete
+            v-model="newName"
+            :fetch-suggestions="suggestNames"
+            placeholder="输入新名字，或从已有任务名里选一个"
+            clearable
+            style="width:100%"
+            @input="onNameInput"
+            @select="() => fetchPreview()"
+          >
+            <template #default="{ item }">
+              <span>{{ item.value }}</span>
+              <span class="rn-sug-hint">{{ item.hint }}</span>
+            </template>
+          </el-autocomplete>
+        </el-form-item>
+      </el-form>
+
+      <!-- 影响预览由后端算（`dry_run=1`），与真执行同一份判据：
+           前端拿台账行自己猜「这个名字有没有人用过」，列表被筛选过就会猜错。 -->
+      <div v-if="preview" class="rn-impact">
+        <template v-if="preview.merged">
+          <div class="rn-line">
+            <el-tag size="small" type="warning" effect="plain">合并</el-tag>
+            把「{{ preview.task_name }}」并进「{{ preview.new_name }}」
+          </div>
+          <div v-if="preview.moved_records" class="rn-sub">
+            {{ preview.moved_records }} 条记录、{{ fmtH(preview.moved_hours) }} 一起搬过去；
+            「{{ preview.task_name }}」这一行会消失。
+          </div>
+          <div v-else class="rn-sub">
+            名下一条记录都没有 —— 这一步实际上就是<b>删掉</b>「{{ preview.task_name }}」这一行。
+          </div>
+          <div v-if="preview.changed_attrs.length" class="rn-warn">
+            属性以「{{ preview.new_name }}」那行为准：<b>{{ preview.changed_attrs.join('、') }}</b>
+            会按它的值，原来那份被覆盖。
+          </div>
+        </template>
+        <template v-else>
+          <div class="rn-line">
+            <el-tag size="small" type="success" effect="plain">改名</el-tag>
+            「{{ preview.task_name }}」→「{{ preview.new_name }}」
+          </div>
+          <div class="rn-sub">
+            {{ preview.moved_records }} 条记录、{{ fmtH(preview.moved_hours) }} 一起改名；
+            L1 / L2 / 成长计时 / 护栏角色原样保留。
+          </div>
+        </template>
+      </div>
+      <div v-else-if="previewError" class="rn-impact is-error">{{ previewError }}</div>
+      <div v-else-if="newName.trim()" class="rn-impact is-muted">算一下影响面…</div>
+
+      <template #footer>
+        <el-button size="small" @click="renameVisible = false">取消</el-button>
+        <el-button
+          size="small" type="primary"
+          :loading="savingName" :disabled="!canConfirm"
+          @click="confirmRename"
+        >{{ preview?.merged ? '合并' : '改名' }}</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 批量设置 -->
     <el-dialog v-model="bulkVisible" title="批量设置 L2 类型 / 归因 / 成长计时" width="480px">
@@ -318,7 +422,7 @@
 import { apiErrorText } from '@/shared/utils/apiError'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, QuestionFilled, Refresh, Search } from '@element-plus/icons-vue'
 import * as temporalApi from '../api/temporalApi'
 import { useTemporalStore } from '../stores/temporalStore'
@@ -327,7 +431,7 @@ import {
   DAILY_ROLE_OPTIONS,
 } from '../types/temporalTypes'
 import type {
-  AttributionSource, DailyRole, MetaLedgerItem, MetaLedgerSummary,
+  AttributionSource, DailyRole, MetaLedgerItem, MetaLedgerSummary, TaskRenameResult,
 } from '../types/temporalTypes'
 
 /** 批量弹窗的「不修改」哨兵值（不落库，仅前端语义） */
@@ -385,6 +489,12 @@ const filter = reactive<{
   unsetAttrOnly: false,
 })
 
+/** 有没有在用筛选（决定这一次返回能不能当「全量快照」用） */
+const hasAnyFilter = computed(() => !!(
+  filter.search.trim() || filter.activityType || filter.attribution
+  || filter.unclassifiedOnly || filter.growthOnly || filter.roleOnly || filter.unsetAttrOnly
+))
+
 const EMPTY_SUMMARY: MetaLedgerSummary = {
   total: 0, classified: 0, unclassified: 0, total_hours: 0, unclassified_hours: 0,
   growth_count: 0, growth_hours: 0, role_count: 0,
@@ -399,6 +509,123 @@ const bulkVisible = ref(false)
 const bulkForm = reactive<{ activity_type: string; attribution: string; growth: string }>({
   activity_type: '', attribution: ATTR_KEEP, growth: ATTR_KEEP,
 })
+
+// ─── 改名 / 合并 / 删除（v3.64.55）───
+
+/**
+ * 无筛选时的全量台账快照。
+ *
+ * 用途只有两个：① 改名弹窗的候选名；② 「幽灵行」提示（有字典、没记录的名字）。
+ * 不参与任何统计口径 —— 页面上的数字一律来自 `items` / `summary`。
+ */
+const allRows = ref<MetaLedgerItem[]>([])
+const renameVisible = ref(false)
+const renameRow = ref<MetaLedgerItem | null>(null)
+const newName = ref('')
+const preview = ref<TaskRenameResult | null>(null)
+const previewError = ref('')
+const savingName = ref(false)
+let previewTimer: ReturnType<typeof setTimeout> | undefined
+
+const ghostNames = computed(() =>
+  allRows.value.filter(r => !r.record_count).map(r => r.task_name))
+
+const canConfirm = computed(() => {
+  const name = newName.value.trim()
+  const old = renameRow.value?.task_name
+  return !!name && name !== old && !previewError.value && preview.value !== null && !savingName.value
+})
+
+function deleteTip(row: MetaLedgerItem) {
+  return `名下还有 ${row.record_count} 条记录（${row.total_hours.toFixed(1)}h），不能直接删 —— `
+    + '删掉不会删记录，只会让它从台账消失、按兜底归因计入。要并到别处请用「改名/合并」。'
+}
+
+function openRename(row: MetaLedgerItem) {
+  renameRow.value = row
+  newName.value = ''
+  preview.value = null
+  previewError.value = ''
+  renameVisible.value = true
+}
+
+/** 候选名：全部已有任务名（排掉自己），后面带上用量 —— 用户才好判断「并到哪个」 */
+function suggestNames(q: string, cb: (items: { value: string; hint: string }[]) => void) {
+  const kw = (q || '').trim().toLowerCase()
+  const old = renameRow.value?.task_name
+  cb(
+    allRows.value
+      .filter(r => r.task_name !== old && (!kw || r.task_name.toLowerCase().includes(kw)))
+      .slice(0, 20)
+      .map(r => ({ value: r.task_name, hint: `${r.record_count} 条 · ${r.total_hours.toFixed(1)}h` })),
+  )
+}
+
+/** 输入停顿 300ms 再问后端 —— 每敲一个字发一次请求既慢又会被后到的旧响应覆盖 */
+function onNameInput() {
+  preview.value = null
+  previewError.value = ''
+  if (previewTimer) clearTimeout(previewTimer)
+  previewTimer = setTimeout(() => { void fetchPreview() }, 300)
+}
+
+async function fetchPreview() {
+  const row = renameRow.value
+  const name = newName.value.trim()
+  if (!row || !name || name === row.task_name) return
+  try {
+    const res = await temporalApi.renameTaskName({ task_name: row.task_name, new_name: name, dry_run: 1 })
+    // 名字在请求期间又被改了 ⇒ 这份预览已经过期，丢掉（否则会拿旧结论去确认新名字）
+    if (newName.value.trim() !== name) return
+    preview.value = res.data
+    previewError.value = ''
+  } catch (err) {
+    if (newName.value.trim() !== name) return
+    preview.value = null
+    previewError.value = apiErrorText(err, '算不出影响面')
+  }
+}
+
+async function confirmRename() {
+  const row = renameRow.value
+  const name = newName.value.trim()
+  if (!row || !name) return
+  savingName.value = true
+  try {
+    const res = await temporalApi.renameTaskName({ task_name: row.task_name, new_name: name })
+    const d = res.data
+    const moved = d.moved_records
+      ? `${d.moved_records} 条记录、${fmtH(d.moved_hours)}`
+      : '它名下本来就没有记录'
+    ElMessage.success(d.merged
+      ? `已把「${row.task_name}」并入「${d.new_name}」：${moved}`
+      : `已把「${row.task_name}」改名为「${d.new_name}」：${moved}`)
+    renameVisible.value = false
+    // 行 key 就是任务名 ⇒ 改名后旧选中项已经不存在，必须清掉再刷
+    clearSelection()
+    await load()
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '改名失败'))
+  } finally { savingName.value = false }
+}
+
+async function onDelete(row: MetaLedgerItem) {
+  try {
+    await ElMessageBox.confirm(
+      `删掉「${row.task_name}」这一行？它名下没有记录，删了只是从台账消失，不会丢任何时长。`,
+      '删除任务名',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch { return }   // 点了取消
+  try {
+    await temporalApi.deleteTaskName({ task_name: row.task_name })
+    ElMessage.success(`已删除「${row.task_name}」`)
+    clearSelection()
+    await load()
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '删除失败'))
+  }
+}
 
 const maxHours = computed(() => Math.max(...items.value.map(i => i.total_hours), 1))
 
@@ -424,6 +651,11 @@ function attrPct(key: string) {
 function fmtAvg(minutes: number) {
   if (!minutes) return '—'
   return minutes >= 60 ? `${(minutes / 60).toFixed(1)}h` : `${Math.round(minutes)}min`
+}
+
+/** 小时数一律 1 位小数 —— 与「累计时长」列同一个精度，免得同屏出现 103.1h / 103.14h */
+function fmtH(hours: number) {
+  return `${(hours || 0).toFixed(1)}h`
 }
 
 function barStyle(row: MetaLedgerItem) {
@@ -462,6 +694,9 @@ async function load() {
     const res = await temporalApi.getMetaLedger(params)
     items.value = res.data.items || []
     summary.value = res.data.summary || { ...EMPTY_SUMMARY }
+    // 无筛选的那一次顺手留一份全量快照：改名候选名 / 幽灵行提示要用全量，
+    // 但**不另发请求** —— 免得两份「全库」各自取一次、前后不一致。
+    if (!hasAnyFilter.value) allRows.value = items.value
   } catch { items.value = [] } finally { loading.value = false }
 }
 
@@ -703,5 +938,26 @@ onMounted(() => {
   .muted { color: #b8bcc4; }
   .is-unclassified { color: #94A3B8; }
   .bulk-tip { font-size: 12px; color: #94A3B8; padding-left: 110px; line-height: 1.6; }
+
+  // 禁用按钮本身收不到 hover（Chrome 不派发事件）⇒ 让事件落到外面那层 span 上，
+  // 否则「为什么不能删」的说明永远弹不出来，只剩一个灰按钮。
+  :deep(.el-button.is-disabled) { pointer-events: none; }
+  // 两个 link 按钮默认会挤在一起（「改名/合并删除」），给一点间距
+  .row-ops { display: inline-flex; align-items: center; gap: 8px; }
+
+  // 改名 / 合并弹窗
+  .rn-old { font-weight: 600; color: #1F2937; }
+  .rn-old-meta { margin-left: 10px; font-size: 12px; color: #94A3B8; }
+  .rn-sug-hint { float: right; margin-left: 12px; font-size: 12px; color: #94A3B8; }
+  .rn-impact { border-radius: 8px; background: #F8FAFC; padding: 10px 12px; font-size: 12px;
+    color: #334155; line-height: 1.7;
+    // 合并会「吃掉」一行 ⇒ 与改名区分开，别让人以为只是换个名字
+    &.is-error { background: #FEF2F2; color: #B91C1C; }
+    &.is-muted { color: #94A3B8; }
+    .rn-line { display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+      font-size: 13px; color: #1F2937; }
+    .rn-sub { color: #475569; }
+    .rn-warn { margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+      background: #FFFBEB; color: #92400E; } }
 }
 </style>

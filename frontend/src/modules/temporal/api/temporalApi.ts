@@ -1,7 +1,7 @@
 import request from '@/shared/utils/request'
 import type {
   CompletenessData, DailyGuardData, FrequentNamesData, ImportPreview, MetaLedgerData,
-  OverlapCheckData, SourceOverview, SunburstData, WeeklyStructure,
+  OverlapCheckData, SourceOverview, SunburstData, TaskRenameResult, WeeklyStructure,
 } from '../types/temporalTypes'
 
 // ─── 每日记录 (OneDay) ───
@@ -213,6 +213,25 @@ export function getUnclassified(params?: Record<string, unknown>) {
 
 export function batchSetMeta(data: Record<string, unknown>) {
   return request({ url: '/temporal/tasks/batch_set_meta/', method: 'post', data })
+}
+
+/**
+ * 改名 / 合并：把一个任务名变成另一个。
+ *
+ * 🔴 新名已存在 = **合并**（记录并过去、源行删掉），由后端判定 ——
+ *    前端不要自己拿台账行去猜「这个名字有没有人用过」：列表一旦被筛选过就会猜错，
+ *    用户点确定前看到「改名」、做完却是「合并」。
+ * `dry_run: 1` 只算不写，弹窗的影响预览走它。
+ */
+export function renameTaskName(data: { task_name: string; new_name: string; dry_run?: 0 | 1 }) {
+  return request<TaskRenameResult>({
+    url: '/temporal/tasks/rename_task_name/', method: 'post', data,
+  })
+}
+
+/** 删一行台账 —— 后端只在名下 0 条记录时放行 */
+export function deleteTaskName(data: { task_name: string }) {
+  return request({ url: '/temporal/tasks/delete_task_name/', method: 'post', data })
 }
 
 /**

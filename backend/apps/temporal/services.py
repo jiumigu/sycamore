@@ -26,7 +26,7 @@ from .constants import (
     TASK_CATEGORY_MAPPING,
     TASK_TO_L2,
 )
-from .models import OneDayPage, TaskMeta, TemporalTask
+from .models import OneDayPage, TaskMeta, TemporalTask, TimerSession
 
 
 def resolve_task_meta(task_names: list[str]) -> dict:
@@ -522,6 +522,152 @@ def _ensure_task_meta(task_names: list[str]) -> int:
             created_unclassified += 1
         TaskMeta.objects.create(task_name=tn, activity_type=at, default_attribution=attr, is_system=False)
     return created_unclassified
+
+
+class TaskNameError(ValueError):
+    """任务名改名 / 删除被拒绝 —— 视图转 400 并把原话给用户，不静默兜底。"""
+
+
+def task_name_usage(task_name: str) -> dict:
+    """一个任务名背后的真实用量：记录数 / 小时 / 有没有未结束的计时会话。
+
+    🔴 台账显示「0 条 0.0h」不代表这个名字是空的：可能有一段**正在跑**的计时，
+       它一停止就会写回这个名字。删除前必须看这一项，否则删完立刻复活。
+    """
+    agg = TemporalTask.objects.filter(task_name=task_name).aggregate(
+        n=Count('id'), h=Sum('duration_hours'),
+    )
+    return {
+        'records': int(agg['n'] or 0),
+        'hours': round(float(agg['h'] or 0), 2),
+        'running': TimerSession.objects.filter(task_name=task_name, status='running').exists(),
+    }
+
+
+def _meta_attrs(m: TaskMeta) -> dict:
+    """台账里那四列属性 —— 合并时用来比「谁覆盖谁」。"""
+    return {
+        'activity_type': m.activity_type,
+        'default_attribution': m.default_attribution,
+        'counts_growth': bool(m.counts_growth),
+        'daily_role': m.daily_role or '',
+    }
+
+
+# 属性差异的中文名（后端算、前端只打印 —— 免得两边各写一份对照表必然漂）
+_ATTR_LABELS = (
+    ('activity_type', 'L2 类型'),
+    ('default_attribution', 'L1 归因'),
+    ('counts_growth', '成长计时'),
+    ('daily_role', '护栏角色'),
+)
+
+
+def rename_task_name(task_name: str, new_name: str, dry_run: bool = False) -> dict:
+    """把 `task_name` 改名成 `new_name`；**新名已存在时即为「合并」**。
+
+    为什么合成一个操作：改名和合并是同一件事的两种结局 ——
+    目标名不存在就是改名，存在就是并过去。拆成两个按钮，用户得先自己判断
+    「这个名字有没有人用过」，而那个列表就在他眼前（同一个表里）。
+
+    合并时**以目标那行为准**（L1/L2/成长计时/护栏角色全取目标的），
+    并在返回里给出 `changed_attrs`，让界面在点「确定」之前就把「会丢什么」说清。
+
+    🔴 记录必须跟着改：只改 `temporal_task_meta` 而不动 `temporal_task`
+       会让这个名字变成 0h、旧名的时长全部从台账消失 —— 且不报错。
+    🔴 `TemporalTask` 是 `managed=False` 的外部表，但 `.update()` 是合法写入
+       （手工新增 / CSV 导入 / 计时停止本来就在写它），这里只改 `task_name` 一列。
+
+    `dry_run=True` 只算不写 —— 弹窗的「影响预览」与真执行走**同一份判据**。
+    """
+    new_name = (new_name or '').strip()
+    if not new_name:
+        raise TaskNameError('新任务名不能为空')
+    if len(new_name) > 255:
+        raise TaskNameError('新任务名最长 255 个字')
+    if new_name == task_name:
+        raise TaskNameError('新旧名字相同，什么都不会变')
+
+    src = TaskMeta.objects.filter(task_name=task_name).first()
+    if src is None:
+        raise TaskNameError(f'任务名「{task_name}」不在映射表里')
+
+    # ⚠️ 必须按主键排掉自己：MySQL 的 `utf8mb4_general_ci` 不区分大小写，
+    #    `filter(task_name='abc')` 会把 'Abc' 这一行（也就是 src 自己）也捞出来，
+    #    于是「只改大小写」会被误判成「并到自己身上」，合并分支一删就把这行干掉。
+    target = TaskMeta.objects.filter(task_name=new_name).exclude(pk=src.pk).first()
+
+    usage = task_name_usage(task_name)
+    payload = {
+        'task_name': task_name,
+        'new_name': new_name,
+        'merged': target is not None,
+        'moved_records': usage['records'],
+        'moved_hours': usage['hours'],
+        'dry_run': dry_run,
+        'kept': _meta_attrs(target) if target is not None else None,
+        'dropped': None,
+        'changed_attrs': [],
+    }
+
+    if target is not None:
+        before, after = _meta_attrs(src), _meta_attrs(target)
+        payload['dropped'] = before
+        payload['changed_attrs'] = [
+            label for key, label in _ATTR_LABELS if before[key] != after[key]
+        ]
+    else:
+        # 改名：属性跟着名字一起走，所以「丢掉的」就是没有
+        payload['dropped'] = None
+
+    if dry_run:
+        return payload
+
+    with transaction.atomic():
+        # 记录先改名：万一后面出错，事务回滚，不会留下「字典改了、记录没改」
+        TemporalTask.objects.filter(task_name=task_name).update(
+            task_name=new_name, updated_at=timezone.now(),
+        )
+        # 正在跑的计时也要改：否则它一停止就写回旧名，旧名立刻复活
+        TimerSession.objects.filter(task_name=task_name, status='running').update(task_name=new_name)
+        if target is not None:
+            # 合并：保留目标行，删掉源行。源行的备注不丢 —— 并进目标备注里
+            if (src.note or '').strip():
+                sep = '' if not (target.note or '').strip() else '\n'
+                target.note = f'{target.note or ""}{sep}合并自「{task_name}」：{src.note}'
+                target.save(update_fields=['note', 'updated_at'])
+            src.delete()
+        else:
+            src.task_name = new_name
+            src.save(update_fields=['task_name', 'updated_at'])
+    return payload
+
+
+def delete_task_name(task_name: str) -> dict:
+    """删掉一行台账 —— **只有名下一条记录都没有时才允许**。
+
+    🔴 有记录时拒绝，而不是「连记录一起删」或「只删字典」：
+       · 连记录删 = 抹掉真实发生过的时长，不可逆；
+       · 只删字典 = 这些记录从台账里消失、按兜底归因计入，**不报错**，
+         从此没人知道那 N 小时去哪了（`meta_ledger` 是遍历 TaskMeta 的）。
+       所以名字下有量时，正确的出口是「合并到别处」，不是删除。
+    """
+    src = TaskMeta.objects.filter(task_name=task_name).first()
+    if src is None:
+        raise TaskNameError(f'任务名「{task_name}」不在映射表里')
+
+    usage = task_name_usage(task_name)
+    if usage['records']:
+        raise TaskNameError(
+            f'「{task_name}」名下还有 {usage["records"]} 条记录（{usage["hours"]}h），不能删除：'
+            f'删掉不会删记录，只会让它从台账消失、按兜底归因计入。'
+            f'如果你是想把它并到别处，用「改名 / 合并」。'
+        )
+    if usage['running']:
+        raise TaskNameError(f'「{task_name}」有一段正在计时，停止后会重新写回这个名字，先停掉再删')
+
+    src.delete()
+    return {'task_name': task_name}
 
 
 class CSVImportService:

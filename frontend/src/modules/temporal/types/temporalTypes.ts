@@ -233,6 +233,36 @@ export interface MetaLedgerData {
   items: MetaLedgerItem[]
 }
 
+/** 一行台账的四列属性 —— 改名/合并时用来比「谁覆盖谁」 */
+export interface TaskMetaAttrs {
+  activity_type: string
+  default_attribution: string | null
+  counts_growth: boolean
+  daily_role: DailyRole
+}
+
+/**
+ * 改名 / 合并的结果（`dry_run=1` 时同一结构，只是没写库）。
+ *
+ * 🔴 `merged` 由**后端**判定（新名是否已存在），前端不许自己拿台账行去猜：
+ *    列表一旦被筛选过就可能猜错，用户点确定前看到「改名」、做完却是「合并」。
+ */
+export interface TaskRenameResult {
+  task_name: string
+  new_name: string
+  /** `true` = 新名已存在，这次是「并过去」；`false` = 纯改名 */
+  merged: boolean
+  moved_records: number
+  moved_hours: number
+  dry_run: boolean
+  /** 合并时生效的那套属性（目标那行）；纯改名时为 null */
+  kept: TaskMetaAttrs | null
+  /** 合并时被覆盖掉的那套属性；纯改名时为 null */
+  dropped: TaskMetaAttrs | null
+  /** 会被覆盖掉的字段中文名（后端算好，前端只打印） */
+  changed_attrs: string[]
+}
+
 /** 台账「来源」列：口径与后端 resolve_attribution_detail 一致 */
 export const ATTR_SOURCE_MAP: Record<AttributionSource, { label: string; color: string; tip: string }> = {
   // ⚠️ 标签叫「任务默认」而不是「类型默认」：这个值来自**该任务名**自己的那一行，

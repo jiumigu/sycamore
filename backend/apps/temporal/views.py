@@ -30,14 +30,17 @@ from .services import (
     CSVImportService,
     DailyLogAutoService,
     OneDayPageService,
+    TaskNameError,
     TemporalStatsService,
     _ensure_task_meta,
     batches_of_kind,
     compute_daily_guards,
     contrib_excluded_names,
+    delete_task_name,
     find_overlaps,
     list_record_sources,
     make_batch_id,
+    rename_task_name,
     resolve_attribution,
     resolve_attribution_detail,
     resolve_task_meta,
@@ -824,6 +827,39 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
         return Response({'updated': updated, 'missing': missing,
                          'activity_type': activity_type, 'attribution': attribution,
                          'counts_growth': growth_value, 'daily_role': role_value})
+
+    @action(detail=False, methods=['post'])
+    def rename_task_name(self, request):
+        """改名 / 合并：把一个任务名变成另一个（v3.64.55）
+
+        `{task_name, new_name, dry_run?}` —— 新名已存在时就是**合并**（记录并过去、源行删掉）。
+
+        `dry_run=1` 只算不写：弹窗的「影响预览」和真执行走**同一份判据**，
+        否则前端自己拿台账行去猜「这个名字有没有人用过」，一旦列表被筛选过就会猜错
+        （猜「改名」而实际执行了「合并」，用户点确定前看到的是一回事，做完是另一回事）。
+
+        `TemporalTask` 是外部表（`managed=False`）但可以写：这里只改 `task_name` 一列。
+        """
+        task_name = (request.data.get('task_name') or '').strip()
+        new_name = request.data.get('new_name') or ''
+        if not task_name:
+            return Response({'error': 'task_name 必填'}, status=status.HTTP_400_BAD_REQUEST)
+        dry_run = request.data.get('dry_run') in (True, '1', 'true', 'True', 1)
+        try:
+            return Response(rename_task_name(task_name, new_name, dry_run=dry_run))
+        except TaskNameError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'])
+    def delete_task_name(self, request):
+        """删一行台账 —— 只有名下 **0 条记录**时才允许（理由见 `services.delete_task_name`）"""
+        task_name = (request.data.get('task_name') or '').strip()
+        if not task_name:
+            return Response({'error': 'task_name 必填'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            return Response(delete_task_name(task_name))
+        except TaskNameError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'])
     def sunburst(self, request):
