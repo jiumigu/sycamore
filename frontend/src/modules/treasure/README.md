@@ -102,4 +102,4 @@
    ⇒ 浮层关闭、选择丢失（`persistent:false` 时直接卸载，Playwright 报 `element was detached`）。
    ⚠️ 副作用：下拉不再逃逸于浮层之外，浮层若有 `overflow: hidden` 会被裁 —— 改布局要实测。
 
-另：列表行内浮层应加 `:persistent="false"`（物件资产一页 78 行 = 78 份常驻 DOM，关闭即卸载）。
+另：列表行内浮层应加 `:persistent="false"`（一页几十行 = 几十份常驻 DOM，关闭即卸载）。

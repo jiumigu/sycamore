@@ -17,9 +17,9 @@
 
 ```
 计划 TravelPlan
-├── 站点 TravelPlanStop (order 1..n)      ← 宁德 → 泉州 → 漳州 → 潮州 → 广州
+├── 站点 TravelPlanStop (order 1..n)      ← A 城 → B 城 → C 城 → D 城
 │   └── 条目 TravelPlanItem (stop=该站)   ← 该城的美食 / 打卡 / 住宿 / 当地交通
-└── 城际交通 TravelPlanItem (stop=NULL)   ← 宁德→泉州 高铁，单列，不摊进任何城市
+└── 城际交通 TravelPlanItem (stop=NULL)   ← A 城→B 城 高铁，单列，不摊进任何城市
 ```
 
 🔴 金额三层只由 `TravelPlanService.totals()` 算一次：
@@ -42,7 +42,7 @@
 
 | Service | 职责 |
 |---------|------|
-| `MapDataService` | 地图展示数据聚合（**地级市热力** + 城市气泡）：`heatmap` 项为 `{name, count, level, sources}`（level 取 偶尔/多次/频繁/深度游；`sources` 为计数来源明细，如宁德市含「福鼎市×1、寿宁县×1」），另返回 `heat_max`；气泡按坐标表**规范名归并**（「温州」+「温州市」= 一个气泡），同 `tname` 的多次到访聚合为一次气泡并累加次数/花费/年份 |
+| `MapDataService` | 地图展示数据聚合（**地级市热力** + 城市气泡）：`heatmap` 项为 `{name, count, level, sources}`（level 取 偶尔/多次/频繁/深度游；`sources` 为计数来源明细，如某地级市含「下辖县级市×1、辖县×1」），另返回 `heat_max`；气泡按坐标表**规范名归并**（「X 市」+「X 市市辖区」= 一个气泡），同 `tname` 的多次到访聚合为一次气泡并累加次数/花费/年份 |
 | `resolve_prefecture(city, parent)` | 把「城市 + 上级」归到地级市（tname 本身是地级市 / tname 是县级市或区县则取其 parentnode / 直辖市保留区名）；索引来自 `toolkit_city_coordinate` 的地级市·自治州·地区·盟，进程内缓存，`reset_prefecture_index()` 可失效 |
 | `heat_level(count)` | 到访次数 → 热力档位（1=偶尔 / 2=多次 / 3-4=频繁 / ≥5=深度游） |
 | `bubble_size(total_cost, count)` | 城市气泡直径唯一实现（v3.64.2）：花费与次数**开方压缩**后才进 `BUBBLE_SIZE_MIN=8 / MAX=20` 区间；旧公式 1250 元就撞 50px 上限，几乎每座城同样大。改上限不是解法，先验「真实数据多久饱和」 |
