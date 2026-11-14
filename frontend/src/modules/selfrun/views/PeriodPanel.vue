@@ -193,6 +193,23 @@
       </el-tag>
     </div>
 
+    <!-- ── ⑥ 这一周我做了什么 ────────────────────────────────
+         🔴 与「历史复盘」抽屉里那张**是同一个组件**（`WhatHappenedCard`）。
+            同一件事在两处渲染，各写一份早晚会分家 —— 而且分家时不报错，
+            只是两个页面上的数不一样。
+         ⚠️ 只在**周**视图 + **未归档**时出现（与上面「这周留下了什么」扁条同一判据）：
+            · 月度的时段轴是 31 列，读不出来（组件内部也只会给清单）；
+            · 归档之后这一期的结论已定格，回头看请走「历史复盘」——
+              那里能对着冻结快照读，这里读的是现算。
+         数据来自 `current` 接口的 `extras`（后端一直在给，store 以前丢掉了）。 -->
+    <WhatHappenedCard
+      v-if="periodType === 'weekly' && !isClosed && view.extras"
+      :what-happened="view.extras.what_happened"
+      title="这一周我做了什么"
+      :period-type="periodType"
+      :period-key="view.key"
+    />
+
     <ComposeDialog v-model="composeVisible" @done="() => {}" />
   </div>
 </template>
@@ -202,6 +219,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import ReadingCard from '../components/ReadingCard.vue'
+import WhatHappenedCard from '../components/WhatHappenedCard.vue'
 import { useSelfRunStore } from '../stores/selfrunStore'
 // 「这周留下了什么」扁条要读作品库 —— 这是自我运转与作品的**唯一接合点**。
 // ⚠️ 作品有自己的 store（它跨四个模块取来源，不属于自我运转）。

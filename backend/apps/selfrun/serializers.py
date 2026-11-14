@@ -45,6 +45,7 @@ class SelfRunMetricPlanSerializer(serializers.ModelSerializer):
 
 class SelfRunStageSerializer(serializers.ModelSerializer):
     status_display = serializers.SerializerMethodField()
+    stage_kind_display = serializers.CharField(source='get_stage_kind_display', read_only=True)
     pause_reason_display = serializers.CharField(source='get_pause_reason_display', read_only=True)
     metric_count = serializers.SerializerMethodField()
     elapsed_days = serializers.SerializerMethodField()
@@ -77,7 +78,12 @@ class SelfRunStageSerializer(serializers.ModelSerializer):
         ⚠️ 不用「有没有孩子」判：长阶段可以先建、后挂小阶段，那段空窗期它同样是长阶段。
         ⚠️ 用「任何状态的 metric」而不是「active 的」：一个 KPI 全部退役的叶子阶段
            曾经有过 KPI，不该因为退役就变成「长阶段」。
+        🔴 记录型阶段**永远不是长阶段**（v3.64.56）：它同样「顶级 + 零 KPI」，
+           不加这一条，一条「小学期」就会被判成长阶段 ——
+           于是它出现在长阶段下拉、账本入口里，读起来就是「我的小学期有个账本」。
         """
+        if obj.stage_kind != 'run':
+            return False
         return obj.parent_id is None and not obj.metrics.exists()
 
     def get_status_display(self, obj):
@@ -257,6 +263,37 @@ class StagePatchSerializer(serializers.Serializer):
 
     note = serializers.CharField(max_length=200, required=False, allow_blank=True)
     end_date = serializers.DateField(required=False, allow_null=True)
+
+
+class RecordStageInputSerializer(serializers.Serializer):
+    """建一条**记录型**阶段（谋生期 / 小学期 / 中学期 …）。
+
+    🔴 没有 `metrics` / `is_long_stage` / `ledger_config` 三个字段 ——
+       记录型不跑 KPI、不汇总、没有账本。给了这些字段等于暗示它能配，
+       而服务层会直接拒绝（`create_record_stage` 只认这里列的五个）。
+    """
+
+    name = serializers.CharField(max_length=100)
+    start_date = serializers.DateField()
+    end_date = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    # 挂在哪一段下面（例如小学/中学/高中/大学都挂在「求学阶段」下）；不传 = 顶级
+    parent = serializers.IntegerField(required=False, allow_null=True)
+
+
+class RecordStagePatchSerializer(serializers.Serializer):
+    """改一条记录型阶段。
+
+    🔴 与 `StagePatchSerializer` 的差别是**允许改 `start_date`**：
+       记录型没有 Period，改日期不会让任何已完成周期掉出阶段 ——
+       而补录人生阶段时把年份写错是常态。
+    ⚠️ 也**不收** `status` / `stage_kind`：那会把记录型改成「进行中但永不判定」的幽灵。
+    """
+
+    name = serializers.CharField(max_length=100, required=False)
+    start_date = serializers.DateField(required=False)
+    end_date = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(max_length=200, required=False, allow_blank=True)
 
 
 class CheckinInputSerializer(serializers.Serializer):

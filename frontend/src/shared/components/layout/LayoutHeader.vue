@@ -185,7 +185,7 @@ const SELF_RUN_ENTRIES: { key: string; route: string; label: string; icon: Compo
 
 /**
  * 路由名 → 入口 key。
- * ⚠️ 「制定配置」的三个页内子页面（模板库 / 按期修订 / 变更留痕）都归到 `setup` ——
+ * ⚠️ 「制定配置」的页内子页面（模板库 / 按期修订 / 变更留痕 / 阶段总览）都归到 `setup` ——
  *    它们不是并列的入口，页头这时该说「制定配置」，而不是跳到子页标题上。
  */
 const SELF_RUN_ENTRY_OF_ROUTE: Record<string, string> = {
@@ -193,6 +193,7 @@ const SELF_RUN_ENTRY_OF_ROUTE: Record<string, string> = {
   'selfrun-setup-templates': 'setup',
   'selfrun-setup-targets': 'setup',
   'selfrun-setup-logs': 'setup',
+  'selfrun-setup-stages': 'setup',
   'selfrun-week': 'week',
   'selfrun-month': 'month',
   'selfrun-review': 'review',

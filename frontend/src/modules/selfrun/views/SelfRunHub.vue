@@ -106,7 +106,7 @@
            🔴 这一页是「配置总台」，**主视图只留一块**（用户 2026-10-13 二轮拍板）：
                正中 = 本阶段 KPI（即时生效）；
                另外三块（KPI 模板库 / 按期修订 / 配置变更留痕）**不再平铺**，
-               改为从右侧三个入口点进**各自的子页面** —— 一屏只讲一件事，
+               改为从右侧入口点进**各自的子页面** —— 一屏只讲一件事，
                改完 KPI 也不用往下滚很远才找到留痕。
            ⚠️ 搬走的只是入口位置，不是内容：右侧每个入口都写清自己干什么、
               作用域是什么（三个匿名按钮等于没说）；子页页头最左还有返回「制定配置」。
@@ -122,7 +122,7 @@
               中间不许插注释 —— 生产构建下编译器找不到相邻的 `v-if` 会直接报错。
       -->
       <el-tab-pane label="制定配置" name="setup" lazy>
-        <!-- ── 主视图：本阶段 KPI（即时生效）＋ 右侧三个入口 ──────── -->
+        <!-- ── 主视图：本阶段 KPI（即时生效）＋ 右侧入口列 ──────── -->
         <template v-if="setupView === 'kpi'">
           <!-- ① 无阶段时：**为什么空必须留在页面上说**（不许只塞进悬停气泡）——
                页面上没数据时，人不会特意去悬停一个问号找原因。
@@ -220,7 +220,7 @@
             </el-table>
           </el-card>
 
-          <!-- ── 主区（左）：本阶段 KPI ＋ 三个入口（右）────────── -->
+          <!-- ── 主区（左）：本阶段 KPI ＋ 入口列（右）────────── -->
           <div class="sh-setup-grid">
             <div class="sh-setup-main">
               <StageMetricPanel v-if="stage" @changed="onChanged" />
@@ -258,6 +258,24 @@
                 </span>
                 <span class="sh-entry-desc">每次改动一行，含「哪一期换过尺子」</span>
               </el-button>
+
+              <!-- ── 阶段（v3.64.56）：与上面三块**不是同类** ───────────────
+                   三块是「配置项」（模板 / 修订 / 留痕），这一块是「对象清单」
+                   （人生走过哪几段、哪儿还空着）。所以单独分一节、不并成第四块 ——
+                   并进去读起来就像「又一张配置表单」。
+                   🔴 刻意不给角标数字：那个数要单独拉一次时间轴接口，
+                      而它只在子页里才是权威的（含空档），放这里迟早过期。 -->
+              <div class="sh-side-split" />
+              <div class="sh-side-title">阶段</div>
+              <!-- 🔴 这里刻意**不写**分节说明：加了它这一栏就比可视区高出约 30px，
+                   「全部阶段」按钮首次进入只露半截（被页脚压住），用户会以为没做。
+                   说明并入按钮第二行 —— 它本来就是「点进去会看到什么」。 -->
+              <el-button class="sh-entry" @click="goSetupView('stages')">
+                <span class="sh-entry-row">
+                  <span class="sh-entry-name">全部阶段</span>
+                </span>
+                <span class="sh-entry-desc">人生已配置的全部阶段 · 按起点从早到晚，含空档</span>
+              </el-button>
             </aside>
           </div>
         </template>
@@ -265,6 +283,10 @@
         <TemplateLibrary v-else-if="setupView === 'templates'" />
         <PeriodTargetsPanel v-else-if="setupView === 'targets'" @changed="onChanged" />
         <ConfigChangeLog v-else-if="setupView === 'logs'" />
+        <!-- 阶段总览（v3.64.56）—— 人生已配置的全部阶段 + 空档。
+             与上面三块**不是同类**：那三块是「配置项」，这一块是「对象清单」，
+             所以入口在右侧栏单独分一节，不并进「配置的另外三块」。 -->
+        <StageTimeline v-else-if="setupView === 'stages'" @changed="onChanged" />
       </el-tab-pane>
 
       <!-- ②③ 本周 / 本月（T2）—— 两把正交的尺子，各占一格 -->
@@ -335,6 +357,7 @@ import SetupWizard from './SetupWizard.vue'
 import ConfigChangeLog from '../components/ConfigChangeLog.vue'
 import EmptyPane from '../components/EmptyPane.vue'
 import StageMetricPanel from '../components/StageMetricPanel.vue'
+import StageTimeline from '../components/StageTimeline.vue'
 import TemplateLibrary from '../components/TemplateLibrary.vue'
 import * as api from '../api/selfrunApi'
 import { useSelfRunStore } from '../stores/selfrunStore'
@@ -347,31 +370,33 @@ const store = useSelfRunStore()
 const route = useRoute()
 const router = useRouter()
 
-/** 「制定配置」这一格里的四种面孔：主视图 + 三个页内子页面 */
-type SetupView = 'kpi' | 'templates' | 'targets' | 'logs'
+/** 「制定配置」这一格里的面孔：主视图 + 三个配置子页 + **阶段总览**（v3.64.56） */
+type SetupView = 'kpi' | 'templates' | 'targets' | 'logs' | 'stages'
 
-/** 路由名 → 页签名。8 条子路由指向**同一个组件**，
+/** 路由名 → 页签名。子路由指向**同一个组件**，
  *  所以「现在在哪一页」只有一个真源：路由。
  *  ⚠️ 原来自带第 6 条「设置」（与本页的「本阶段 KPI」完全重复）—— 已删。
- *  ⚠️ 「制定配置」的三个页内子页面也映射回 `setup` ——
+ *  ⚠️ 「制定配置」的页内子页面也映射回 `setup` ——
  *     点进去时页签仍亮「制定配置」（那是它们的父页）。 */
 const TAB_OF_ROUTE: Record<string, string> = {
   'selfrun-setup': 'setup',
   'selfrun-setup-templates': 'setup',
   'selfrun-setup-targets': 'setup',
   'selfrun-setup-logs': 'setup',
+  'selfrun-setup-stages': 'setup',
   'selfrun-week': 'week',
   'selfrun-month': 'month',
   'selfrun-review': 'review',
   'selfrun-summary': 'summary',
 }
 
-/** 路由名 → 「制定配置」里的哪一种面孔（主视图 / 三块之一） */
+/** 路由名 → 「制定配置」里的哪一种面孔（主视图 / 三块之一 / 阶段总览） */
 const SETUP_VIEW_OF_ROUTE: Record<string, SetupView> = {
   'selfrun-setup': 'kpi',
   'selfrun-setup-templates': 'templates',
   'selfrun-setup-targets': 'targets',
   'selfrun-setup-logs': 'logs',
+  'selfrun-setup-stages': 'stages',
 }
 
 /** 反查表：按钮点下去推哪个路由名。走**路由名**不走路径字面量（路径改了不用跟着改） */
@@ -380,6 +405,7 @@ const ROUTE_OF_SETUP_VIEW: Record<SetupView, string> = {
   templates: 'selfrun-setup-templates',
   targets: 'selfrun-setup-targets',
   logs: 'selfrun-setup-logs',
+  stages: 'selfrun-setup-stages',
 }
 
 /**
@@ -787,7 +813,7 @@ onMounted(reload)
 .sh-collapse-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .sh-collapse-title { font-weight: 600; }
 
-/* ── 主视图：主区（本阶段 KPI）＋ 右侧三个入口 ───────────── */
+/* ── 主视图：主区（本阶段 KPI）＋ 右侧入口列 ───────────── */
 .sh-setup-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
@@ -798,6 +824,11 @@ onMounted(reload)
 .sh-setup-side { display: flex; flex-direction: column; gap: 8px; }
 .sh-side-title { font-weight: 600; font-size: 13px; }
 .sh-side-note { font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.6; }
+/* 「配置项」与「阶段清单」之间的一道分隔 —— 两者不是同一类东西，靠间距说不清 */
+.sh-side-split {
+  margin: 2px 0 0; padding-top: 6px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
 
 /* 🔴 入口做成**两行**（名字 + 干什么）：只有一个名字的话，
    三个按钮等于三个需要自己猜的词。

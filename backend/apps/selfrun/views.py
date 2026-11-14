@@ -25,6 +25,7 @@ from .constants import (
     PERIOD_VERDICT_BANDS, PLAN_SCOPE_CHOICES, SOURCE_KIND_CHOICES,
     VERDICT_COLORS, PERIOD_STATUS_COLORS, AGG_CHOICES,
     MODULE_VALUE_WHITELIST, READER_KEYS, READER_WHERE_KEYS, STALE_RULES,
+    STAGE_KIND_CHOICES, STAGE_KIND_RECORD, STAGE_KIND_RUN,
 )
 from .models import (
     SelfRunCheckin, SelfRunMetric, SelfRunMetricLog, SelfRunMetricPlan,
@@ -34,7 +35,8 @@ from .serializers import (
     CheckinInputSerializer, FROZEN_PERIOD_FIELDS, HeartbeatSerializer,
     MetricPatchSerializer, MetricPreviewSerializer, PauseSerializer,
     PeriodCloseSerializer, PeriodReviewSerializer, PlanSetSerializer,
-    ReasonSerializer, ReopenSerializer, SelfRunCheckinSerializer,
+    ReasonSerializer, RecordStageInputSerializer, RecordStagePatchSerializer,
+    ReopenSerializer, SelfRunCheckinSerializer,
     SelfRunMetricLogSerializer, SelfRunMetricPlanSerializer, SelfRunMetricSerializer,
     SelfRunPeriodSerializer, SelfRunStageSerializer, SelfRunTemplateSerializer,
     StageCopySerializer, StageCreateSerializer, StagePatchSerializer, SummarySerializer,
@@ -361,30 +363,26 @@ class MetricPlanDetailView(SelfRunBaseView):
 
 
 class StageListCreateView(SelfRunBaseView):
-    """`GET` 列阶段（裸数组）；`POST` 生效新阶段（**一个事务写 3 张表**）。"""
+    """`GET` 列阶段（裸数组）；`POST` 生效新阶段（**一个事务写 3 张表**）。
+
+    🔴 `kind` **默认 `run`**（v3.64.56）：加「记录型阶段」这一维之后，
+       这个接口的既有调用方（向导的上级阶段下拉、账本、时间统计、已收尾表）
+       全都只该看到运转型。默认收紧 ⇒ 它们零改动即正确；
+       要人生阶段档案请显式 `?kind=all`（只有总览页这么干）。
+    """
+
     pagination_class = None
 
     def get(self, request):
-        qs = SelfRunStage.objects.all()
-        st = request.query_params.get('status')
-        if st:
-            qs = qs.filter(status=st)
         # 🔴 `shape`：分层之后 `status=active` **不止一行**（长阶段与它的小阶段同时 open），
         #    前端「取第一条」就会拿到长阶段 —— 页头于是显示「0 条 KPI」，
         #    周/月状态读一个永不判定的阶段，而且**不报错**。
-        #    判据与 `get_open_stage()` 同一把尺子：叶子 = 有 active KPI。
-        shape = request.query_params.get('shape')
-        if shape == 'leaf':
-            qs = qs.filter(metrics__status='active').distinct()
-        elif shape == 'long':
-            # 与 `get_open_long_stage()` 同源：**顶级 + 零 KPI**。
-            # 只判 `metrics__isnull` 会把「KPI 全退役的小阶段」也算成长阶段。
-            qs = qs.filter(parent__isnull=True, metrics__isnull=True)
-        elif shape:
-            return Response(
-                {'detail': f'shape 只能是 leaf / long，收到 {shape!r}'},
-                status=http.HTTP_400_BAD_REQUEST,
-            )
+        #    判据统一收敛到 `services.list_stages`（与 `get_open_stage()` 同一把尺子）。
+        qs = services.list_stages(
+            kind=request.query_params.get('kind') or 'run',
+            status=request.query_params.get('status') or None,
+            shape=request.query_params.get('shape') or None,
+        )
         return Response(SelfRunStageSerializer(qs, many=True).data)
 
     def post(self, request):
@@ -429,6 +427,17 @@ class StageDetailView(SelfRunBaseView):
 
     def patch(self, request, pk):
         stage = get_object_or_404(SelfRunStage, pk=pk)
+        # 🔴 记录型走另一套校验：它没有 Period，`start_date` **可以**改
+        #    （改它不会让任何已完成周期掉出阶段，而补录人生阶段写错年份是常态）。
+        if stage.stage_kind == STAGE_KIND_RECORD:
+            ser = RecordStagePatchSerializer(data=request.data)
+            ser.is_valid(raise_exception=True)
+            stage, touched = services.update_record_stage(stage, ser.validated_data)
+            return Response({
+                'stage': SelfRunStageSerializer(stage).data,
+                'touched': touched,
+                'written': _written(selfrun_stage=1 if touched else 0),
+            })
         if 'start_date' in request.data:
             raise services.SelfRunError(
                 '阶段的起点生效后不可修改（改它会让已完成周期掉出阶段）。要改请收尾后重开。'
@@ -444,6 +453,87 @@ class StageDetailView(SelfRunBaseView):
         return Response({
             'stage': SelfRunStageSerializer(stage).data,
             'written': _written(selfrun_stage=1 if fields else 0),
+        })
+
+    def delete(self, request, pk):
+        """删阶段 —— **只对记录型开放**。
+
+        🔴 运转型一律 400：它有 KPI / Period / Checkin，删掉就是
+           「历史判定与好几小时的记录凭空消失」且不报错。
+           运转型的结束只有「收尾（归档）」一条路。
+        """
+        stage = get_object_or_404(SelfRunStage, pk=pk)
+        if stage.stage_kind != STAGE_KIND_RECORD:
+            raise services.SelfRunError(
+                '运转型阶段不能删除（会带走 KPI 与已归档的周期）—— 请用「收尾阶段」。'
+            )
+        info = services.delete_record_stage(stage)
+        return Response({
+            'deleted': info,
+            'written': _written(selfrun_stage=1),
+        })
+
+
+class RecordStageCreateView(SelfRunBaseView):
+    """建一条**记录型**阶段（谋生期 / 小学期 / 中学期 / 大学期 …）。
+
+    🔴 与 `POST /stages/` 分开：那条路是「开一段要跑 KPI 的阶段」，
+       一个事务写 3 张表且强制至少一条 KPI。两类阶段的写入口混成一个，
+       就只能靠「有没有 metrics」猜意图 —— 那正是本模块明令禁止的猜法。
+    """
+
+    def post(self, request):
+        ser = RecordStageInputSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        stage = services.create_record_stage(ser.validated_data)
+        return Response({
+            'stage': SelfRunStageSerializer(stage).data,
+            'written': _written(selfrun_stage=1),
+        }, status=http.HTTP_201_CREATED)
+
+
+class StageTimelineView(SelfRunBaseView):
+    """人生阶段时间轴：**全部**阶段（运转型 + 记录型）按起点正序 + 空档。
+
+    🔴 为什么不能前端自己排：空档是派生值，而「两段之间的空白」最容易被写成
+       「相邻两行相减」—— 一旦有嵌套（长阶段包小阶段）或重叠（两条并行的阶段），
+       相减会算出负数天或不存在的空档，而列表看起来完全正常。
+       口径统一在 `services.stage_timeline()`（顶层区间并集扫描）。
+    ⚠️ 日期在这里格式化成字符串：`total.first_start` 为空是**合法的**（还没有任何阶段），
+       前端据此显示空态，不需要再判一次类型。
+    """
+
+    def get(self, request):
+        data = services.stage_timeline()
+
+        def _d(v):
+            return f'{v:%Y-%m-%d}' if v else None
+
+        def _gap(g):
+            return None if g is None else {**g, 'start': _d(g['start']), 'end': _d(g['end'])}
+
+        roots = [
+            {
+                'stage': SelfRunStageSerializer(r['stage']).data,
+                'children': [SelfRunStageSerializer(c).data for c in r['children']],
+                # 🔴 空档**挂在节点上**（这一段之前空了多久），不另给平铺数组 ——
+                #    让前端按日期自己去配对，起点相同或重叠时必然配错且不报错。
+                'gap_before': _gap(r['gap_before']),
+            }
+            for r in data['roots']
+        ]
+        totals = data['totals']
+        totals['first_start'] = _d(totals['first_start'])
+        totals['last_end'] = _d(totals['last_end'])
+        return Response({
+            'roots': roots,
+            'tail_gap': _gap(data['tail_gap']),
+            'totals': totals,
+            # 枚举随接口下发 —— 前端不抄第三份（抄了就会漏改，且静默）
+            'enum': {
+                'kind': [{'value': v, 'label': l} for v, l in STAGE_KIND_CHOICES],
+            },
+            'written': {},
         })
 
 
@@ -904,6 +994,12 @@ class StageCopyView(SelfRunBaseView):
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
         src = get_object_or_404(SelfRunStage, pk=d['from_stage_id'])
+        # 🔴 记录型没有 KPI 可复制 —— 放行会建出一个「0 条 KPI 的运转型阶段」，
+        #    而它一建出来就是 active：一个永不判定的幽灵阶段（页头写着「进行中 · 0 条 KPI」）。
+        if src.stage_kind != STAGE_KIND_RUN:
+            raise services.SelfRunError(
+                f'「{src.name}」是记录型阶段，没有 KPI 可复制 —— 它只记一笔事实。'
+            )
         stage, metrics = services.copy_stage(src, d['name'], d.get('start_date'))
         return Response({
             'stage': SelfRunStageSerializer(stage).data,

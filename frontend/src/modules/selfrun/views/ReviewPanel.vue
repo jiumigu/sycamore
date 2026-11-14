@@ -148,62 +148,16 @@
         </el-card>
 
         <!-- ② 这一期我做了什么 —— 回答「我忘了这周干了什么」。
-             数字勾不起回忆，做过的事才行；而「几点到几点」只有时段轴给得出。 -->
-        <el-card shadow="never" class="rp-gap">
-          <template #header>
-            <div class="rp-card-head">
-              <span>{{ whatTitle }}</span>
-              <span class="rp-head-right">
-                <span v-if="extras" class="rp-hint">
-                  有记录的 {{ extras.what_happened.day_count }} 天
-                </span>
-                <el-radio-group v-if="canTimeline" v-model="whatView" size="small">
-                  <el-radio-button value="timeline">时段</el-radio-button>
-                  <el-radio-button value="list">清单</el-radio-button>
-                </el-radio-group>
-                <!-- 月度不给时段轴：31 列挤进 720px 抽屉，每列 20px，块里放不下一个字。
-                     说一句是为了回答「为什么这周有图、这月没有」，不是辩解。 -->
-                <span v-else-if="extras && isMonthly" class="rp-hint">
-                  （月度列太多，用清单）
-                </span>
-              </span>
-            </div>
-          </template>
-          <div v-if="!extras" class="rp-hint">读取中…</div>
-          <template v-else-if="extras.what_happened.days.length">
-            <div class="rp-attr-row">
-              <span v-for="a in extras.what_happened.attr_totals" :key="a.label" class="rp-attr">
-                {{ a.label }} <b>{{ fmt(a.hours) }}</b>h
-              </span>
-            </div>
-
-            <WhatHappenedTimeline
-              v-if="whatView === 'timeline' && extras.what_happened.blocks.length"
-              :columns="extras.what_happened.columns"
-              :blocks="extras.what_happened.blocks"
-              :span="extras.what_happened.span"
-              :truncated="extras.what_happened.truncated"
-              :attr-totals="extras.what_happened.attr_totals"
-            />
-
-            <div v-else class="rp-days">
-              <div v-for="d in extras.what_happened.days" :key="d.date" class="rp-day">
-                <span class="rp-day-when">{{ d.weekday }}<i>{{ d.md }}</i></span>
-                <span class="rp-day-what">
-                  <span v-for="it in d.items" :key="it.task_name" class="rp-day-item">
-                    <i class="rp-dot-mini" :class="{ loss: it.attribution === '流失' }" />
-                    {{ it.task_name }}<em>{{ fmt(it.hours) }}h</em>
-                  </span>
-                  <span v-if="d.more" class="rp-day-more">等 {{ d.more }} 项</span>
-                </span>
-                <span class="rp-day-total">{{ fmt(d.total_hours) }}h</span>
-              </div>
-            </div>
-          </template>
-          <div v-else class="rp-hint">
-            这一期没有任何时间记录 —— 不是「什么都没做」，是没记。
-          </div>
-        </el-card>
+             数字勾不起回忆，做过的事才行；而「几点到几点」只有时段轴给得出。
+             🔴 卡片本身在 `WhatHappenedCard`：「本周状态」页（归档按钮下方）
+                用的是**同一个组件** —— 两处各写一份，早晚会各自漂移且不报错。 -->
+        <WhatHappenedCard
+          class="rp-gap"
+          :what-happened="extras ? extras.what_happened : null"
+          :title="whatTitle"
+          :period-type="current?.period_type ?? 'weekly'"
+          :period-key="current?.period_key ?? ''"
+        />
 
         <!-- ③ 这一期干成了什么 —— ② 量的是「投入」，这一张量的是「产出」。
              三栏各报各的数（不给跨源总数）；三栏全空时整卡不渲染。 -->
@@ -324,7 +278,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ReadingCard from '../components/ReadingCard.vue'
 import OutcomeCard from '../components/OutcomeCard.vue'
-import WhatHappenedTimeline from '../components/WhatHappenedTimeline.vue'
+import WhatHappenedCard from '../components/WhatHappenedCard.vue'
 import { useSelfRunStore } from '../stores/selfrunStore'
 import { getPeriodDetail } from '../api/selfrunApi'
 import { FALLBACK_COLOR, MONTHLY_QUESTIONS, fmt, periodStatusLabel } from '../types/selfrunTypes'
@@ -347,19 +301,11 @@ const reviewText = ref('')
 const editing = ref(false)
 /** 折叠区（`gap` 缺口 / `readings` 逐条读数）—— 默认全收起，欠账不占首屏 */
 const faces = ref<string[]>([])
-/** 「这一期我做了什么」怎么看：时段轴（周默认）还是清单（月默认） */
-const whatView = ref<'timeline' | 'list'>('timeline')
 
 const hasText = computed(() => reviewText.value.trim().length > 0)
 
 const whatTitle = computed(() =>
   current.value?.period_type === 'monthly' ? '这一个月我做了什么' : '这一周我做了什么')
-
-const isMonthly = computed(() => current.value?.period_type === 'monthly')
-
-/** 时段轴只给周：31 列挤进 720px 抽屉，每列 20px，块里一个字都放不下 */
-const canTimeline = computed(() =>
-  !isMonthly.value && (extras.value?.what_happened.blocks.length ?? 0) > 0)
 
 /** 「这句话是什么时候写的」—— 归档后补写的必须与当天写的分开说 */
 const writtenWhen = computed(() => {
@@ -435,9 +381,8 @@ function openDetail(row: SelfRunPeriod) {
   editing.value = !reviewText.value.trim()
   faces.value = []
   extras.value = null
-  // 每次打开回到默认视图：周看时段、月看清单。
-  // 不沿用上一期的选择 —— 上一期是月、这一期是周，会打开成一张「月视图」的周。
-  whatView.value = row.period_type === 'monthly' ? 'list' : 'timeline'
+  // 「时段 / 清单」的默认看法由 `WhatHappenedCard` 按 `period_key` 自己重置 ——
+  // 这里不用管：上期看月、这期看周，也不会打开成一张「月视图」的周。
   drawer.value = true
   loadExtras(row.id)
 }
@@ -570,27 +515,8 @@ onMounted(load)
 .rp-foot-item b { font-weight: 600; color: var(--el-text-color-primary); font-variant-numeric: tabular-nums; }
 .rp-foot-more { margin-left: auto; color: var(--el-color-primary); cursor: pointer; }
 
-/* ② 这一期我做了什么：按天一条，具体的事才勾得起回忆 */
-.rp-attr-row {
-  display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 8px;
-  font-size: 12px; color: var(--el-text-color-secondary);
-}
-.rp-attr b { color: var(--el-text-color-primary); font-variant-numeric: tabular-nums; }
-.rp-days { display: flex; flex-direction: column; max-height: 320px; overflow: auto; }
-.rp-day {
-  display: flex; gap: 12px; align-items: baseline;
-  padding: 7px 0; font-size: 12px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-}
-.rp-day-when { width: 62px; flex: none; color: var(--el-text-color-secondary); }
-.rp-day-when i { font-style: normal; margin-left: 4px; color: var(--el-text-color-placeholder); }
-.rp-day-what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; padding-right: 8px; }
-.rp-day-item { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-primary); }
-.rp-day-item em { font-style: normal; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
-.rp-day-total { flex: none; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
-.rp-day-more { color: var(--el-text-color-placeholder); }
-.rp-dot-mini { width: 5px; height: 5px; border-radius: 50%; background: var(--el-color-success); flex: none; }
-.rp-dot-mini.loss { background: var(--el-color-danger); }
+/* ② 「这一期我做了什么」的样式随组件走（`WhatHappenedCard` 的 `.whc-*`），
+      这里不再留任何 `.rp-day*` / `.rp-attr*` —— 留在原处会让人以为本页还在用。 */
 
 /* ③ 折叠区：缺口与读数 */
 .rp-faces { margin-top: 12px; }

@@ -18,6 +18,18 @@
 // ══════════════════════════════════════════════════════════════
 
 export type StageStatus = 'draft' | 'active' | 'paused' | 'closed'
+/**
+ * 阶段**类型**（与 `StageStatus` 正交，v3.64.56）。
+ *
+ * `run`    = 运转型：配 KPI、按周/月归档、有达标判定；
+ * `record` = 记录型：只记一笔事实（谋生期 / 小学期 / 中学期 …），
+ *            **零 KPI、零周期、恒 `closed`**，不进任何运转逻辑。
+ *
+ * 🔴 判「这段在不在跑」看这个字段，**不要看 `status`** ——
+ *    记录型的库值也是 `closed`（它没有状态机），只看 status 会把它当成
+ *    「一个已经收尾的 KPI 阶段」。
+ */
+export type StageKind = 'run' | 'record'
 export type PauseReason = 'trip' | 'sick' | 'fallow' | 'other'
 export type PeriodType = 'weekly' | 'monthly'
 export type PeriodStatus = 'great' | 'on_track' | 'slipping' | 'slid' | 'no_record' | 'fallow'
@@ -200,6 +212,9 @@ export const FALLBACK_COLOR = '#CBD5E1'
 export interface SelfRunStage {
   id: number
   name: string
+  /** 运转型 / 记录型（见 `StageKind` 的注释）。判「在不在跑」只看它 */
+  stage_kind: StageKind
+  stage_kind_display: string
   start_date: string
   end_date: string | null
   status: StageStatus
@@ -244,6 +259,47 @@ export interface SelfRunStage {
    *  「2026-11-01 起（不设终点，手动收尾）」）。
    *  🔴 起止日期只此一份：页头、仪表盘卡、阶段总结都印它，谁都不许自己拼 str。 */
   range_label: string
+}
+
+/** 时间轴上的一段**空档**（两段人生之间没配阶段的日子）。 */
+export interface StageTimelineGap {
+  /** `between` = 两段之间；`tail` = 最后一段结束之后到今天 */
+  kind: 'between' | 'tail'
+  start: string
+  end: string
+  /** 闭区间天数（两端都算）—— 后端算，前端不自己相减 */
+  days: number
+  label: string
+}
+
+/** 时间轴的一层节点：顶层阶段 + 它下面挂的子段（「求学阶段 › 小学期」）。 */
+export interface StageTimelineRoot {
+  stage: SelfRunStage
+  children: SelfRunStage[]
+  /**
+   * **这一段之前**空了多久（没有则 `null`）。
+   *
+   * 🔴 空档位置由后端扫完就定，前端**不要**再按日期自己配对 ——
+   *    起点相同或两段重叠时，任何「相邻相减」都会配错，而且页面看着正常。
+   */
+  gap_before: StageTimelineGap | null
+}
+
+export interface StageTimelineResponse {
+  roots: StageTimelineRoot[]
+  /** 最后一段结束之后到今天那段空白（没有则 `null`） */
+  tail_gap: StageTimelineGap | null
+  totals: {
+    all: number
+    run: number
+    record: number
+    first_start: string | null
+    last_end: string | null
+    /** 空档总天数（含尾部）—— 后端相加，前端不再自己累 */
+    gap_days: number
+  }
+  enum: { kind: { value: StageKind; label: string }[] }
+  written: Record<string, number>
 }
 
 export interface SelfRunMetric {
@@ -681,6 +737,14 @@ export interface CurrentPeriodResponse {
   hint?: string
   status_explain?: PeriodStatusExplain
   heartbeat?: Heartbeat
+  /**
+   * 当期**现算**的复盘补充（做过什么 / 到期里程碑 / 时间流失）。
+   *
+   * 🔴 与 `period` 无关地存在：已归档的期也给（算的是「当下」，
+   *    与快照里的读数是两回事）；**没有阶段时是 `null`** ——
+   *    那时页面该说「还没有进行中的阶段」，不能当成「这一期什么都没记录」。
+   */
+  extras: PeriodExtras | null
   colors?: { verdict: Record<string, string>; period: Record<string, string> }
   written: Written
 }

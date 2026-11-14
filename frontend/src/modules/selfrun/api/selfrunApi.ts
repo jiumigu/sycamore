@@ -15,7 +15,7 @@ import type {
   CurrentPeriodResponse, KpiTemplate, OverviewResponse, PeriodOption, PeriodType,
   PeriodExtras, PlanScope, PreviewResult, SelfRunCheckin, SelfRunMetric, SelfRunMetricLog,
   SelfRunMetricPlan, SelfRunPeriod, SelfRunStage, StageLedger, StageSummary, TargetsResponse,
-  TemplateEnum, Written, RunwayReading,
+  StageTimelineResponse, TemplateEnum, Written, RunwayReading,
 } from '../types/selfrunTypes'
 
 // ══════════════════════════════════════════════════════════════
@@ -81,9 +81,59 @@ export function copyStage(data: { from_stage_id: number; name: string; start_dat
 
 /** `shape`：`leaf` = 有 active KPI 的（真正在跑的那一层）/ `long` = 零 KPI 的长阶段。
  *  🔴 分层之后 `status=active` 会有两行（长阶段 + 小阶段），
- *     想拿「当前在跑的那个」必须带 `shape=leaf`，不能靠「取第一条」。 */
-export function listStages(params?: { status?: string; shape?: 'leaf' | 'long' }) {
+ *     想拿「当前在跑的那个」必须带 `shape=leaf`，不能靠「取第一条」。
+ *
+ *  🔴 `kind` **不传 = `run`（只给运转型）** —— v3.64.56 起默认收紧。
+ *     只有阶段总览页会传 `all`；其余调用方（向导 / 账本 / 时间统计）
+ *     保持不传就是对的，不要「顺手」加 `all`。 */
+export function listStages(params?: {
+  status?: string
+  shape?: 'leaf' | 'long'
+  kind?: 'run' | 'record' | 'all'
+}) {
   return request<SelfRunStage[]>({ url: '/selfrun/stages/', method: 'get', params })
+}
+
+/**
+ * 人生阶段时间轴：**全部**阶段（运转型 + 记录型）按起点正序 + 空档。
+ *
+ * 🔴 排序与空档都由**后端**算：空档要按「顶层区间并集」扫（嵌套/重叠时
+ *    相邻相减会算出负数天），前端只负责画。
+ */
+export function getStageTimeline() {
+  return request<StageTimelineResponse>({ url: '/selfrun/stages/timeline/', method: 'get' })
+}
+
+/** 建一条**记录型**阶段（谋生期 / 小学期 …）：不配 KPI、不产生周期。 */
+export function createRecordStage(data: {
+  name: string
+  start_date: string
+  end_date?: string | null
+  note?: string
+  parent?: number | null
+}) {
+  return request<{ stage: SelfRunStage; written: Written }>({
+    url: '/selfrun/stages/records/', method: 'post', data,
+  })
+}
+
+/** 改记录型阶段（**可以改 `start_date`** —— 它没有周期会被改掉）。 */
+export function patchRecordStage(id: number, data: {
+  name?: string
+  start_date?: string
+  end_date?: string | null
+  note?: string
+}) {
+  return request<{ stage: SelfRunStage; touched: string[]; written: Written }>({
+    url: `/selfrun/stages/${id}/`, method: 'patch', data,
+  })
+}
+
+/** 删记录型阶段（后端只对 `record` 放行；运转型一律 400）。 */
+export function deleteRecordStage(id: number) {
+  return request<{ deleted: { id: number; name: string }; written: Written }>({
+    url: `/selfrun/stages/${id}/`, method: 'delete',
+  })
 }
 
 export function getStage(id: number) {

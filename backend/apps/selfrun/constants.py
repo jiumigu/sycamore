@@ -15,7 +15,29 @@
 # 一、枚举（7 张表的取值）
 # ══════════════════════════════════════════════════════════════
 
+# ⓪ 阶段**类型**（与 `status` 正交，v3.64.56）
+#
+# 🔴 为什么必须与 `status` 分开，而不是往 status 里多加一个值：
+#    「谋生期 6 年 / 小学期 / 中学期 / 大学期」这类**已经走完的人生阶段**
+#    只记一笔事实，**永远不配 KPI、不产生周期、不做达标判定**；
+#    而 `draft/active/paused/closed` 说的是**一段正在运转的 KPI 阶段**走到了哪一步。
+#    把前者塞进 `closed` ⇒ `closed` 变成兜底桶：
+#      · 「已收尾的阶段」表会混进 0 条 KPI 的行，而那张表带「用它开新阶段」按钮；
+#      · `is_long_stage`（顶级 + 零 KPI）会把一条「小学期」判成**长阶段**，
+#        于是它出现在长阶段下拉与账本入口里，且不报错。
+#    这正是项目铁律「枚举混不同质 ⇒ 拆轴加一维」的落点。
+STAGE_KIND_CHOICES = [
+    ('run', '运转型'),
+    ('record', '记录型'),
+]
+STAGE_KIND_RUN = 'run'
+STAGE_KIND_RECORD = 'record'
+
 # ① 阶段状态机：draft → active ⇄ paused → closed ──[复制]──> 新 draft
+#
+# ⚠️ 这只描述**运转型**阶段的运转状态。记录型阶段恒为 `closed` 且不走这个状态机
+#    （它没有「进行中 / 暂停」这回事）。判定一个阶段是不是在运转，看 `stage_kind`，
+#    不要看 `status` —— 见上面 STAGE_KIND_CHOICES 的说明。
 STAGE_STATUS_CHOICES = [
     ('draft', '草稿'),
     ('active', '进行中'),
@@ -341,6 +363,13 @@ STATE_CHOICES = [
 
 # 一个阶段同一时间只允许一个 `active` 或 `paused`
 OPEN_STAGE_STATUSES = ('active', 'paused')
+
+# 记录型阶段的**固定**状态。它没有「进行中 / 暂停」这回事，建出来就是走完的。
+# 🔴 用 `closed` 而不是新造一个 status 值：所有「运转型」列表查询都已按
+#    `stage_kind='run'` 收紧（见 `services.list_stages`），所以它不会被误纳入；
+#    显示词由 `services.stage_status_display()` 分流成「已记录」，
+#    于是**数据上合法、界面上准确**，不必为此再加一个状态值。
+RECORD_STAGE_STATUS = 'closed'
 
 # 归档后**只读**的 Period 字段（序列化器用同一份，避免两处清单漂移）
 PERIOD_FROZEN_FIELDS = (

@@ -81,7 +81,7 @@ class SelfRunTemplate(models.Model):
 class SelfRunStage(models.Model):
     """阶段 —— 生命周期容器。
 
-    状态机：`draft → active ⇄ paused → closed ──[复制]──> 新 draft`
+    状态机（**只对运转型**）：`draft → active ⇄ paused → closed ──[复制]──> 新 draft`
 
     🔴 约束（v3.65.0 起分两层）：
     1. **最多两层**：长阶段（`parent IS NULL`）挂小阶段，小阶段不能再挂。
@@ -93,9 +93,22 @@ class SelfRunStage(models.Model):
        长阶段若也配 KPI，**同一周会同时属于长阶段和小阶段两个 Period**，
        判定打两遍，而「本周活着 0/5」到底算谁的就说不清了 ——
        又一把「同一事实两把尺子」。所以长阶段只做**账本 + 汇总**。
+
+    🔴 另有一维 `stage_kind`（v3.64.56），与状态机**正交**：
+       `run` = 跑 KPI 的运转型；`record` = 只记一笔的事实型（谋生期 / 小学期 …），
+       后者零 KPI、零 Period、恒 `closed`，**不进任何运转查询**。
+       判「这段在不在运转」看 `stage_kind`，不要看 `status`。
     """
 
     name = models.CharField(max_length=100, verbose_name='阶段名称')
+    # 🔴 与 `status` **正交**（v3.64.56）：`run` = 跑 KPI 的阶段，`record` = 只记一笔的
+    #    人生阶段（谋生期 / 小学期 / 中学期 …）。记录型永不配 KPI、不产生 Period、
+    #    不参与任何判定，恒为 `status='closed'`。理由见 `constants.STAGE_KIND_CHOICES`。
+    # ⚠️ 存量行默认 `run` —— 加这一维之前建出来的每一条都是运转型。
+    stage_kind = models.CharField(
+        max_length=10, choices=C.STAGE_KIND_CHOICES, default=C.STAGE_KIND_RUN,
+        verbose_name='阶段类型',
+    )
     # 🔴 长阶段（parent 为空）只汇总；小阶段才是真正跑 KPI 的那一层。
     #    `PROTECT`：删长阶段不许连带删小阶段（与全模块 FK 纪律一致）。
     parent = models.ForeignKey(

@@ -273,7 +273,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
         meta: { title: '制定配置' },
       },
-      // 「制定配置」的**三个页内子页面**（v3.61.2）—— 入口是主视图右侧那三个按钮。
+      // 「制定配置」的**页内子页面**（v3.61.2 三页 + v3.64.56「人生阶段」）——
+      // 前三页的入口是主视图右侧那三块配置项，第四页在它们下方单独一节。
       // ⚠️ path 挂在 `/selfrun/setup/` 之下而非 `/selfrun/`（§45）：
       //    侧边栏高亮用 `route.path.startsWith('/selfrun/setup')`，仍精确亮「制定配置」；
       //    而挂父路径之下才表达得出「这是制定配置的下一层」（父子关系写在 path 里）。
@@ -297,6 +298,16 @@ const routes: RouteRecordRaw[] = [
         name: 'selfrun-setup-logs',
         component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
         meta: { title: '配置变更留痕' },
+      },
+      // 阶段总览（v3.64.56）—— 人生已配置的**全部**阶段 + 空档。
+      // ⚠️ 同样不占侧边栏菜单项：入口是「制定配置」右侧栏底部那一节。
+      // 🔴 与上面三条不同类（它们管配置，这条管对象），但在路由上仍是
+      //    「制定配置的下一层」—— 因为「阶段」就是这个模块配置的对象。
+      {
+        path: 'setup/stages',
+        name: 'selfrun-setup-stages',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '人生阶段' },
       },
       {
         path: 'week',

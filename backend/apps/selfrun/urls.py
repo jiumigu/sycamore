@@ -10,6 +10,11 @@ urlpatterns = [
     path('templates/<int:pk>/', views.TemplateDetailView.as_view(), name='selfrun-template-detail'),
     path('metrics/preview/', views.MetricPreviewView.as_view(), name='selfrun-metric-preview'),
     path('stages/copy/', views.StageCopyView.as_view(), name='selfrun-stage-copy'),
+    # 人生阶段时间轴（v3.64.56）：运转型 + 记录型合并，按起点正序 + 空档。
+    # ⚠️ 字面路径，排在 `<int:pk>/` 之前 —— 读起来不该依赖 int 转换器不匹配它。
+    path('stages/timeline/', views.StageTimelineView.as_view(), name='selfrun-stage-timeline'),
+    # 记录型的**建**入口（改/删走 `stages/<pk>/`，由 `stage_kind` 分流）
+    path('stages/records/', views.RecordStageCreateView.as_view(), name='selfrun-stage-records'),
     path('stages/', views.StageListCreateView.as_view(), name='selfrun-stages'),
     path('stages/<int:pk>/pause/', views.StagePauseView.as_view(), name='selfrun-stage-pause'),
     path('stages/<int:pk>/resume/', views.StageResumeView.as_view(), name='selfrun-stage-resume'),

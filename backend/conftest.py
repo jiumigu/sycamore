@@ -411,6 +411,63 @@ CREATE TABLE IF NOT EXISTS `travel_wish` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+# travel_plan_stop（旅行 0010，managed 新表；--no-migrations --reuse-db 下镜像）
+#
+# ⚠️ DDL 与 `manage.py sqlmigrate travel 0010` 逐字对齐（`id` 是 integer、
+#    `order` / `days` 是 smallint unsigned）。两张 CHECK 刻意不写：
+#    非负由 Django 侧字段类型保证，测试库不必依赖 DB CHECK。
+#    FK 不带 ON DELETE（Django 在应用层管级联：plan CASCADE、item→stop PROTECT）。
+# ⚠️ 顺序：`travel_plan` 由模型建表（managed），故本表排在文件任意位置都不缺前置。
+_CREATE_TRAVEL_STOP_SQL = """
+CREATE TABLE IF NOT EXISTS `travel_plan_stop` (
+  `id` integer NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `city` varchar(100) NOT NULL,
+  `province` varchar(50) NOT NULL,
+  `order` smallint unsigned NOT NULL,
+  `days` smallint unsigned NULL,
+  `notes` longtext NOT NULL,
+  `plan_id` integer NOT NULL,
+  CONSTRAINT `uniq_travel_stop_plan_order` UNIQUE (`plan_id`, `order`),
+  CONSTRAINT `travel_plan_stop_plan_id_64a28bbd_fk_travel_plan_id` FOREIGN KEY (`plan_id`) REFERENCES `travel_plan` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# ⚠️ travel 0010 给**已存在**的 `travel_plan_item` 加了 `stop_id`。
+#    `--reuse-db` 复用的旧测试库里那张表还是 0009 的样子，而
+#    `CREATE TABLE IF NOT EXISTS` 遇到已存在的表什么也不做 ⇒ 列不存在，
+#    随后 ORM 一 SELECT `stop_id` 就报 Unknown column（看着像「迁移没跑」）。
+#    处置与其余补列 patch 一致：查 information_schema，缺什么补什么（幂等、不删不动）。
+_TRAVEL_PLAN_ITEM_STOP_FK = 'travel_plan_item_stop_id_43326aef_fk_travel_plan_stop_id'
+
+
+def _patch_travel_plan_item_columns(cursor) -> None:
+    """给已存在的 `travel_plan_item` 补 0010 的 `stop_id` 列与外键（幂等、不删不动）。"""
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'travel_plan_item'
+        """,
+    )
+    existing = {row[0] for row in cursor.fetchall()}
+    if not existing:
+        return          # 表还没建：Django 侧用当前模型建表，已经带着新列
+    if 'stop_id' not in existing:
+        cursor.execute('ALTER TABLE `travel_plan_item` ADD COLUMN `stop_id` integer NULL')
+    cursor.execute(
+        """
+        SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'travel_plan_item'
+           AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+        """,
+    )
+    constraints = {row[0] for row in cursor.fetchall()}
+    if _TRAVEL_PLAN_ITEM_STOP_FK not in constraints:
+        cursor.execute(
+            f'ALTER TABLE `travel_plan_item` ADD CONSTRAINT `{_TRAVEL_PLAN_ITEM_STOP_FK}`'
+            ' FOREIGN KEY (`stop_id`) REFERENCES `travel_plan_stop` (`id`)',
+        )
+
+
 # ⚠️ 2026-11-02 起赎回期**已无表**（v3.64.20 第 4 轮）：
 #    `redemption_period` / `redemption_week_snapshot` 退役，
 #    `redemption_pool_inject` 搬到 `selfrun_pool_inject`（见 selfrun 那一段）。
@@ -954,6 +1011,7 @@ _CREATE_SELFRUN_STAGE_SQL = """
 CREATE TABLE IF NOT EXISTS `selfrun_stage` (
   `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
   `name` varchar(100) NOT NULL,
+  `stage_kind` varchar(10) NOT NULL,
   `parent_id` integer NULL,
   `start_date` date NOT NULL,
   `end_date` date NULL,
@@ -986,7 +1044,10 @@ _SELFRUN_STAGE_PARENT_FK_0008 = 'selfrun_stage_parent_id_e1842814_fk_selfrun_sta
 
 
 def _patch_selfrun_stage_columns(cursor) -> None:
-    """给已存在的 `selfrun_stage` 补 0008 的两列 + 自引用外键（幂等、不删不动）。"""
+    """给已存在的 `selfrun_stage` 补 0008 的两列 + 自引用外键（幂等、不删不动）。
+
+    另补 0012 的 `stage_kind`（见函数末尾）。
+    """
     cursor.execute(
         """
         SELECT COLUMN_NAME FROM information_schema.COLUMNS
@@ -1006,6 +1067,22 @@ def _patch_selfrun_stage_columns(cursor) -> None:
         cursor.execute(
             f'ALTER TABLE `selfrun_stage` ADD CONSTRAINT `{_SELFRUN_STAGE_PARENT_FK_0008}`'
             ' FOREIGN KEY (`parent_id`) REFERENCES `selfrun_stage` (`id`)',
+        )
+
+    # selfrun 0012（v3.64.56）：`stage_kind`（run / record）。
+    #
+    # 🔴 必须**先带 `DEFAULT 'run'` 再 DROP DEFAULT**（与 `sqlmigrate` 的两条逐字一致）：
+    #    直接 `ADD COLUMN ... NOT NULL` 时 MySQL 给存量行的隐式默认是**空串**，
+    #    而 `''` 既不等于 `run` 也不等于 `record` ⇒ `list_stages()` 默认过滤
+    #    （`filter(stage_kind='run')`）会把**所有存量阶段丢掉**，
+    #    表现是「阶段全没了」—— 不报错、只是空。测试里就是一大片 404 / 空列表。
+    if 'stage_kind' not in existing:
+        cursor.execute(
+            "ALTER TABLE `selfrun_stage`"
+            " ADD COLUMN `stage_kind` varchar(10) NOT NULL DEFAULT 'run'",
+        )
+        cursor.execute(
+            'ALTER TABLE `selfrun_stage` ALTER COLUMN `stage_kind` DROP DEFAULT',
         )
 _CREATE_SELFRUN_METRIC_SQL = """
 CREATE TABLE IF NOT EXISTS `selfrun_metric` (
@@ -1577,6 +1654,9 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_ASK_ANSWER_SQL)
             cursor.execute(_CREATE_ELECTRICITY_TABLE_SQL)
             cursor.execute(_CREATE_WISH_TABLE_SQL)
+            # 旅行计划站点（travel 0010）：先建站点表，再给 item 补 stop_id 外键
+            cursor.execute(_CREATE_TRAVEL_STOP_SQL)
+            _patch_travel_plan_item_columns(cursor)
             cursor.execute(_CREATE_ACTIVITY_GROUP_SQL)
             cursor.execute(_CREATE_TASK_META_SQL)
             _patch_task_meta_columns(cursor)

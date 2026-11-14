@@ -31,7 +31,10 @@ from .constants import (
     PLAN_SCOPE_CHOICES,
     READER_AGG,
     READER_KEYS,
+    RECORD_STAGE_STATUS,
     STALE_RULES,
+    STAGE_KIND_RECORD,
+    STAGE_KIND_RUN,
     TARGET_SOURCE_FROM,
     TARGET_SOURCE_LABELS,
     TARGET_SOURCE_METRIC,
@@ -117,7 +120,169 @@ def get_open_long_stage():
 
 
 def get_closed_stages():
-    return SelfRunStage.objects.filter(status='closed')
+    """已收尾的**运转型**阶段。
+
+    🔴 必须带 `stage_kind='run'`：记录型阶段的库值也是 `closed`（它没有状态机），
+       不加这一条就会把「小学期」一并收进「已收尾的阶段」表 ——
+       而那张表带「用它开新阶段」按钮，复制一个 0 条 KPI 的阶段毫无意义。
+    """
+    return SelfRunStage.objects.filter(
+        status='closed', stage_kind=STAGE_KIND_RUN,
+    )
+
+
+def list_stages(kind=STAGE_KIND_RUN, status=None, shape=None):
+    """阶段列表的**唯一出口** —— 默认只给**运转型**。
+
+    🔴 默认收紧、显式放开（v3.64.56）：加 `stage_kind` 这一维之前，
+       所有调用方都以为「`GET /stages/` = 能跑 KPI 的那些阶段」。
+       默认返回 `run` ⇒ 向导的「上级阶段」下拉、账本、时间统计、已收尾表
+       **零改动**就是对的；要看人生阶段档案必须显式 `kind='all'`
+       （只有总览页这么干）。反过来（默认全给、各调用方自己加过滤）
+       就要改 7 处，漏一处就是静默混入 —— 那才是这轮最容易犯的错。
+
+    `kind`：
+      · `run`（默认）—— 跑 KPI 的；
+      · `record` —— 只记一笔的人生阶段；
+      · `all` —— 两者都要（阶段总览页专用）。
+
+    `shape`（沿用 v3.65.0 的分层判据，只在 `kind='run'` 下有意义）：
+      · `leaf` —— 有 active KPI 的叶子（「哪一层在跑 KPI」）；
+      · `long` —— 顶级 + 零 KPI 的长阶段。
+    """
+    if kind not in (STAGE_KIND_RUN, STAGE_KIND_RECORD, 'all'):
+        raise SelfRunError(f'kind 只能是 run / record / all，收到 {kind!r}')
+
+    qs = SelfRunStage.objects.all()
+    if kind != 'all':
+        qs = qs.filter(stage_kind=kind)
+
+    if status:
+        qs = qs.filter(status=status)
+
+    if shape == 'leaf':
+        # 判据与 `get_open_stage()` 同一把尺子：叶子 = 有 active KPI。
+        qs = qs.filter(metrics__status='active').distinct()
+    elif shape == 'long':
+        # 与 `get_open_long_stage()` 同源：**顶级 + 零 KPI**。
+        # 只判 `metrics__isnull` 会把「KPI 全退役的小阶段」也算成长阶段。
+        qs = qs.filter(parent__isnull=True, metrics__isnull=True)
+    elif shape:
+        raise SelfRunError(f'shape 只能是 leaf / long，收到 {shape!r}')
+
+    return qs
+
+
+def _day_span(start, end):
+    """闭区间天数（两端都算）。`end` 为空 ⇒ 不设终点，返回 `None`。"""
+    if not end:
+        return None
+    return (end - start).days + 1
+
+
+def stage_timeline():
+    """人生阶段时间轴（v3.64.56）：两类阶段合并、按起点正序、并算出**空档**。
+
+    🔴 为什么页面不能自己排：空档是**派生值**，而「两段之间的空白」最容易被
+       写成「相邻两行相减」—— 一旦有嵌套（长阶段包小阶段）或重叠
+       （谋生期与自我价值实现期可以并行），相减就会算出**负数天**或不存在的空档，
+       而列表看起来完全正常。所以按「顶层区间并集」扫一遍，全站只此一份。
+
+    🔴 **只算顶层**（`parent IS NULL`）：小阶段被长阶段包住，它自己那段空白
+       不属于「人生断档」。若把子阶段也摊平算，长阶段里没开小阶段的日子
+       会被误报成空档 —— 那些日子其实在同一段人生里。
+
+    🔴 **尾部空档要算**：所有阶段都有终点、且最后一段已结束时，
+       从它的次日起到今天就是「还没配置下一步」—— 这正是用户想看见的那段空白
+       （「后几年可能会属于自我价值实现期」）。不算它，页面就只剩走过的那几段，
+       看不出「人生还开着」。
+
+    返回（不做序列化，视图层负责）：
+      `roots`    顶层节点，按 `start_date` 正序，每项
+                 `{stage, children, gap_before}` —— `gap_before` 是**这一段之前**的空档
+                 （没有则 `None`），位置在后端一次扫完就定了，前端不按日期配对；
+      `tail_gap` 最后一段结束之后的空档（到今天），没有则 `None`；
+      `totals`   计数、首尾、空档总天数（`gap_days`，含尾部）。
+    """
+    stages = list(SelfRunStage.objects.all())
+    by_parent = {}
+    for s in stages:
+        by_parent.setdefault(s.parent_id, []).append(s)
+
+    def _sort_key(s):
+        # 同起点按 id —— 与模型 `ordering` 不同：那边是倒序（列表新在前），
+        # 人生时间轴必须**正序**（从早年走到现在），否则读起来是倒着活。
+        return (s.start_date, s.id)
+
+    roots = []
+    for s in sorted(by_parent.get(None, []), key=_sort_key):
+        kids = sorted(by_parent.get(s.id, []), key=_sort_key)
+        roots.append({'stage': s, 'children': kids, 'gap_before': None})
+
+    # ── 空档：顶层区间并集之间的空白 ──────────────────────────────
+    #
+    # 🔴 `gap_before` **挂在节点上**，不另给一份平铺数组：
+    #    前端要按日期去「哪个空档该插在哪两段之间」配对，就得自己再算一遍
+    #    （起点相同/重叠时必然配错，而且不报错）。这里扫一遍就确定位置。
+    today = timezone.localdate()
+    cur_end = None
+    for i, node in enumerate(roots):
+        s = node['stage']
+        if i == 0:
+            cur_end = s.end_date
+            continue
+        if cur_end is not None and s.start_date > cur_end + dt.timedelta(days=1):
+            node['gap_before'] = _gap(
+                'between', cur_end + dt.timedelta(days=1), s.start_date - dt.timedelta(days=1),
+            )
+        if s.end_date is None:
+            cur_end = None           # 延伸到无限，后面不再有空档
+        elif cur_end is None or s.end_date > cur_end:
+            cur_end = s.end_date
+
+    # 尾部空档：最后一段已结束 ⇒ 从次日起到今天都没配阶段
+    tail_gap = None
+    if roots and cur_end is not None and cur_end < today:
+        tail_gap = _gap('tail', cur_end + dt.timedelta(days=1), today)
+
+    first_start = roots[0]['stage'].start_date if roots else None
+    last_end = None
+    if roots and all(r['stage'].end_date for r in roots):
+        last_end = max(r['stage'].end_date for r in roots)
+
+    return {
+        'roots': roots,
+        'tail_gap': tail_gap,
+        'totals': {
+            'all': len(stages),
+            'run': sum(1 for s in stages if s.stage_kind == STAGE_KIND_RUN),
+            'record': sum(1 for s in stages if s.stage_kind == STAGE_KIND_RECORD),
+            'first_start': first_start,
+            'last_end': last_end,
+            # 空档总天数（含尾部）—— 给「一共空了多久」一个数，不用前端相加
+            'gap_days': sum(
+                n['gap_before']['days'] for n in roots if n['gap_before']
+            ) + (tail_gap['days'] if tail_gap else 0),
+        },
+    }
+
+
+def _gap(kind, start, end):
+    """一个空档的显示词（**只在这里拼一份**，前端零计算）。
+
+    ⚠️ 天数用闭区间（两端都算）—— `[10-01, 10-31]` 是 31 天，不是 30。
+       写成相减会每次少一天，而少一天这种事没人会去核对。
+    """
+    days = (end - start).days + 1
+    if kind == 'tail':
+        return {
+            'kind': kind, 'start': start, 'end': end, 'days': days,
+            'label': f'{start:%Y-%m-%d} 起还没配置下一个阶段（到今天 {days} 天）',
+        }
+    return {
+        'kind': kind, 'start': start, 'end': end, 'days': days,
+        'label': f'{start:%Y-%m-%d} ~ {end:%Y-%m-%d} 没有阶段（{days} 天）',
+    }
 
 
 def current_period_meta(period_type='weekly'):
@@ -871,6 +1036,133 @@ def create_stage(payload):
         created.append(metric)
 
     return stage, created
+
+
+# ══════════════════════════════════════════════════════════════
+# T1a · 记录型阶段（人生已走过的那几段，**只记一笔、不跑 KPI**）
+# ══════════════════════════════════════════════════════════════
+
+def create_record_stage(payload):
+    """建一条**记录型**阶段（谋生期 / 小学期 / 中学期 …）。
+
+    🔴 与 `create_stage()` 是两条路，**不能合并**：
+       · 那边一个事务写 3 张表（Stage + Metric×N + MetricLog×N），
+         且「至少一条 KPI」是硬校验；
+       · 这边只写 1 行，`metrics` 恒为空，`status` 恒 `closed`。
+       把两者塞进一个函数，就要靠「有没有 metrics」猜意图 ——
+       那正是 `create_stage()` 里已经明令禁止的写法
+       （「不静默把忘填 KPI 的叶子变成长阶段」）。
+
+    🔴 记录型**不设终点也合法**（那段人生还在继续），但那样它必须是最晚那一段：
+       时间轴上它会延伸到现在，后面的阶段要么不存在、要么与它并行 ——
+       这与「空档」算法一致（见 `stage_timeline` 的并集扫描）。
+    """
+    name = (payload.get('name') or '').strip()
+    if not name:
+        raise SelfRunError('阶段名称不能为空。')
+
+    start_date = payload.get('start_date')
+    if not start_date:
+        raise SelfRunError('记录型阶段必须填起点（这是它唯一的事实）。')
+    end_date = payload.get('end_date')
+    if end_date and end_date < start_date:
+        raise SelfRunError('终点不能早于起点。')
+
+    parent = None
+    parent_id = payload.get('parent')
+    if parent_id:
+        parent = SelfRunStage.objects.filter(pk=parent_id).first()
+        if parent is None:
+            raise SelfRunError('上级阶段不存在。')
+        if parent.parent_id:
+            raise SelfRunError('只支持两层：上级阶段不能再有上级。')
+        # 🔴 父子必须同类：把「小学期」挂到一条跑 KPI 的运转型阶段下，
+        #    会让那条运转型阶段的「孩子」里出现一条永远没有判定的行，
+        #    账本/汇总遍历 children 时口径就混了。
+        if parent.stage_kind != STAGE_KIND_RECORD:
+            raise SelfRunError(
+                f'「{parent.name}」是运转型阶段 —— 记录型只能挂在记录型下面。'
+            )
+
+    return SelfRunStage.objects.create(
+        name=name,
+        stage_kind=STAGE_KIND_RECORD,
+        parent=parent,
+        start_date=start_date,
+        end_date=end_date,
+        # 记录型没有状态机，建出来就是「已走完」；显示词由
+        # `stage_status_display()` 分流成「已记录」。
+        status=RECORD_STAGE_STATUS,
+        note=payload.get('note') or '',
+    )
+
+
+def update_record_stage(stage, payload):
+    """改一条记录型阶段。
+
+    🔴 与运转型的 PATCH 纪律**刻意不同**：运转型 `start_date` 生效后不可改
+       （改它会让已完成周期掉出阶段）；记录型**没有 Period**，改哪个字段都不会
+       牵连任何历史读数 —— 而补录人生阶段时写错日期是常态，锁死等于让人重录。
+    ⚠️ 也**不接受** `status` / `stage_kind` —— 那会把一条记录型改成运转型，
+       而它没有 KPI、没有周期，改完就是一条「进行中但永不判定」的幽灵阶段。
+    """
+    if stage.stage_kind != STAGE_KIND_RECORD:
+        raise SelfRunError('这只支持记录型阶段；运转型请走各自的专用接口。')
+
+    touched = []
+
+    if 'name' in payload:
+        name = (payload.get('name') or '').strip()
+        if not name:
+            raise SelfRunError('阶段名称不能为空。')
+        if name != stage.name:
+            stage.name = name
+            touched.append('name')
+
+    if 'start_date' in payload:
+        if not payload.get('start_date'):
+            raise SelfRunError('记录型阶段必须有起点。')
+        if payload['start_date'] != stage.start_date:
+            stage.start_date = payload['start_date']
+            touched.append('start_date')
+
+    if 'end_date' in payload:
+        if payload.get('end_date') != stage.end_date:
+            stage.end_date = payload.get('end_date')
+            touched.append('end_date')
+
+    if 'note' in payload:
+        note = payload.get('note') or ''
+        if note != stage.note:
+            stage.note = note
+            touched.append('note')
+
+    if stage.end_date and stage.end_date < stage.start_date:
+        raise SelfRunError('终点不能早于起点。')
+
+    if touched:
+        stage.save(update_fields=[*touched, 'updated_at'])
+    return stage, touched
+
+
+def delete_record_stage(stage):
+    """删一条记录型阶段（**真删**，只允许记录型）。
+
+    🔴 运转型阶段一律不给删：它有 KPI / Period / Checkin，删掉就是
+       「好几个小时的记录按兜底归因消失」且不报错。运转型的「结束」只有
+       「归档」一条路（`close_stage`），历史永远留着。
+    🔴 记录型可删是因为它**零依赖**：没有 KPI、没有周期、没有打卡。
+       唯一的牵连是子阶段 —— 有孩子就拒绝（`PROTECT` 也会拦，但报错文案要能读懂）。
+    """
+    if stage.stage_kind != STAGE_KIND_RECORD:
+        raise SelfRunError('只有记录型阶段可以删除；运转型请用「收尾阶段」。')
+    if stage.children.exists():
+        raise SelfRunError(
+            f'「{stage.name}」下面还挂着 {stage.children.count()} 段子阶段，先删子阶段。'
+        )
+    info = {'id': stage.id, 'name': stage.name}
+    stage.delete()
+    return info
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2229,6 +2521,10 @@ def stage_range_label(stage):
     """
     start = f'{stage.start_date:%Y-%m-%d}'
     if not stage.end_date:
+        # 记录型没有「收尾」这个动作（它一开始就是已记录的），说「手动收尾」会
+        # 指向一个根本不存在的按钮。
+        if stage.stage_kind == STAGE_KIND_RECORD:
+            return f'{start} 起（持续中）'
         return f'{start} 起（不设终点，手动收尾）'
     total = (stage.end_date - stage.start_date).days + 1
     return f'{start} ~ {stage.end_date:%Y-%m-%d}（{total} 天）'
@@ -2256,7 +2552,15 @@ def stage_status_display(stage):
        库里的 `status='active'` 说的是「这是当前在册的那一个阶段」，
        不是「已经在跑了」。两种情况都印「进行中」，页头就会写成
        「进行中 · 还有 1 天开始」。
+
+    🔴 记录型状态**在显示层分流**、不往 `status` 枚举里加值（v3.64.56）：
+       它库里存的是 `closed`（合法且能被运转型查询整体排除），
+       但界面上说「已收尾」是错的 —— 那 6 年谋生期不是「一个被我收尾的 KPI 阶段」，
+       它是「已经发生、我记了一笔」。所以：有终点印「已记录」，无终点印「持续中」。
+       （项目铁律：显示层能分流的不动数据。）
     """
+    if stage.stage_kind == STAGE_KIND_RECORD:
+        return '持续中' if not stage.end_date else '已记录'
     if stage.status == 'active' and stage.start_date > timezone.localdate():
         return '未开始'
     return stage.get_status_display()
@@ -2273,6 +2577,10 @@ def stage_days_label(stage):
        未开始时说的是**还差几天**（进度），不是区间。
     """
     n = stage_elapsed_days(stage)
+    # 记录型没有「进度」可言（它不跑），只有长度 —— 判在 `status` 之前，
+    # 否则「持续中」那条会掉进下面的 `closed` 分支印成「共 N 天」，看着像已经结束。
+    if stage.stage_kind == STAGE_KIND_RECORD:
+        return f'到现在 {n} 天' if not stage.end_date else f'共 {n} 天'
     if n <= 0:
         return f'还有 {(stage.start_date - timezone.localdate()).days} 天开始'
     if stage.status == 'closed':

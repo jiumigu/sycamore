@@ -2,7 +2,7 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import * as api from '../api/selfrunApi'
 import type {
-  CurrentPeriodResponse, Heartbeat, KpiTemplate, PeriodOption, PeriodStatusExplain,
+  CurrentPeriodResponse, Heartbeat, KpiTemplate, PeriodExtras, PeriodOption, PeriodStatusExplain,
   PeriodType, PlanScope, SelfRunMetric, SelfRunMetricLog, SelfRunPeriod, SelfRunStage,
   TemplateEnum,
 } from '../types/selfrunTypes'
@@ -26,12 +26,19 @@ interface PeriodView {
   live: boolean
   hint: string
   explain: PeriodStatusExplain | null
+  /**
+   * 当期现算的补充（`what_happened` / `goals` / `time_loss` / `outcomes`）。
+   * 🔴 **后端一直在返回，前端以前把它丢了**（`applyCurrent` 只挑了七个字段）——
+   *    结果是「本周状态」页拿不到时段轴，只能去复盘抽屉看。
+   *    `null` = 还没取到，或还没有进行中的阶段（两者不是一回事，用时分开说）。
+   */
+  extras: PeriodExtras | null
 }
 
 function emptyView(): PeriodView {
   return {
     stage: null, period: null, key: '', start: '', end: '',
-    live: true, hint: '', explain: null,
+    live: true, hint: '', explain: null, extras: null,
   }
 }
 
@@ -76,6 +83,7 @@ export const useSelfRunStore = defineStore('selfrun', () => {
       live: res.live,
       hint: res.hint ?? '',
       explain: res.status_explain ?? null,
+      extras: res.extras ?? null,
     }
     if (periodType === 'weekly') weekly.value = view
     else monthly.value = view
