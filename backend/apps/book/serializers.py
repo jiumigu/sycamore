@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import Book
+from .services import ReadingFocusService
 
 
 class BookListSerializer(serializers.ModelSerializer):
@@ -92,9 +93,9 @@ class BookCreateUpdateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         status = attrs.get('status')
-        if status == '弃读':
+        if status == Book.STATUS_ABANDONED:
             old_status = self.instance.status if self.instance else None
-            if old_status != '弃读' and not attrs.get('abandon_reason'):
+            if old_status != Book.STATUS_ABANDONED and not attrs.get('abandon_reason'):
                 raise serializers.ValidationError({'abandon_reason': '弃读时必须填写弃读原因'})
         return attrs
 
@@ -110,7 +111,7 @@ class BookBulkUpdateSerializer(serializers.Serializer):
     而不是「看起来成功了、其实写了一条假原因」。
     """
 
-    BULK_STATUS_CHOICES = [c for c in Book.STATUS_CHOICES if c[0] != '弃读']
+    BULK_STATUS_CHOICES = [c for c in Book.STATUS_CHOICES if c[0] != Book.STATUS_ABANDONED]
 
     bids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -142,3 +143,48 @@ class BookStatsSerializer(serializers.Serializer):
     year_stats = serializers.ListField(default=[])
     recommend_stats = serializers.ListField(default=[])
     depth_stats = serializers.ListField(default=[])
+
+
+class ReadingFocusBookSerializer(serializers.ModelSerializer):
+    """「当前这本」横条上要显示的那几列 —— 不做成 BookListSerializer 全量。"""
+
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    btype_display = serializers.CharField(source='get_btype_display', read_only=True)
+    reading_depth_display = serializers.CharField(source='get_reading_depth_display', read_only=True)
+
+    class Meta:
+        model = Book
+        fields = [
+            'bid', 'btitle', 'author', 'btype', 'btype_display',
+            'status', 'status_display', 'reading_depth', 'reading_depth_display',
+            'readDate', 'recommend', 'tags',
+        ]
+
+
+class ReadingFocusSerializer(serializers.Serializer):
+    """`GET /books/reading-focus/` 的出参。
+
+    `book` / `started_on` / `days` 三件事必须**同时**为 `null` 或同时有值：
+    没有指针时前端显示「还没指定当前这本」，不该出现「有书但没有天数」。
+    """
+    book = ReadingFocusBookSerializer(allow_null=True)
+    started_on = serializers.DateField(allow_null=True)
+    days = serializers.IntegerField(allow_null=True)
+
+
+class ReadingFocusSwitchSerializer(serializers.Serializer):
+    """`POST /books/reading-focus/switch/` 的入参。
+
+    🔴 `close_mode` 的**语义校验**（有没有旧书、弃读要不要原因）在
+       `ReadingFocusService.switch` 里 —— 那取决于库里的状态，
+       不取决于请求体。这里只管类型与取值。
+    """
+    book_id = serializers.IntegerField(min_value=1)
+    close_mode = serializers.ChoiceField(
+        choices=ReadingFocusService.CLOSE_CHOICES,
+        required=False,
+    )
+    reason = serializers.CharField(
+        required=False, allow_blank=True, max_length=500, default='',
+    )
+

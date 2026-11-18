@@ -1,5 +1,7 @@
 import request from '@/shared/utils/request'
-import type { BookListParams, BookStats } from '../types/bookTypes'
+import type {
+  Book, BookListParams, BookStats, ReadingFocus, ReadingFocusCloseMode, ReadingFocusSwitchResult,
+} from '../types/bookTypes'
 
 export function getBookList(params?: BookListParams) {
   return request({
@@ -101,3 +103,35 @@ export function markAsCompleted(id: number) {
     method: 'post',
   })
 }
+
+/** 当前在读的那一本（全库唯一）。只读接口，看一眼不会建行。 */
+export function getReadingFocus() {
+  return request<ReadingFocus>({
+    url: '/books/reading-focus/',
+    method: 'get',
+  })
+}
+
+/** 换书弹窗的候选（v3.64.81）。**口径在后端**：只含还能读的书（待读 / 在读 /
+ *  二刷 / 搁置），且已排除当前这本 —— 前端不许再筛一遍，那是第二份口径。 */
+export function getFocusCandidates(search = '') {
+  return request<{ results: Book[]; count: number }>({
+    url: '/books/reading-focus/candidates/',
+    method: 'get',
+    params: search ? { search } : {},
+  })
+}
+
+/** 换书。`closeMode` 是**给旧书的结论**：没有旧书时不要传（传了后端 400）。 */
+export function switchReadingFocus(
+  bookId: number,
+  closeMode?: ReadingFocusCloseMode,
+  reason?: string,
+) {
+  return request<ReadingFocusSwitchResult>({
+    url: '/books/reading-focus/switch/',
+    method: 'post',
+    data: { book_id: bookId, close_mode: closeMode, reason: reason || '' },
+  })
+}
+

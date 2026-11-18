@@ -1,7 +1,7 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as bookApi from '../api/bookApi'
-import type { BookListParams, BookStats } from '../types/bookTypes'
+import type { BookListParams, BookStats, ReadingFocus, ReadingFocusCloseMode } from '../types/bookTypes'
 import type { Book } from '../types/bookTypes'
 
 export const useBookStore = defineStore('book', () => {
@@ -134,6 +134,57 @@ export const useBookStore = defineStore('book', () => {
     }
   }
 
+  /** 当前在读的那一本。`null` = 还没指定，**不是**加载失败。 */
+  const focus = ref<ReadingFocus | null>(null)
+
+  async function fetchReadingFocus() {
+    try {
+      const response = await bookApi.getReadingFocus()
+      focus.value = response.data
+      return response.data
+    } catch (error) {
+      console.error('获取当前在读失败:', error)
+      throw error
+    }
+  }
+
+  /** 换书 —— 必须带旧书结论（`closeMode`），否则后端 400。 */
+  async function switchFocus(
+    bookId: number,
+    closeMode?: ReadingFocusCloseMode,
+    reason?: string,
+  ) {
+    submitting.value = true
+    try {
+      const response = await bookApi.switchReadingFocus(bookId, closeMode, reason)
+      focus.value = response.data
+      return response.data
+    } catch (error) {
+      console.error('换书失败:', error)
+      throw error
+    } finally {
+      submitting.value = false
+    }
+  }
+
+  /** 换书弹窗里的候选书（本地一份，**不写 `bookList`**）。
+   *
+   *  🔴 不能借用 `fetchBookList`：它会顺手改写 `bookList` / `totalCount`，
+   *     于是弹窗里搜一次，背后的表格就被换掉了 —— 关掉弹窗看到的是搜索结果，
+   *     而筛选条还写着原来的条件。 */
+  const focusCandidates = ref<Book[]>([])
+
+  async function searchFocusCandidates(keyword = '') {
+    // 口径（哪些书能当候选、当前这本排不排）**全在后端**（v3.64.81）。
+    // 🔴 这里不要再 filter：原来那句 `b.bid !== focus.value?.book?.bid` 是
+    //    仅剩的本地口径，后端已经在 `candidate_queryset` 里排除过一遍；
+    //    两边各写一份，将来放宽规则时必有一边漏掉 —— 而且漏了不报错，
+    //    只是弹窗里多出几本不该出现的书（用户报的就是这个）。
+    const response = await bookApi.getFocusCandidates(keyword)
+    focusCandidates.value = response.data?.results ?? []
+    return focusCandidates.value
+  }
+
   function resetState() {
     bookList.value = []
     stats.value = null
@@ -146,9 +197,10 @@ export const useBookStore = defineStore('book', () => {
 
   return {
     bookList, stats, loading, submitting, totalCount, currentPage, pageSize,
-    currentBook,
+    currentBook, focus, focusCandidates,
     fetchBookList, fetchBookById, fetchStats, createNewBook, updateExistingBook,
     deleteExistingBook, bulkDeleteBooks, bulkUpdateBooks, markAsCompleted,
+    fetchReadingFocus, switchFocus, searchFocusCandidates,
     resetState,
   }
 })

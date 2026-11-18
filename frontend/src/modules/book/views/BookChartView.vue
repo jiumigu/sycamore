@@ -47,7 +47,7 @@
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ stats?.completed_count || 0 }}</div>
-              <div class="stat-label">{{ scopeLabel('已完成', '已完成') }}</div>
+              <div class="stat-label">{{ scopeLabel('已读完', '已读完') }}</div>
             </div>
           </div>
         </el-card>
@@ -73,7 +73,7 @@
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ stats?.reading_count || 0 }}</div>
-              <div class="stat-label">{{ scopeLabel('阅读中', '阅读中') }}</div>
+              <div class="stat-label">{{ scopeLabel('在读', '在读') }}</div>
             </div>
           </div>
         </el-card>
