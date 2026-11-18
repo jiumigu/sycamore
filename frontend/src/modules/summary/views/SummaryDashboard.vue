@@ -129,6 +129,48 @@
     </el-card>
 
     <!--
+      阶段对照（v3.64.61）：把「自我运转」的人生阶段标到七维上 ——
+      两座总览岛的最小连法。
+
+      🔴 紧跟趋势图，但**不受上方年份选择影响**：阶段可以跨自然年
+         （三年赎回期 2026-11 → 2029-09），按年切会把它劈成三段，
+         而「赎回期 vs 谋生期」本来就不是同一年内的事。
+         标题里的「跨年」二字就是防这个误读的。
+    -->
+    <el-card v-if="store.stageCompare" shadow="hover" class="chart-card full-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">🧭 阶段对照</span>
+          <div class="card-hint">
+            按人生阶段而不是自然年比七维 —— 跨年，不受上方年份选择影响
+          </div>
+        </div>
+      </template>
+      <StageCompareTable :data="store.stageCompare" />
+    </el-card>
+
+    <!--
+      跨维度配对体检（v3.64.62）
+
+      🔴 紧接在「阶段对照」之后：上一张是「各维度有没有断」，
+         这一张才回答「维度之间有没有关系」—— 后者才是审计里说的
+         「尺子都摆出来了，却没人拿它们互相量」。
+         它同样**不受年份选择影响**（跨年比，n 才够）；
+         月份粒度下「没记」与「0」分得开，日粒度分不开。
+    -->
+    <el-card v-if="store.pairCheck" shadow="hover" class="chart-card full-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">🔬 配对体检</span>
+          <div class="card-hint">
+            一次列出几组说得通的配对 —— 有关系的、没关系的、算不出的都在这里
+          </div>
+        </div>
+      </template>
+      <PairCheckTable :data="store.pairCheck" />
+    </el-card>
+
+    <!--
       两个回顾出口并排（v3.60.11 起）：金句 + 一条旧结论。
       🔴 v3.63.14 起从**页面顶部挪到底部**：这两张是「回顾读物」，实测各 450px 高，
       把「七维雷达」挤到第 900px 处（可视高度只有 753px）——
@@ -227,8 +269,16 @@
     </div>
 
 
-    <!-- 身体-状态关联（暂隐藏，等待数据接口就绪后启用） -->
-    <!-- <BodyMindChart /> -->
+    <!--
+      身体-状态（周级，v3.64.62 恢复渲染）
+
+      🔴 它曾被注释掉（写着「等待数据接口就绪后启用」），而接口其实一直是通的。
+         真正的原因是**数据不够**：健康自查全库 4 条，12 周窗口内 0 条，
+         老版本靠 `or 0` 把这变成「每晚睡满分」，于是图很好看、全是假的。
+         现在它如实说「这周没做过自检」，并给出去补记的出口。
+         放在页底：这是低频读物，不是首屏要看的量。
+    -->
+    <BodyMindChart />
 
     <!--
       月度明细表已删除（v3.62.43）。
@@ -238,23 +288,40 @@
       原「📆 年度明细」保留在页头下方？不 —— 它现在挂在趋势卡页头，见下。
     -->
 
-    <!-- 月度详情弹窗 -->
-    <!-- 年度明细弹窗 -->
-    <el-dialog v-model="showYearModal" title="📆 年度明细 · 覆盖率" width="960" append-to-body>
-      <div class="config-hint">
-        每一格是当年该维度的覆盖率：有记录期数 ÷ 该有的期数。
-        <b>0% 不是「没做」，是「没记」</b>——这两件事在业务上完全不同，数值上都是 0。
-      </div>
-      <el-table :data="yearRows" v-loading="yearLoading" stripe size="small" max-height="420" style="width: 100%">
-        <el-table-column v-for="col in YEAR_COLUMNS" :key="col.key" :label="col.label" :prop="col.key"
-          align="right" :min-width="col.width" />
-        <el-table-column label="当年最短板" min-width="120" align="right" fixed="right">
-          <template #default="{ row }">
-            <span v-if="row.weakest">{{ row.weakest }} {{ row.weakest_pct }}%</span>
-            <span v-else class="text-muted">—</span>
-          </template>
-        </el-table-column>
-      </el-table>
+    <!-- 年度明细弹窗：表格 ⇄ 叙事两态同框，不叠第二层弹窗
+         宽度跟着态走 —— 表格要 10 列，叙事是一列长文，960 宽的行读起来太散 -->
+    <el-dialog
+      v-model="showYearModal"
+      :title="retroYear ? `📖 读这一年 · ${retroYear} 年` : '📆 年度明细 · 覆盖率'"
+      :width="retroYear ? '780' : '960'"
+      append-to-body
+      @closed="retroYear = null"
+    >
+      <YearRetroPanel v-if="retroYear" :year="retroYear" @back="retroYear = null" />
+      <template v-else>
+        <div class="config-hint">
+          每一格是当年该维度的覆盖率：有记录期数 ÷ 该有的期数。
+          <b>0% 不是「没做」，是「没记」</b>——这两件事在业务上完全不同，数值上都是 0。
+        </div>
+        <el-table :data="yearRows" v-loading="yearLoading" stripe size="small" max-height="420" style="width: 100%">
+          <el-table-column v-for="col in YEAR_COLUMNS" :key="col.key" :label="col.label" :prop="col.key"
+            align="right" :min-width="col.width" />
+          <el-table-column label="当年最短板" min-width="120" align="right" fixed="right">
+            <template #default="{ row }">
+              <span v-if="row.weakest">{{ row.weakest }} {{ row.weakest_pct }}%</span>
+              <span v-else class="text-muted">—</span>
+            </template>
+          </el-table-column>
+          <!-- 叙事入口：表格回答「各维度多少」，这里回答「我发生了什么」 -->
+          <el-table-column label="这一年" width="104" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="retroYear = row.year">
+                读这一年 →
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
     </el-dialog>
 
     <!--
@@ -340,8 +407,11 @@ import QuarterlyDecisionCards from '../components/QuarterlyDecisionCards.vue'
 import CoverageTable from '../components/CoverageTable.vue'
 import RadarChart from '../components/RadarChart.vue'
 import TrendChart from '../components/TrendChart.vue'
+import StageCompareTable from '../components/StageCompareTable.vue'
+import PairCheckTable from '../components/PairCheckTable.vue'
 import MonthlyModal from '../components/MonthlyModal.vue'
 import BodyMindChart from '../components/BodyMindChart.vue'
+import YearRetroPanel from '../components/YearRetroPanel.vue'
 import type { RadarBasis } from '../types/summaryTypes'
 import { getNextConclusion } from '@/modules/toolkit/api/askLibraryApi'
 import type { AskConclusionItem } from '@/modules/toolkit/api/askLibraryApi'
@@ -402,6 +472,13 @@ const YEAR_COLUMNS = [
 const showYearModal = ref(false)
 const yearRows = ref<Array<Record<string, any>>>([])
 const yearLoading = ref(false)
+/**
+ * 年度明细弹窗的第二种形态：`null` = 表格，有值 = 读这一年
+ *
+ * 🔴 用弹窗内切换而不是再开一层弹窗：嵌套对话框在 Element Plus 里
+ *    要各自处理 `append-to-body` 与层级，且关掉上层会把下层一起带走。
+ */
+const retroYear = ref<number | null>(null)
 
 async function openYearDetail() {
   showYearModal.value = true

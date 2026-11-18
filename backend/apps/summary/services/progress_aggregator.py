@@ -219,7 +219,9 @@ class ProgressAggregator:
         from apps.book.models import Book
 
         qs = Book.objects.filter(
-            status__in=['已完成', '通读', '精读'],
+            # 「读完」只有一个值：v3.64.79 之前这里写 ['已完成','通读','精读']，
+            # 那三个正是被拆掉的「读法混进状态」；迁完都归 `finished`。
+            status=Book.STATUS_FINISHED,
             readDate__year=year,
         )
         if month:
@@ -358,7 +360,7 @@ class ProgressAggregator:
         if module == BOOK:
             from apps.book.models import Book
             qs = Book.objects.filter(
-                status__in=['已完成', '通读', '精读'], readDate__year=year,
+                status=Book.STATUS_FINISHED, readDate__year=year,
             )
             return {d for d in qs.values_list('readDate', flat=True) if d}
 
@@ -560,7 +562,7 @@ class ProgressAggregator:
             set(OneDayPage.objects.values_list('begin_date__year', flat=True)),
             set(SugarRecord.objects.values_list('time__year', flat=True)),
             set(TravelRecord.objects.values_list('tyear', flat=True)),
-            set(Book.objects.filter(status='已完成').values_list('readDate__year', flat=True)),
+            set(Book.objects.filter(status=Book.STATUS_FINISHED).values_list('readDate__year', flat=True)),
         ]
         all_years: set[int] = set()
         for s in year_sets:
@@ -895,7 +897,7 @@ class ProgressAggregator:
 
         if module == BOOK:
             from apps.book.models import Book
-            qs = Book.objects.filter(status='已完成', readDate__year=year)
+            qs = Book.objects.filter(status=Book.STATUS_FINISHED, readDate__year=year)
             if month:
                 qs = qs.filter(readDate__month=month)
             return [

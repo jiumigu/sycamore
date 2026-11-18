@@ -16,6 +16,26 @@
     </div>
 
     <div class="mgrid__body">
+      <!--
+        阶段带（v3.64.61）：先看「这几个月的记录属于哪段人生」，再看每个月记了多少。
+
+        🔴 放在月份行**上方**而不是下方：下方紧贴第一行数据（财富），
+           带子会被读成「财富这一行的标题」。上方单独一行、字号更小、无交互。
+        🔴 一个月内发生切换时只印主段名 + 「切换」，详情进 title ——
+           一个月只有一格宽，两段名字印不下；而按天拆格会让 12 列变成 31 列。
+      -->
+      <div v-if="stageRuns.length" class="mrow mrow--stage">
+        <span class="mrow__label mrow__label--stage">阶段</span>
+        <span
+          v-for="run in stageRuns"
+          :key="run.key"
+          class="mcell mcell--stage"
+          :class="`is-${run.kind ?? 'none'}`"
+          :style="{ gridColumn: `span ${run.span}` }"
+          :title="run.title"
+        >{{ run.text }}</span>
+      </div>
+
       <div class="mrow mrow--head">
         <span class="mrow__label"></span>
         <span v-for="m in 12" :key="m" class="mcell mcell--head">{{ m }}月</span>
@@ -77,10 +97,10 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useSummaryStore } from '../stores/summaryStore'
 import { formatSignedAmount } from '@/shared/utils/format'
-import type { TrendModuleMeta } from '../types/summaryTypes'
+import type { StageMonthSpan, TrendModuleMeta } from '../types/summaryTypes'
 
 /**
  * 月度「覆盖率 + 强度」
@@ -220,6 +240,90 @@ function money(v: number | null): string {
   return v === null ? '—' : formatSignedAmount(v, 2)
 }
 
+// ── 阶段带 ────────────────────────────────────────────────
+
+interface StageRun {
+  /** v-for 的 key：逐月唯一（同一段阶段跨月要各自成格再由 span 合并） */
+  key: string
+  /** 合并判据：相邻月归属相同才并成一格 */
+  groupKey: string
+  span: number
+  text: string
+  kind: 'run' | 'record' | null
+  /** 这一段的起始月（补「1–10 月未配置」用） */
+  firstMonth: number
+  /** 原生 title（悬停看整段日期与类型）；阶段带不做点击，不抢格子的事件 */
+  title: string
+}
+
+const KIND_WORD: Record<string, string> = { run: '运转型', record: '记录型' }
+
+function stageTitle(m: StageMonthSpan): string {
+  const head = `${m.month}月`
+  if (!m.segments.length) return `${head}：还没有建这一段的阶段记录`
+  if (!m.is_mixed) {
+    const s = m.segments[0]
+    return `${head}：${s.name}（${KIND_WORD[s.kind] ?? ''}）${s.start} ~ ${s.end}`
+  }
+  return `${head}：` + m.segments.map((s) => `${s.name} ${s.days} 天`).join(' → ')
+}
+
+/**
+ * 把 12 个月的归属压成「连续同归属」的若干段
+ *
+ * 🔴 整年都没有阶段时**不铺 12 个「未配置」**：那会把图挤满、还看不出是
+ *    「没建阶段」还是「建了但没生效」。一句话跨 12 列说完，反而说得清。
+ */
+const stageRuns = computed<StageRun[]>(() => {
+  const spans = store.stageSpans
+  if (!spans || !spans.months.length) return []
+
+  if (spans.uncovered_months.length === 12) {
+    return [{
+      key: 'none-all',
+      groupKey: 'none-all',
+      span: 12,
+      text: '这一年还没有建阶段记录',
+      kind: null,
+      firstMonth: 1,
+      title: '阶段在「自我运转 › 阶段」里建；这一年的 12 个月都没有对应阶段',
+    }]
+  }
+
+  const runs: StageRun[] = []
+  for (const m of spans.months) {
+    const groupKey = `${m.stage_id ?? 'none'}|${m.label ?? ''}|${m.is_mixed ? 'mixed' : ''}`
+    const text = m.is_mixed
+      ? (m.label ? `${m.label} 切换` : '月内切换')
+      : (m.label ?? '未配置')
+    const last = runs[runs.length - 1]
+
+    if (last && last.groupKey === groupKey) {
+      last.span += 1
+      last.title += `\n${stageTitle(m)}`
+      continue
+    }
+    runs.push({
+      key: `${groupKey}#${m.month}`,
+      groupKey,
+      span: 1,
+      text,
+      kind: m.kind,
+      firstMonth: m.month,
+      title: stageTitle(m),
+    })
+  }
+
+  // 空档段跨了几个月就写清范围：「未配置」三个字横跨十格，读者不知道
+  // 是十个月都没建、还是只有一格。单月的仍只说「未配置」。
+  for (const r of runs) {
+    if (r.kind === null && r.span > 1) {
+      r.text = `${r.firstMonth}–${r.firstMonth + r.span - 1} 月未配置`
+    }
+  }
+  return runs
+})
+
 function onEnter(ev: MouseEvent, mod: TrendModuleMeta, col: Column, idx: number) {
   const title = `${idx + 1}月 · ${mod.label}`
   if (col.state === 'future') {
@@ -340,6 +444,50 @@ onBeforeUnmount(() => window.removeEventListener('scroll', closeTip, true))
   min-height: 40px;
 }
 .mrow--head { min-height: 16px; }
+
+/* ── 阶段带 ────────────────────────────────────────────────
+   比数据行矮、字更小、无 hover 高亮：它是「背景说明」，
+   不是第 8 个维度。 */
+.mrow--stage { min-height: 20px; }
+.mrow__label--stage {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.mcell--stage {
+  justify-content: flex-start;
+  margin: 1px 1px 4px;
+  padding: 0 5px;
+  height: 18px;
+  /* 🔴 必须写死 border-box：`is-none` 有 1px 虚线边框，content-box 下
+     它会比相邻的实心格子高 2px，整条带子高低不齐 */
+  box-sizing: border-box;
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+}
+/* 运转型：在跑 KPI 的那段人生 —— 用主色淡底区分 */
+.mcell--stage.is-run {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
+}
+/* 记录型：只记一笔的事实（求学期 / 谋生期）—— 灰底，不抢眼 */
+.mcell--stage.is-record {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--el-text-color-regular);
+}
+/* 没有阶段：与「本期未结」「还没到」共用同一套虚线语言 */
+.mcell--stage.is-none {
+  background: transparent;
+  border: 1px dashed var(--el-border-color);
+  color: var(--el-text-color-placeholder);
+}
+.mcell--stage:hover { outline: none; }
 .mrow__label {
   display: flex;
   flex-direction: column;

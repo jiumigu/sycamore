@@ -159,8 +159,8 @@ class TestBookAndSugar:
         if COMPLETED_MONTHS < 1:
             pytest.skip('今年还没有完整月')
         done_day = dt.date(YEAR, 1, 15)
-        Book.objects.create(btitle='读完的', status='已完成', readDate=done_day)
-        Book.objects.create(btitle='在读的', status='在读', readDate=done_day)
+        Book.objects.create(btitle='读完的', status='finished', readDate=done_day)
+        Book.objects.create(btitle='在读的', status='reading', readDate=done_day)
 
         cov = P._coverage(BOOK, YEAR)
         # 同一个月内两本只算「这个月有读完」这一期

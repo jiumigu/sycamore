@@ -12,7 +12,14 @@ from rest_framework.response import Response
 from .constants import MODULE_LIST
 from .models import SevenDimConfig
 from .serializers import SevenDimConfigSerializer
-from .services import BodyMindCorrelationService, ProgressAggregator, QuarterlyWorkbenchService
+from .services import (
+    BodyMindCorrelationService,
+    CorrelationService,
+    ProgressAggregator,
+    QuarterlyWorkbenchService,
+    StageSpanService,
+    YearRetroService,
+)
 
 
 class SummaryViewSet(viewsets.ViewSet):
@@ -53,12 +60,23 @@ class SummaryViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def trend(self, request):
-        """月度趋势：12 个月各模块堆叠数据"""
+        """月度趋势：12 个月各模块堆叠数据 + 阶段带
+
+        🔴 `stage_spans` 在**视图层**拼进来，不进 `ProgressAggregator`：
+           那边一行 selfrun 都不该 import（它是纯聚合器），
+           而这里是总览的组装层 —— 依赖方向只能 summary → selfrun。
+        """
         year = request.query_params.get('year')
         if year:
             year = int(year)
         data = ProgressAggregator.get_trend(year)
+        data['stage_spans'] = StageSpanService.month_spans(int(data['year']))
         return Response(data)
+
+    @action(detail=False, methods=['get'])
+    def stage_compare(self, request):
+        """阶段对照：各人生阶段的七维**覆盖率**（跨年，只比覆盖率）"""
+        return Response(StageSpanService.stage_compare())
 
     @action(detail=False, methods=['get'])
     def radar(self, request):
@@ -289,8 +307,40 @@ class SummaryViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def body_mind(self, request):
-        """身体-状态关联：睡眠、良品率、情绪趋势"""
+        """身体-状态关联：睡眠原始量、良品率、情绪 trend
+
+        🔴 三组量的缺失一律 `null`，不再用 0 顶替 —— 见服务层 docstring。
+        """
         weeks = int(request.query_params.get('weeks', 12))
         user_id = int(request.query_params.get('user_id', 1))
         data = BodyMindCorrelationService.get_correlation_data(user_id=user_id, weeks=weeks)
         return Response(data)
+
+    # ── 跨维度配对体检 ───────────────────────────────────
+
+    @action(detail=False, methods=['get'])
+    def pair_check(self, request):
+        """跨维度配对体检：每组给共同月数、系数、去掉极端月后是否还成立
+
+        只回答「有没有关系」，不回答「谁导致谁」。
+        """
+        return Response(CorrelationService.pair_check())
+
+    # ── 年度回顾（叙事版）───────────────────────────────
+
+    @action(detail=False, methods=['get'])
+    def year_retro(self, request):
+        """把这一年讲成一篇有前后顺序的事实流（每段都引用真实记录）
+
+        与 `/yearly_detail/` 的分工：那边是一张表（每年一行 × 七列覆盖率），
+        这边是**叙事** —— 只讲「什么时候发生了什么」，不做评价、不打分。
+        """
+        year = request.query_params.get('year')
+        if not year:
+            return Response({'error': '需要 year 参数'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            # 参数不是数字就明说，别让它走到 `int()` 抛 500 —— 也不吞成 200 空结果
+            return Response({'error': f'year 不是年份: {year}'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(YearRetroService.build(year))

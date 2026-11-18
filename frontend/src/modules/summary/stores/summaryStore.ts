@@ -6,7 +6,8 @@ import { ElMessage } from 'element-plus'
 import * as summaryApi from '../api/summaryApi'
 import type {
   YearlyOverview, MonthlyDetail, TrendData, TrendMonth, TrendModuleMeta, RadarData, ModuleDetail,
-  QuarterlyReport, QuestionItem, AnswerItem, InsightItem,
+  QuarterlyReport, QuestionItem, AnswerItem, InsightItem, StageCompareData, StageSpans,
+  PairCheckData,
 } from '../types/summaryTypes'
 
 export const useSummaryStore = defineStore('summary', () => {
@@ -37,6 +38,14 @@ export const useSummaryStore = defineStore('summary', () => {
   const trendData = computed<TrendMonth[]>(() => trend.value?.months ?? [])
   /** 维度元信息（颜色 / 单位由后端下发） */
   const trendModules = computed<TrendModuleMeta[]>(() => trend.value?.modules ?? [])
+  /** 12 个月的阶段归属（趋势图上方那条阶段带） */
+  const stageSpans = computed<StageSpans | null>(() => trend.value?.stage_spans ?? null)
+
+  /** 阶段对照（**跨年**，与 currentYear 无关） */
+  const stageCompare = ref<StageCompareData | null>(null)
+
+  /** 跨维度配对体检（**跨年**，与 currentYear 无关） */
+  const pairCheck = ref<PairCheckData | null>(null)
 
   // ── 操作 ──
 
@@ -109,9 +118,32 @@ export const useSummaryStore = defineStore('summary', () => {
         fetchTrend(year),
         fetchRadar(year),
         fetchYears(),
+        // 阶段对照跨年，但仍跟着刷新：阶段改了名/改了日期，
+        // 「只看一次」的懒取会让页面继续显示旧阶段，且界面上看不出来。
+        fetchStageCompare(),
+        // 配对体检同理：数据每月新增，缓存住就会显示上一个系数。
+        fetchPairCheck(),
       ])
     } finally {
       loading.value = false
+    }
+  }
+
+  async function fetchStageCompare() {
+    try {
+      const res = await summaryApi.getStageCompare()
+      stageCompare.value = res.data as StageCompareData
+    } catch {
+      ElMessage.error('获取阶段对照失败')
+    }
+  }
+
+  async function fetchPairCheck() {
+    try {
+      const res = await summaryApi.getPairCheck()
+      pairCheck.value = res.data as PairCheckData
+    } catch {
+      ElMessage.error('获取配对体检失败')
     }
   }
 
@@ -176,10 +208,14 @@ export const useSummaryStore = defineStore('summary', () => {
   }
 
   return {
-    loading, overview, monthlyDetail, trend, trendData, trendModules, radarData,
+    loading, overview, monthlyDetail, trend, trendData, trendModules, stageSpans, radarData,
     availableYears, currentYear, currentMonth, moduleDetail,
     fetchOverview, fetchMonthlyDetail, fetchTrend, fetchRadar,
     fetchYears, fetchModuleDetail, fetchAll, switchYear,
+    // 阶段对照
+    stageCompare, fetchStageCompare,
+    // 跨维度配对体检
+    pairCheck, fetchPairCheck,
     // 季度决策工作台
     quarterlyReport, quarterlyQuestions, quarterlyAnswers, quarterlyInsights,
     currentQuarter, quarterlyLoading,
