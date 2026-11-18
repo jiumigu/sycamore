@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
@@ -33,7 +34,9 @@ class InboxViewSet(viewsets.ModelViewSet):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['content', 'description', 'tags']
-    ordering_fields = ['created_at', 'due_date', 'priority', 'updated_at']
+    ordering_fields = ['created_at', 'due_date', 'priority', 'updated_at', 'processed_at']
+    # 默认排序（**除「已完成」以外**的状态都走它，见 `filter_queryset`）。
+    # 「待办 / 犹豫」问的是「我最近记了什么」，创建时间是对的尺子。
     ordering = ['-created_at']
     pagination_class = InboxPagination
 
@@ -68,10 +71,43 @@ class InboxViewSet(viewsets.ModelViewSet):
 
         return qs
 
+    def filter_queryset(self, queryset):
+        """默认排序 —— 按「这件事发生的时间」，不是按「记下来的时间」（v3.64.82）。
+
+        | 看哪个列表 | 排序键 | 为什么 |
+        |---|---|---|
+        | 已完成 `status=done` | `-Coalesce(processed_at, created_at)`，次级 `-id` | 这一页问的是「我最近**完成**了什么」。按创建时间排，等于把 9 月记下、昨天才做完的那条埋在中间 |
+        | 其它（待办 / 犹豫 / 已处理 / 废弃） | `-created_at`（`ordering` 默认值） | 问的是「我最近**记**了什么」 |
+
+        🔴 `processed`（已转出）**不**按 `processed_at` 排：87 条里 61 条是历史空值
+           （转出时还没记时间）。按它排会让那 61 条整体沉到底、内部又按 id 排，
+           看起来像乱序 —— 比现在更糟。要改先补历史数据。
+
+        🔴 显式传 `?ordering=` 时一律听调用方（排序控件、调试）。
+        """
+        queryset = super().filter_queryset(queryset)
+        if self.request.query_params.get('ordering'):
+            return queryset
+        if self.request.query_params.get('status', 'pending') == 'done':
+            # `Coalesce` 而不是 `nulls_last`：那几条历史空值用「记下的时间」兜底，
+            # 与前端显示（`processed_at ?? created_at`）是**同一句**兜底；
+            # 顺带不依赖 MySQL / SQLite 对 NULL 排序的差异。
+            return queryset.order_by(
+                Coalesce('processed_at', 'created_at').desc(), '-id',
+            )
+        return queryset
+
     def perform_create(self, serializer):
         serializer.save(user_id=1)
 
     def perform_update(self, serializer):
+        # 状态迁移的唯一收口：`processed_at` 跟着状态走。
+        # 编辑表单能直接把状态改成「已完成」（走 PATCH，不是 `complete` 动作），
+        # 不在这里补时间，那一行就没有完成时刻 —— 列表排序与界面都说不清它。
+        item = serializer.instance
+        new_status = serializer.validated_data.get('status')
+        if new_status and new_status != item.status:
+            item.sync_processed_at(new_status)
         serializer.save(user_id=1)
 
     @action(detail=True, methods=['post'])

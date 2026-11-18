@@ -23,16 +23,19 @@
         <span v-if="item.due_date" class="item-due" :class="dueDateUrgency">
           📅 {{ formatDueDate }}
         </span>
-        <span class="item-date">{{ item.created_at?.slice(0, 10) }}</span>
-        <span v-if="item.status === 'hesitating' && item.hesitate_reason" class="item-hesitate-reason">
-          🤔 {{ item.hesitate_reason }}
-        </span>
-        <span v-if="item.status === 'done' && item.completion_note" class="item-completion-note">
-          📝 {{ item.completion_note }}
-        </span>
-        <span v-if="item.status === 'abandoned' && item.abandon_reason" class="item-abandon-reason">
-          🗑️ {{ item.abandon_reason }}
-        </span>
+        <span class="item-date">{{ dateText }}</span>
+        <span
+          v-if="item.status === 'hesitating' && item.hesitate_reason"
+          class="item-reason item-reason--hesitate"
+        >🤔 {{ item.hesitate_reason }}</span>
+        <span
+          v-if="item.status === 'done' && item.completion_note"
+          class="item-reason item-reason--done"
+        >📝 {{ item.completion_note }}</span>
+        <span
+          v-if="item.status === 'abandoned' && item.abandon_reason"
+          class="item-reason item-reason--abandoned"
+        >🗑️ {{ item.abandon_reason }}</span>
       </div>
     </div>
     <div class="item-actions">
@@ -73,6 +76,25 @@ const emit = defineEmits<{
 
 const categoryIcon = computed(() => {
   return CATEGORY_OPTIONS.find(c => c.value === props.item.category)?.icon ?? '📌'
+})
+
+/** 行上那个日期：**排序键是什么，这里就印什么**（v3.64.82）。
+ *
+ *  「已完成」列表在后端按 `Coalesce(processed_at, created_at)` 倒序
+ *  （`InboxViewSet.filter_queryset`）。这里若还印 `created_at`，
+ *  用户看到的就是一串没规律的日期 —— 按完成时间排出来是
+ *  10-23 / 10-23 / 10-26，印出来的却是 10-22 / 10-22 / 10-17。
+ *
+ *  兜底也和后端同一句：没有完成时间（历史数据）就用记下的时间。
+ *  🔴 时间是后端下发的本地时间串，只截断，禁 `new Date()`（会差 8h）。
+ */
+const dateText = computed(() => {
+  const raw = props.item.status === 'done'
+    ? (props.item.processed_at ?? props.item.created_at)
+    : props.item.created_at
+  if (!raw) return '—'
+  const day = raw.slice(0, 10)
+  return props.item.status === 'done' ? `完成于 ${day}` : day
 })
 
 const categoryLabel = computed(() => {
@@ -203,27 +225,22 @@ function toggleSelect() {
   color: #F59E0B;
   font-weight: 600;
 }
-.item-hesitate-reason {
-  color: #F59E0B;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 状态附带的说明（完成备注 / 犹豫原因 / 废弃原因）—— 三者同构，一套样式。
+   🔴 它**独占一行、高度跟内容走**：长度不是常量（真实数据里最长 88 字、带 2 个换行），
+      挤在日期后面只能截成 280px 的一小截，而右边大半行是空的。
+   🔴 也**不设行数上限**：`line-clamp: 2` 只是把截断点往后挪 —— 那条 88 字 3 行的备注
+      照样会被切在第 2 行，用户看到的还是半句话。回看类文本按内容给高度，
+      多出来的一两行比「省略号」便宜。
+      日期那一段仍是「一行里的一小段」，两者不能共用一个宽度规则。 */
+.item-reason {
+  flex: 1 1 100%;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
-.item-completion-note {
-  color: #10B981;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.item-abandon-reason {
-  color: #9CA3AF;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.item-reason--hesitate { color: #F59E0B; }
+.item-reason--done { color: #10B981; }
+.item-reason--abandoned { color: #9CA3AF; }
 .item-actions {
   flex-shrink: 0;
 }

@@ -4,7 +4,6 @@ from datetime import datetime
 from io import StringIO
 
 from django.db import models, transaction
-from django.utils import timezone
 
 from .models import InboxItem
 
@@ -58,20 +57,6 @@ class ConverterService:
         GoalProgressService.recalculate(goal)
         return 'milestone', milestone.id
 
-    @staticmethod
-    def convert_to_sugar(inbox_item, **extra):
-        """转为能量清单模板，返回 (target_type, target_id)"""
-        from apps.sugar.models import EnergyTemplate
-
-        template = EnergyTemplate.objects.create(
-            content=inbox_item.content,
-            default_energy=extra.get('energy', 2),
-            category=extra.get('category', 'daily'),
-            is_system=False,
-            user_id=inbox_item.user_id,
-        )
-        return 'sugar', template.id
-
     @classmethod
     def process(cls, inbox_item, action, **extra):
         """统一处理入口——执行转换并记录日志"""
@@ -82,31 +67,26 @@ class ConverterService:
 
         if action == 'complete':
             inbox_item.status = 'done'
-            inbox_item.processed_at = timezone.now()
+            inbox_item.sync_processed_at()
 
         elif action == 'convert_to_goal':
             target_type, target_id = cls.convert_to_goal(inbox_item, **extra)
             inbox_item.target_type = target_type
             inbox_item.target_id = target_id
             inbox_item.status = 'processed'
-            inbox_item.processed_at = timezone.now()
+            inbox_item.sync_processed_at()
 
         elif action == 'convert_to_milestone':
             target_type, target_id = cls.convert_to_milestone(inbox_item, **extra)
             inbox_item.target_type = target_type
             inbox_item.target_id = target_id
             inbox_item.status = 'processed'
-            inbox_item.processed_at = timezone.now()
-
-        elif action == 'convert_to_sugar':
-            target_type, target_id = cls.convert_to_sugar(inbox_item, **extra)
-            inbox_item.target_type = target_type
-            inbox_item.target_id = target_id
-            inbox_item.status = 'processed'
-            inbox_item.processed_at = timezone.now()
+            inbox_item.sync_processed_at()
 
         elif action == 'archive':
             inbox_item.status = 'archived'
+            # 归档不写也不清（收尾态）—— 但仍然过同一个入口，别在别处另写一份判据。
+            inbox_item.sync_processed_at()
 
         inbox_item.save()
 

@@ -92,7 +92,7 @@ class InboxItemDetailSerializer(serializers.ModelSerializer):
 
 class BatchActionSerializer(serializers.Serializer):
     ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
-    action = serializers.ChoiceField(choices=['complete', 'archive', 'delete', 'convert_to_goal', 'convert_to_milestone', 'convert_to_sugar'])
+    action = serializers.ChoiceField(choices=['complete', 'archive', 'delete', 'convert_to_goal', 'convert_to_milestone'])
     target_type = serializers.CharField(required=False, allow_null=True)
     target_id = serializers.IntegerField(required=False, allow_null=True)
 

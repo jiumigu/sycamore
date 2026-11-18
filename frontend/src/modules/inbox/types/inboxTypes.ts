@@ -53,7 +53,7 @@ export interface InboxStats {
 
 export interface BatchActionPayload {
   ids: number[]
-  action: 'complete' | 'archive' | 'delete' | 'convert_to_goal' | 'convert_to_milestone' | 'convert_to_sugar'
+  action: 'complete' | 'archive' | 'delete' | 'convert_to_goal' | 'convert_to_milestone'
   target_type?: string
   target_id?: number
 }

@@ -95,7 +95,6 @@ const goalsLoading = ref(false)
 const convertOptions = [
   { action: 'convert_to_goal', icon: '🎯', title: '转为目标', desc: '移到目标管理，长期跟进' },
   { action: 'convert_to_milestone', icon: '🏁', title: '转为里程碑', desc: '关联到已有目标，持续追踪' },
-  { action: 'convert_to_sugar', icon: '⚡', title: '转为能量', desc: '移到能量清单，提升幸福感' },
 ]
 
 watch(() => props.visible, (v) => {

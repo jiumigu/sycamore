@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 
 class InboxItem(models.Model):
@@ -96,6 +97,39 @@ class InboxItem(models.Model):
                 return label
         return self.category
 
+    # ── 「离开收件箱的时刻」= `processed_at` ──────────────────────────
+    #
+    # 六种状态按「时间该不该有」分三组，正好铺满 `STATUS_CHOICES`（有用例钉住）：
+    #   STATUS_CLOSED  完成 / 转出   → 有（写下这一刻）
+    #   STATUS_OPEN    待处理 / 犹豫 → 必须没有（退回待办要清空）
+    #   （其余：已归档 / 已废弃）     → 不碰（收尾态，归档掉一条已完成的不该抹掉完成时刻）
+    STATUS_CLOSED = ('done', 'processed')
+    STATUS_OPEN = ('pending', 'hesitating')
+
+    def sync_processed_at(self, new_status=None, now=None):
+        """按状态对齐 `processed_at` —— **唯一写入口**。
+
+        🔴 三条都是「不写就会静默错」：
+
+        ① **编辑表单能把状态直接改成 `done`**（`InboxForm` 的下拉里就有它），
+           走的是 PATCH 而不是 `complete` 动作。那条路径此前不写时间 ⇒
+           「已完成」列表按完成时间倒序时，这一行永远排到最后，
+           而界面上看不出它为什么在那儿。
+        ② **再点一次「完成」不覆盖已有时间**：完成是既成事实，重记一次等于把
+           9 月 30 日改成今天（与「已读完不再改 `readDate`」同一条口径）。
+        ③ **退回待办要清空**：不清的话，一条待办会带着一个完成时间，
+           「完成于」从此在非完成条目上也有值，谁也说不清它是什么意思。
+
+        `new_status` 只给「刚改完、还没 save 的调用方」用（PATCH 路径）；
+        不传就读当前 `status`（`ConverterService` 路径先写值再调）。
+        """
+        status = self.status if new_status is None else new_status
+        if status in self.STATUS_CLOSED:
+            if self.processed_at is None:
+                self.processed_at = now or timezone.now()
+        elif status in self.STATUS_OPEN:
+            self.processed_at = None
+
 
 class InboxProcessLog(models.Model):
     """收件箱处理日志"""
@@ -103,7 +137,9 @@ class InboxProcessLog(models.Model):
     ACTION_CHOICES = [
         ('convert_to_goal', '转为目标'),
         ('convert_to_milestone', '转为里程碑'),
-        ('convert_to_sugar', '转为能量'),
+        # 历史取值：能量清单已退役（sugar 三表已删）。新请求在 serializer 层就被拒，
+        # 这里保留只为让旧日志还能显示中文标签 —— 删掉会让历史记录变成裸英文。
+        ('convert_to_sugar', '转为能量（已下线）'),
         ('complete', '完成'),
         ('archive', '归档'),
     ]
