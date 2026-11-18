@@ -16,8 +16,6 @@ export interface Milestone {
   status_display?: string
   completed_note: string | null
   self_review?: string
-  difficulty_met?: string
-  next_action?: string
   description?: string
   order_num: number
   target_date: string | null
@@ -82,8 +80,6 @@ export interface CheckinMilestone {
   description: string
   completed_note: string
   self_review: string
-  difficulty_met?: string
-  next_action?: string
   target_date: string | null
   order_num: number
   updated_at: string

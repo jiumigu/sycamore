@@ -73,6 +73,12 @@
           <el-descriptions-item v-if="detailEvent.description" label="描述">
             <div class="desc-text">{{ detailEvent.description }}</div>
           </el-descriptions-item>
+          <!-- 🔴 批阅单独一栏：它此前被并进「完成备注」显示过 —— 写的是 `self_review`、
+               显示的却是 `completed_note` 的标题，刷新后那行还会凭空消失。
+               两列各归各位，标题不一致就等于同一句话有两个名字。 -->
+          <el-descriptions-item v-if="detailEvent.selfReview" label="自我批阅">
+            <div class="desc-text">{{ detailEvent.selfReview }}</div>
+          </el-descriptions-item>
           <el-descriptions-item v-if="detailEvent.completedNote" label="完成备注">
             <div class="desc-text">{{ detailEvent.completedNote }}</div>
           </el-descriptions-item>
@@ -92,14 +98,17 @@
         <!-- 录入模式：完成备注 + 确认 -->
         <template v-else-if="detailEvent.status !== 'done' && completing">
           <div class="completion-form">
-            <div class="completion-title">记录完成心得</div>
+            <!-- 标题跟着写入的列走：这里对里程碑写的是批阅，不是「心得」 -->
+            <div class="completion-title">
+              {{ detailEvent.source === 'inbox' ? '记录完成心得' : '写一句批阅' }}
+            </div>
             <el-input
               v-model="completionNote"
               type="textarea"
               :rows="5"
               :placeholder="detailEvent.source === 'inbox'
                 ? '做完有什么感想？耗时多久？留个记录日后可回顾'
-                : '学习内容、心得、答题情况… 写下来才算真正掌握'"
+                : '难在哪，下次怎么改 —— 一句话就够'"
               maxlength="500"
               show-word-limit
             />
@@ -160,6 +169,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/shared/utils/request'
+import { apiErrorText } from '@/shared/utils/apiError'
 import CalendarMonthView from './components/CalendarMonthView.vue'
 import CalendarListView from './components/CalendarListView.vue'
 import type { CalendarEvent } from '../types/calendar'
@@ -209,6 +219,7 @@ const allEvents = computed<CalendarEvent[]>(() => {
         sourceLabel: m.goal_title || '目标',
         description: m.description || '',
         completedNote: m.completed_note || '',
+        selfReview: m.self_review || '',
         goalTitle: m.goal_title || '',
         goalDeadline: m.goal_deadline || '',
         rawId: m.id,
@@ -251,7 +262,11 @@ function handleEventClick(ev: CalendarEvent) {
 }
 
 function enterCompleteMode() {
-  completionNote.value = detailEvent.value?.completedNote || ''
+  const ev = detailEvent.value
+  // ⚠️ 回填必须跟着**写入口**走：里程碑那个框写的是 `self_review`，
+  //    回填却取 `completed_note` 的话，一条「完成过又改回进行中」的里程碑
+  //    打开时框是空的，一保存就把原来那句覆盖掉（旧内容无声消失）。
+  completionNote.value = (ev?.source === 'milestone' ? ev.selfReview : ev?.completedNote) || ''
   completing.value = true
 }
 
@@ -267,10 +282,20 @@ async function submitComplete() {
   try {
     const note = completionNote.value.trim()
     if (ev.source === 'milestone') {
+      // 🔴 后端要求完成里程碑必须附一句批阅（goals/services/completion_review.py），
+      //    缺了返回 400。先在本地挡：空着点「确认完成」不该发一次必然失败的请求。
+      if (!note) {
+        ElMessage.warning('留一句再完成')
+        return                       // `finally` 会复位 submitting
+      }
+      // ⚠️ 这个框的语义一直是「完成心得」（占位文案就是「心得、答题情况」），
+      //    此前却发给了 `completed_note`（完成备注），于是这里完成的里程碑
+      //    从来不算「有批阅」。改为写进 `self_review` —— 同一个框只写一列，
+      //    不两列都发（那会让同一句话有两个来源，以后必然分叉）。
       await request({
         url: `/goals/milestones/${ev.rawId}/`,
         method: 'patch',
-        data: { status: 'completed', completed_note: note },
+        data: { status: 'completed', self_review: note },
       })
     } else {
       await request({
@@ -281,12 +306,19 @@ async function submitComplete() {
     }
     ElMessage.success('已完成 ✓')
     ev.status = 'done'
-    if (note) ev.completedNote = note
+    // 回显跟着写入的列走：里程碑那句是批阅，不是完成备注
+    if (note) {
+      if (ev.source === 'milestone') ev.selfReview = note
+      else ev.completedNote = note
+    }
     completing.value = false
     completionNote.value = ''
     fetchEvents(calendarDate.value)
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '操作失败')
+    // 用唯一实现：400 的体是 `{'self_review': ['…']}`，没有 `detail` 键 ——
+    // 原来只读 `detail`，于是「留一句再完成」这句后端话术永远显示不出来，
+    // 用户只会看到「操作失败」。
+    ElMessage.error(apiErrorText(e, '操作失败'))
   } finally {
     submitting.value = false
   }

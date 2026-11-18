@@ -106,7 +106,13 @@ class TestMilestoneEditPreservesFields:
         from rest_framework.test import APIClient
         g, m = self._setup()
         c = APIClient()
-        r = c.patch(f'/api/goals/milestones/{m.id}/', {'status': 'completed'}, format='json')
+        # v3.64.84：完成必须带一句批阅（见 services/completion_review.py）——
+        # 本用例钉的是「状态变更不得清空 target_date」，批阅只是过闸的条件。
+        r = c.patch(
+            f'/api/goals/milestones/{m.id}/',
+            {'status': 'completed', 'self_review': '做完了'},
+            format='json',
+        )
         assert r.status_code == 200
         m.refresh_from_db()
         assert m.status == 'completed'

@@ -145,6 +145,7 @@
 
 <script setup lang="ts">
 import { apiErrorText } from '@/shared/utils/apiError'
+import { promptCompletionReview } from '@/shared/utils/completionReview'
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ElMessageBox } from 'element-plus'
@@ -461,14 +462,35 @@ async function toggleMilestoneStatus(m: CheckinMilestone) {
       '确认',
       { confirmButtonText: action, cancelButtonText: '取消', type: 'warning' },
     )
+  } catch {
+    return                                  // 用户取消确认框：什么都不做
+  }
+
+  // 🔴 完成要留一句批阅 —— 后端强制（goals/services/completion_review.py），
+  //    只发状态会 400。本卡此前正是只发状态，所以这一处点「完成」会静默失败。
+  //    重置不需要（取消完成不是一次宣告）。
+  let extra: Record<string, unknown> = {}
+  if (!wasCompleted) {
+    const review = await promptCompletionReview(
+      `「${m.title}」做完了。写一句留给以后的自己 —— 难在哪，下次怎么改。`,
+    )
+    if (review === null) return
+    extra = { self_review: review }
+  }
+
+  try {
     await toggleMilestone(props.goalId, m.id, {
       status: wasCompleted ? 'pending' : 'completed',
+      ...extra,
     })
     ElMessage.success(`里程碑已${action}`)
     emit('checked')
     await loadStats()
-  } catch {
-    // cancelled
+  } catch (err) {
+    // 原来这里是空 catch（只写了一句 `// cancelled`）—— 它把 400 一起吞掉，
+    // 于是「点了完成、什么都没发生、也不报错」。取消已在上面单独 return，
+    // 走到这里就是真的失败，必须说出来。
+    ElMessage.error(apiErrorText(err, `${action}失败`))
   }
 }
 

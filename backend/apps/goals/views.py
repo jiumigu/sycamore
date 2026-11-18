@@ -37,6 +37,8 @@ from .services import (
     QuickGoalService,
     build_checkup,
     calculate_streak,
+    completion_review_clear_issue,
+    completion_review_issue,
 )
 
 
@@ -272,16 +274,34 @@ class GoalViewSet(viewsets.ModelViewSet):
 
         data = serializer.validated_data
         new_status = data.get('status', 'completed' if milestone.status != 'completed' else 'pending')
+
+        # 🔴 完成必须留一句批阅（判据唯一实现在 services/completion_review.py）。
+        #    这条 POST 与 `PATCH /milestones/{pk}/` 是同一件事的两个入口 ——
+        #    只堵其中一个，用户会绕到另一个去完成，而页面上看不出差别。
+        issue = completion_review_issue(
+            before=milestone.status,
+            after=new_status,
+            review=data.get('self_review', milestone.self_review),
+        )
+        if issue:
+            return Response({'self_review': [issue]}, status=400)
+
+        # 同一条「可以改、不能抹掉」—— 勾选框那条路也能把批阅清空
+        clear_issue = completion_review_clear_issue(
+            before=milestone.status,
+            after=new_status,
+            before_review=milestone.self_review,
+            review=data.get('self_review'),
+        )
+        if clear_issue:
+            return Response({'self_review': [clear_issue]}, status=400)
+
         was_completed = milestone.status == 'completed'
         milestone.status = new_status
         if data.get('completed_note') is not None:
             milestone.completed_note = data['completed_note']
         if data.get('self_review') is not None:
             milestone.self_review = data['self_review']
-        if data.get('difficulty_met') is not None:
-            milestone.difficulty_met = data['difficulty_met']
-        if data.get('next_action') is not None:
-            milestone.next_action = data['next_action']
         if data.get('actual_value') is not None:
             milestone.actual_value = data['actual_value']
         milestone.save()
@@ -478,6 +498,10 @@ class ActionViewSet(viewsets.ModelViewSet):
                 milestones = goal.milestones.exclude(status='completed').order_by('order_num', 'id')[:1]
             for milestone in milestones:
                 milestone.status = 'completed'
+                # ⚠️ 这条路径**故意不走**「完成必须留批阅」的校验（见 services/completion_review.py）：
+                #    它是「日子到了」的系统推进，调用方只是点了一下打卡，没有在宣布
+                #    「这件事我交出去了」。逼它在打卡时弹输入框，等于在用户没开口的
+                #    时刻要一句话 —— 而这种要求会被绕过，不会被执行。
                 milestone.save(update_fields=['status'])
                 completed_any = True
                 reward_result = MilestoneRewardService().complete_milestone(milestone)
@@ -657,6 +681,32 @@ class MilestoneViewSet(viewsets.ModelViewSet):
         old_instance = self.get_object()
         old_status = old_instance.status
         new_status = serializer.validated_data.get('status', old_status)
+
+        # 🔴 完成必须留一句批阅 —— 判据唯一实现在 services/completion_review.py。
+        #    必须在 `save()` **之前**：先写状态再报错，就是一条「口头拒绝了、
+        #    库里已经完成」的半写（前端只看见 400，不会看见数据已经变了）。
+        #    ⚠️ `self_review` 没随请求一起来时，传实例现值 —— 之前填过又改回
+        #    pending 的条目，再次完成不必重写一遍。
+        # 🔴 两条判据都要：上面这条管「第一次完成」，下面这条管「已完成的批阅被抹掉」。
+        #    只堵前者，用户仍可「先随便写一句完成，再进编辑删空」—— 缺口会以
+        #    另一种方式长回来，而库里再也看不出这条完成有没有人写过。
+        raw_review = serializer.validated_data.get('self_review')
+        issue = completion_review_issue(
+            before=old_status,
+            after=new_status,
+            review=old_instance.self_review if raw_review is None else raw_review,
+        )
+        if issue:
+            raise ValidationError({'self_review': [issue]})
+
+        clear_issue = completion_review_clear_issue(
+            before=old_status,
+            after=new_status,
+            before_review=old_instance.self_review,
+            review=raw_review,
+        )
+        if clear_issue:
+            raise ValidationError({'self_review': [clear_issue]})
 
         instance = serializer.save()
 

@@ -20,7 +20,7 @@ class MilestoneSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'goal', 'goal_title', 'goal_deadline', 'title', 'status', 'status_display',
             'completed_note', 'description', 'order_num', 'target_date',
-            'target_value', 'actual_value', 'self_review', 'difficulty_met', 'next_action',
+            'target_value', 'actual_value', 'self_review',
             'reward_amount', 'reward_synced', 'reward_issued_at', 'reward_transaction_id',
             'reward_amount_display',
             'created_at', 'updated_at',
@@ -414,8 +414,6 @@ class MilestoneToggleSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=Milestone.STATUS_CHOICES, required=False)
     completed_note = serializers.CharField(required=False, allow_blank=True)
     self_review = serializers.CharField(required=False, allow_blank=True)
-    difficulty_met = serializers.CharField(required=False, allow_blank=True)
-    next_action = serializers.CharField(required=False, allow_blank=True)
     actual_value = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
 
 

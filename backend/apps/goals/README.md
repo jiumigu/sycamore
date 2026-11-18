@@ -6,7 +6,7 @@
 | Model | Table | 用途 |
 |-------|-------|------|
 | Goal | goals_goal | 目标（年度/季度/月度/长期/项目，P0-P3 优先级，支持 `parent_goal` 自关联父子嵌套 + `life_dimension` 人生维度必填 + `goal_completion_bonus` 完成奖励金 + 里程碑/完成双重奖励） |
-| Milestone | goals_milestone | 里程碑（按序排列，含奖励同步 + `difficulty_met` 遇到的困难 + `next_action` 下一步行动 + 完成感悟） |
+| Milestone | goals_milestone | 里程碑（按序排列，含奖励同步 + `self_review` 自我批阅 + 完成备注） |
 | Action | goals_action | 行为记录 |
 | GoalReview | goals_review | 目标回顾（周/月/里程碑三种回顾类型） |
 | OutputRecord | goals_output_record | 良品率记录（类别/质量判定/难度/失败原因/失败类型，含 created_at 月度聚合） |
@@ -31,7 +31,7 @@
 | POST | /goals/quick_create/ | 快速创建（含批量里程碑） |
 | POST | /goals/&lt;pk&gt;/clone/ | 复制目标 |
 | GET | /goals/&lt;pk&gt;/sub_goals/ | 获取子目标列表 |
-| POST | /goals/&lt;pk&gt;/toggle_milestone/ | 切换里程碑状态 |
+| POST | /goals/&lt;pk&gt;/toggle_milestone/ | 切换里程碑状态。🔴 置为 `completed` 时**必须带 `self_review`**（否则 400），与 `PATCH /milestones/&lt;pk&gt;/` 同一道闸 —— 判据唯一实现在 `services/completion_review.py`。🔴 已写下的批阅**可以改、不能清空**（原本为空的放行） |
 | POST | /goals/&lt;pk&gt;/recalculate/ | 手动重算进度 |
 | GET | /goals/stats/ | 统计总览 |
 | GET | /goals/checkup/ | **只读**过程检查（停滞 / 落后 / 逾期；不改任何数据） |
@@ -39,7 +39,7 @@
 | POST | /goals/&lt;pk&gt;/abandon/ | 放弃目标（理由必填；写 `status=abandoned` + `GoalReview` 留痕；里程碑不动） |
 | DELETE | /goals/bulk_delete/ | 批量删除 |
 | GET/POST | /milestones/ | 里程碑列表（?goal= 筛选）/ 创建。日历用 `?target_date_year=&target_date_month=&exclude_abandoned_goals=1` —— **已放弃目标 + 还没完成（`status != completed`）的里程碑不算待办**；已完成的留着（历史日程要能翻回去看）。该开关必须显式传，默认不过滤（目标详情页要看得见自己的全部里程碑，否则放弃后子项「凭空消失」） |
-| GET/PUT/PATCH/DELETE | /milestones/&lt;pk&gt;/ | 详情/更新/删除 |
+| GET/PUT/PATCH/DELETE | /milestones/&lt;pk&gt;/ | 详情/更新/删除。🔴 `PATCH {"status": "completed"}` **必须带 `self_review`**（缺失 400 且不落库；已完成条目再编辑不追溯、打卡推进不拦 —— 判据 `services/completion_review.py`）。🔴 已完成且原本有批阅时，`self_review: ""` 会被拒（400）—— 可以改，不能抹掉 |
 | GET/POST | /actions/ | 行为列表（?goal_id=&milestone_id= 筛选）/ 创建 |
 | GET/PUT/DELETE | /actions/&lt;pk&gt;/ | 详情/更新/删除 |
 | GET | /actions/today_pending/ | 今日未完成行为 |

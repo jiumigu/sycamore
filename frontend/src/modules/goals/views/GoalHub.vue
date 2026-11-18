@@ -289,25 +289,7 @@
       <el-input
         v-model="editSelfReview"
         type="textarea" :rows="3"
-        placeholder="你想对完成这件事的自己说什么？"
-        maxlength="500" show-word-limit
-      />
-    </el-form-item>
-
-    <el-form-item label="遇到的困难">
-      <el-input
-        v-model="editDifficulty"
-        type="textarea" :rows="2"
-        placeholder="过程中遇到了哪些困难？"
-        maxlength="500" show-word-limit
-      />
-    </el-form-item>
-
-    <el-form-item label="下一步行动">
-      <el-input
-        v-model="editNextAction"
-        type="textarea" :rows="2"
-        placeholder="接下来做什么？"
+        placeholder="难在哪，下次怎么改"
         maxlength="500" show-word-limit
       />
     </el-form-item>
@@ -340,7 +322,7 @@
 
     <el-divider />
 
-    <el-form-item label="完成情况">
+    <el-form-item label="完成备注">
       <el-input
         v-model="completionNote"
         type="textarea" :rows="2"
@@ -353,39 +335,16 @@
       <el-input
         v-model="selfReview"
         type="textarea" :rows="4"
-        placeholder="完成这件事，你有什么想对自己说的？哪怕一句话也好。"
+        placeholder="难在哪，下次怎么改 —— 一句话就够"
         maxlength="500" show-word-limit
       />
     </el-form-item>
 
-    <el-form-item label="遇到的困难">
-      <el-input
-        v-model="completingDifficulty"
-        type="textarea" :rows="2"
-        placeholder="过程中遇到了哪些困难？（可选）"
-        maxlength="500" show-word-limit
-      />
-    </el-form-item>
-
-    <el-form-item label="下一步行动">
-      <el-input
-        v-model="completingNextAction"
-        type="textarea" :rows="2"
-        placeholder="接下来做什么？（可选）"
-        maxlength="500" show-word-limit
-      />
-    </el-form-item>
-
-    <div class="quick-phrases">
-      <span class="phrase-label">不知道写什么？试试：</span>
-      <el-tag
-        v-for="phrase in quickPhrases" :key="phrase"
-        size="small" class="phrase-tag"
-        @click="selfReview = phrase"
-      >
-        {{ phrase }}
-      </el-tag>
-    </div>
+    <!-- 🔴 这里**不给**预设短语（v3.64.85）。数据说话：41 条批阅里只有 21 种写法，
+         一半以上是点这排 chip 出来的安抚话（「这是我为自己做的」11 次）。
+         提示语问的是「难在哪、下次怎么改」，chip 给的却是「加油」——
+         等于在同一处既提要求又给标准答案，人一定选最省力那个。
+         编辑弹窗那排还留着：那是**改写**已有的一句（参照），不是**回答**一个问题。 -->
 
     <!-- 「值得留下」（v3.62.0）：**独立一行**，不需要填任何东西。
          🔴 打勾不用现在写 —— 一周后「本周状态」页末才是写的地方。 -->
@@ -421,6 +380,7 @@
 
 <script setup lang="ts">
 import { apiErrorText } from '@/shared/utils/apiError'
+import { promptCompletionReview } from '@/shared/utils/completionReview'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -635,8 +595,6 @@ async function handleMilestoneToggle(goal: Goal, milestone: Milestone, status: s
     completingGoalId.value = goal.id
     completionNote.value = milestone.completed_note || ''
     selfReview.value = milestone.self_review || ''
-    completingDifficulty.value = milestone.difficulty_met || ''
-    completingNextAction.value = milestone.next_action || ''
     keepIt.value = false          // 每次打开都从「不勾」开始 —— 别继承上一次
     showCompleteDialog.value = true
     return
@@ -661,8 +619,6 @@ async function confirmComplete() {
       status: 'completed',
       completed_note: completionNote.value,
       self_review: selfReview.value,
-      difficulty_met: completingDifficulty.value,
-      next_action: completingNextAction.value,
     }, completingGoalId.value)
     // 🔴 打勾放在**完成之后**，且**失败不阻断** ——
     //    它是个附加标记，不能因为作品库还没迁移就把「完成里程碑」也弄成失败。
@@ -687,8 +643,6 @@ async function handleEditMilestone(goal: Goal, milestone: Milestone) {
   editDescription.value = milestone.description || ''
   editCompletionNote.value = milestone.completed_note || ''
   editSelfReview.value = milestone.self_review || ''
-  editDifficulty.value = milestone.difficulty_met || ''
-  editNextAction.value = milestone.next_action || ''
   showEditDialog.value = true
 }
 
@@ -697,16 +651,12 @@ const editingMilestoneData = ref<Milestone | null>(null)
 const editDescription = ref('')
 const editCompletionNote = ref('')
 const editSelfReview = ref('')
-const editDifficulty = ref('')
-const editNextAction = ref('')
 
 const showCompleteDialog = ref(false)
 const completingMilestone = ref<Milestone | null>(null)
 const completingGoalId = ref<number | null>(null)
 const completionNote = ref('')
 const selfReview = ref('')
-const completingDifficulty = ref('')
-const completingNextAction = ref('')
 /**
  * 「这件事里有东西值得留下」—— 打勾**不用现在写任何东西**。
  *
@@ -766,8 +716,6 @@ async function saveMilestoneDetail() {
       description: editDescription.value,
       completed_note: editCompletionNote.value,
       self_review: editSelfReview.value,
-      difficulty_met: editDifficulty.value,
-      next_action: editNextAction.value,
     }
     await goalStore.updateMilestoneStatus(editingMilestoneData.value.id, data, editingMilestoneData.value.goal)
     showEditDialog.value = false
@@ -875,12 +823,27 @@ async function handleAddMilestone() {
 async function handleToggleMilestone(m: Milestone, completed: boolean) {
   if (!milestoneGoal.value) return
   const newStatus = completed ? 'completed' : 'pending'
+
+  // 🔴 这个小圆点也是一个「完成」入口 —— 后端要求完成必附一句批阅，
+  //    只发状态会 400，而下面的 catch 只会说「操作失败」。
+  //    重置（completed=false）不需要理由。
+  let extra: Record<string, unknown> = {}
+  if (completed) {
+    const review = await promptCompletionReview(
+      `「${m.title}」做完了。写一句留给以后的自己 —— 难在哪，下次怎么改。`,
+    )
+    // `null` = 用户取消。圆点是受控的（显示由 `m.status` 决定），
+    // 这里直接返回即可，不会留下一个「勾上了但没保存」的假象。
+    if (review === null) return
+    extra = { self_review: review }
+  }
+
   try {
-    await goalStore.updateMilestoneStatus(m.id, { status: newStatus }, milestoneGoal.value.id)
+    await goalStore.updateMilestoneStatus(m.id, { status: newStatus, ...extra }, milestoneGoal.value.id)
     const detail = await goalStore.fetchGoalById(milestoneGoal.value.id)
     milestones.value = detail?.milestones || []
-  } catch {
-    ElMessage.error('操作失败')
+  } catch (err) {
+    ElMessage.error(apiErrorText(err, '操作失败'))
   }
 }
 

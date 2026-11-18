@@ -112,8 +112,6 @@ class Milestone(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='状态')
     completed_note = models.TextField(blank=True, null=True, verbose_name='完成备注说明')
     self_review = models.TextField(blank=True, default='', verbose_name='自我批阅')
-    difficulty_met = models.TextField(blank=True, default='', verbose_name='遇到的困难')
-    next_action = models.TextField(blank=True, default='', verbose_name='下一步行动')
     description = models.TextField(blank=True, default='', verbose_name='详细描述')
     order_num = models.IntegerField(default=0, verbose_name='排序序号')
     target_date = models.DateField(blank=True, null=True, verbose_name='目标日期')

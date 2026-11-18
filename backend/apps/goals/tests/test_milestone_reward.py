@@ -104,7 +104,12 @@ def test_reward_disabled_issues_nothing(goal: Goal, milestone: Milestone) -> Non
 def test_api_complete_milestone_updates_total_issued(goal: Goal, milestone: Milestone) -> None:
     """核心：API 完成里程碑（views 路径）同步更新目标累计发奖统计"""
     client = APIClient()
-    resp = client.patch(f'/api/goals/milestones/{milestone.id}/', {'status': 'completed'}, format='json')
+    # v3.64.84：完成必须带一句批阅 —— 本用例钉的是奖励同步，批阅只是过闸条件。
+    resp = client.patch(
+        f'/api/goals/milestones/{milestone.id}/',
+        {'status': 'completed', 'self_review': '这一座做完了'},
+        format='json',
+    )
 
     assert resp.status_code == 200
     goal.refresh_from_db()
