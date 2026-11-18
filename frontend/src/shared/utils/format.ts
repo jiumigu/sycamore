@@ -73,3 +73,26 @@ export function formatSignedAmount(
   const sign = value < 0 ? '-' : showPlus ? '+' : ''
   return `¥${sign}${formatAmount(Math.abs(value), precision)}`
 }
+
+/**
+ * 模板边界的金额入口 —— 自带 `¥`、空值 `—`、隐私模式自动掩码。
+ *
+ * 为什么还要有这一个：`formatAmount` 只吃 `number`，而 JSON 里的金额字段到模板
+ * 之间常常是 `unknown`（`plan.stops_total` 之类没有声明类型）。此前各组件自己包一层
+ * `Number(n ?? 0)` —— 缺值于是变成 `¥0.00`，一个**看着合理的错数**，而且四份抄在
+ * 四个组件里。此处替调用点做「是不是 number」这一步：**不是 number 一律按取不到**，
+ * 绝不替用户决定「缺省当 0」。
+ *
+ * 🔴 返回值已含 `¥`，模板里**不要再手写 `¥`**，否则出现 `¥¥1,234.50`；
+ *    空值时也不会出现 `¥—`。
+ */
+export function formatMoney(value: unknown, precision = 2): string {
+  if (typeof value === 'number') return formatSignedAmount(value, precision)
+  // 后端 `DecimalField` 默认发字符串（`total_daily: "484.00"`）—— 能算出数的照常显示。
+  // 但空串不是 0：`Number('')` 也是 0，必须单独拦掉，否则「没填」会变成「¥0.00」。
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed)) return formatSignedAmount(parsed, precision)
+  }
+  return EMPTY_AMOUNT
+}

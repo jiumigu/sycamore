@@ -40,3 +40,20 @@ export function todayLocal(): string {
   const day = String(now.getDate()).padStart(2, '0')
   return `${now.getFullYear()}-${month}-${day}`
 }
+
+/**
+ * 纯日期加减：`YYYY-MM-DD` 进、`YYYY-MM-DD` 出。
+ *
+ * 🔴 用 `Date.UTC` 构造、只在 UTC 上加减 —— 这里做的是**日历运算**，
+ *    不是时刻换算。用本地构造再格式化，遇夏令时/时区切换日会偏一天，
+ *    而那一天在产品里就是「色带上这一格画错了」，看着还挺合理。
+ *
+ * ⚠️ 这里的 `toISOString()` 不违反上面那条禁令：输入是 UTC 零点构造的
+ *    纯日期，没有「本地 → UTC」这一步，也就不会差 8 小时。
+ */
+export function shiftDate(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d))
+  t.setUTCDate(t.getUTCDate() + days)
+  return t.toISOString().slice(0, 10)
+}

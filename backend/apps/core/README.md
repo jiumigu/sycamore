@@ -13,11 +13,23 @@ Django 项目通用基础设施，不归属任何业务模块。
 | `models.py` | 全局共享模型 + UserProfile |
 | `admin.py` | 系统管理后台配置 |
 | `views.py` | 通用视图 + ProfileView |
-| `media.py` | **媒体上传与结构校验的唯一实现**（showroom / works 共用）：扩展名白名单 + 大小上限 + 落盘；类型只判一次 |
+| `media.py` | **媒体上传与结构校验的唯一实现**（showroom / works 共用）：扩展名白名单 + 大小上限 + 落盘 + **列表缩略图**；类型只判一次 |
+| `management/commands/make_thumbs.py` | 给已落盘的图片补生成 `*_thumb.jpg`（**幂等；只新增、不动原图、不改库**）；`--dry-run` 只列清单 |
 | `management/commands/generate_notifications.py` | 生成系统通知（关系静默 / 目标落后 / 文件堆积）；默认 30 分钟节流，`--force` 忽略，`--cleanup` 才删 30 天前已读 |
 | `db_comments.py` | **数据库注释（表 / 列）的唯一实现** —— 判据、例外文案、接管范围 |
 | `management/commands/audit_comments.py` | **只读**注释体检：缺口清单（表 / 列 / 英文残留 / 外部表 / 未接管 app） |
 | `management/commands/sync_field_comments.py` | ⚠️ **已被 `db_comments.py` 取代**，保留仅作应急手工入口 |
+
+## 媒体缩略图（v3.64.72）
+
+列表用缩略图、点开的预览用原图。缩略图是**派生文件，不落库**：
+
+- 原图 `…/abc.jpg` ⇒ 缩略图 `…/abc_thumb.jpg`；这条约定只写在 `thumb_url_for()` 一处
+- 上传时 `save_upload_file()` 自动生成；历史图跑 `manage.py make_thumbs`（幂等，只新增文件）
+- 出参由 `with_thumbs()` 补一个 `thumb`（**只有图片有**；没生成过是 `None` ⇒ 前端回退原图）
+- 🔴 入参 `validate_media_items()` **只留 `type` / `url`**。`thumb` 若被前端回传落库，改文件名后库里就留着一个指向不存在文件的地址 —— 界面上是「列表图裂、点开预览却正常」，很难查
+- 尺寸 200px / JPEG q78：40px 在 2 倍屏也只有 80px，200 是给以后放大缩略图留的余量
+- 🔴 生成失败**不阻断上传**，只记 warning：功能仍然对（回退原图），只是慢一点
 
 ## 数据库注释（表 COMMENT / 列 COMMENT）
 
