@@ -9,8 +9,8 @@
       <div class="form-header">
         <span class="form-title">✏️ 记录体重</span>
         <el-radio-group :model-value="unitMode" size="small" @change="handleUnitChange">
-          <el-radio-button v-for="item in UNIT_OPTIONS" :key="item.value" :value="item.value">
-            {{ item.label }}
+          <el-radio-button v-for="item in WEIGHT_UNIT_OPTIONS" :key="item.value" :value="item.value">
+            {{ item.fullLabel }}
           </el-radio-button>
         </el-radio-group>
       </div>
@@ -72,40 +72,13 @@ import type { FormInstance } from 'element-plus'
 import { MEASURE_TIME_OPTIONS } from '../../types/healthTypes'
 import type { WeightRecord } from '../../types/healthTypes'
 import { todayLocal } from '@/shared/utils/datetime'
-
-type UnitMode = 'kg' | 'jin'
-
-interface UnitSpec {
-  value: UnitMode
-  label: string
-  suffix: string
-  min: number
-  max: number
-  precision: number
-  step: number
-}
-
-/**
- * 两个称重单位（家里一台秤读 kg、一台读斤，随机用）。
- * 🔴 min / max / precision 必须跟着模式走，不能沿用对方的刻度：
- *    沿用对方的 min=50 ⇒ 在 kg 模式下输 45 会被组件静默钳到 50；
- *    kg 只给 1 位小数 ⇒ 125.3 斤换来的 62.65 被抹成 62.7，再显示回斤就是 125.4。
- */
-const UNITS: Record<UnitMode, UnitSpec> = {
-  kg: { value: 'kg', label: 'KG模式', suffix: 'kg', min: 25, max: 200, precision: 2, step: 0.1 },
-  jin: { value: 'jin', label: '斤模式', suffix: '斤', min: 50, max: 400, precision: 1, step: 0.5 },
-}
-
-const UNIT_OPTIONS = [UNITS.kg, UNITS.jin]
-
-/** 1 kg = 2 斤。换算系数只此一份，别在别处再写 2。 */
-const JIN_PER_KG = 2
-
-/** 库列 weight_kg 是 Decimal(5,2)，入库值必须落在 2 位小数内，否则 DRF 拒收。 */
-const KG_DECIMALS = 2
-
-/** 记住上次用的模式：两个秤随机换着用，每次都重选太费事。 */
-const UNIT_STORAGE_KEY = 'sycamore.health.weightUnit'
+// 🔴 单位刻度、换算系数、上次用过的单位都在这里 —— 与「快速记录」里的体重共用一份。
+//    在组件里再写一遍 `2`，就是第二套尺子（见 utils/weightUnits.ts 的注释）。
+import {
+  WEIGHT_UNITS, WEIGHT_UNIT_OPTIONS,
+  readStoredWeightUnit, storeWeightUnit, toKg, fromKg, convertBetweenUnits,
+  type WeightUnit,
+} from '../../utils/weightUnits'
 
 const props = defineProps<{
   modelValue: boolean
@@ -125,23 +98,8 @@ const visible = computed({
 
 const formRef = ref<FormInstance>()
 
-function roundTo(value: number, precision: number): number {
-  const factor = 10 ** precision
-  return Math.round(value * factor) / factor
-}
-
-function readStoredUnit(): UnitMode {
-  try {
-    const stored = localStorage.getItem(UNIT_STORAGE_KEY)
-    return stored === 'kg' || stored === 'jin' ? stored : 'jin'
-  } catch {
-    // 隐私模式 / 存储被禁用：回退到「斤」，不影响录入
-    return 'jin'
-  }
-}
-
-const unitMode = ref<UnitMode>(readStoredUnit())
-const activeUnit = computed(() => UNITS[unitMode.value])
+const unitMode = ref<WeightUnit>(readStoredWeightUnit())
+const activeUnit = computed(() => WEIGHT_UNITS[unitMode.value])
 
 const form = ref({
   record_date: '',
@@ -157,36 +115,19 @@ const rules = {
 }
 
 /** 录入值换算成 kg（真源口径），空值不给数。用于消除「最后一跳」的困惑。 */
-const weightKgPreview = computed(() => {
-  const value = form.value.weight
-  if (value === undefined || value === null || !Number.isFinite(value)) return null
-  const kg = unitMode.value === 'kg' ? value : value / JIN_PER_KG
-  return Number(roundTo(kg, KG_DECIMALS).toFixed(KG_DECIMALS))
-})
+const weightKgPreview = computed(() => toKg(form.value.weight, unitMode.value))
 
-/**
- * 🔴 切换模式时，已填的数字必须按「同一个物理重量」换算过去。
- *    若只换单位标签不动数字，125（斤）会原地变成 125 kg（= 250 斤）——
- *    链路上没有任何一步会报错，只会在趋势图上多一根暴涨柱。
- */
 function handleUnitChange(value: string | number | boolean | undefined): void {
-  const next: UnitMode | null = value === 'kg' ? 'kg' : value === 'jin' ? 'jin' : null
+  const next: WeightUnit | null = value === 'kg' ? 'kg' : value === 'jin' ? 'jin' : null
   if (!next || next === unitMode.value) return
 
-  const prev = unitMode.value
   const current = form.value.weight
   if (current !== undefined && current !== null && Number.isFinite(current)) {
-    const kg = prev === 'kg' ? current : current / JIN_PER_KG
-    const converted = next === 'kg' ? kg : kg * JIN_PER_KG
-    form.value.weight = roundTo(converted, UNITS[next].precision)
+    form.value.weight = convertBetweenUnits(current, unitMode.value, next)
   }
 
   unitMode.value = next
-  try {
-    localStorage.setItem(UNIT_STORAGE_KEY, next)
-  } catch {
-    // 存不进去不影响本次录入，下次打开回落默认值
-  }
+  storeWeightUnit(next)
 }
 
 function resetForm() {
@@ -209,11 +150,10 @@ function loadRecord(record: WeightRecord | null) {
   }
   // 🔴 真源只有 weight_kg 一列：无论当前是哪个模式，都从它派生显示值。
   //    库里不记录「这条是用哪个秤量的」，所以不许反推，只能换算。
-  const kg = Number(record.weight_kg)
-  const ratio = unitMode.value === 'kg' ? 1 : JIN_PER_KG
+  const shown = fromKg(Number(record.weight_kg), unitMode.value)
   form.value = {
     record_date: record.record_date,
-    weight: Number.isFinite(kg) ? roundTo(kg * ratio, activeUnit.value.precision) : undefined,
+    weight: shown === null ? undefined : shown,
     body_fat: record.body_fat ? parseFloat(record.body_fat) : undefined,
     measure_time: record.measure_time || '',
     notes: record.notes || '',
@@ -226,11 +166,10 @@ async function handleSubmit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
-  const displayed = form.value.weight
-  const kg = unitMode.value === 'kg' ? (displayed ?? 0) : (displayed ?? 0) / JIN_PER_KG
+  // 校验已通过 ⇒ 这里一定是个数。用 `?? 0` 兜住类型，但别让它变成「没填也存 0 kg」的路径。
   emit('submit', {
     record_date: form.value.record_date,
-    weight_kg: roundTo(kg, KG_DECIMALS),
+    weight_kg: toKg(form.value.weight ?? 0, unitMode.value),
     body_fat: form.value.body_fat,
     measure_time: form.value.measure_time,
     notes: form.value.notes,

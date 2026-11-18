@@ -82,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { apiErrorText } from '@/shared/utils/apiError'
@@ -223,8 +223,24 @@ async function handleSizeChange() {
   await loadRecords()
 }
 
+/**
+ * 别处（页头快速记录）新增了一条体重。
+ * 口径与本页「新增」一致：**不回第 1 页**（§93）—— 你在第 3 页时不该被拽走，
+ * 新记录按 `-record_date` 落在第 1 页顶部，由 toast 与统计卡变化告知。
+ */
+function onExternalWeightRecorded() {
+  store.loadAll(recordParams())
+}
+
 onMounted(() => {
   store.loadAll(recordParams())
+  // 页头「快速记录 → 体重」存完会发这个事件：本页正开着时自己重取，
+  // 否则刚记的那条要等下次进页面才出现（看起来像没存上）。
+  window.addEventListener('weight-recorded', onExternalWeightRecorded)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('weight-recorded', onExternalWeightRecorded)
 })
 </script>
 
