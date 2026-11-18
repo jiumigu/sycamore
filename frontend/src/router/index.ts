@@ -267,6 +267,16 @@ const routes: RouteRecordRaw[] = [
     path: '/selfrun',
     redirect: { name: 'selfrun-week' },
     children: [
+      // 今天（T0，v3.64.75）—— **每天都用**，所以排在页签第一位。
+      // 🔴 但 `redirect` 仍指向 `week`（见上一行）：改默认落地页会让
+      //    「点开自我运转」的肌肉记忆失效；今天这一页的日常入口是页签与仪表盘卡。
+      // ⚠️ 它不依赖阶段存在：没有阶段的人早上起来同样不知道该干哪件。
+      {
+        path: 'today',
+        name: 'selfrun-today',
+        component: () => import('@/modules/selfrun/views/SelfRunHub.vue'),
+        meta: { title: '今天' },
+      },
       {
         path: 'setup',
         name: 'selfrun-setup',
@@ -513,10 +523,18 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '关系详情' },
   },
 
-  // 分析统计
-  { path: '/analysis/progress', name: 'analysis-progress', component: () => import('@/core/analysis/views/ProgressAnalysis.vue'), meta: { title: '进度分析' } },
-  { path: '/analysis/trend', name: 'analysis-trend', component: () => import('@/core/analysis/views/ProgressAnalysis.vue'), meta: { title: '趋势分析' } },
-  { path: '/analysis/correlation', name: 'analysis-correlation', component: () => import('@/core/analysis/views/ProgressAnalysis.vue'), meta: { title: '关联分析' } },
+  // 分析统计（v3.64.62）
+  //
+  // 这三条曾各自挂一个 13 行的「此模块正在开发中…」占位页，而菜单里
+  // 一个入口都没有 —— 有路由、无菜单、页面空白，是最难被发现的一种死链：
+  // 从侧边栏永远走不到，只能靠手输 URL 撞见。
+  //
+  // 它们要表达的内容（进度 / 趋势 / 关联）本来就都在 `/summary` 上：
+  // 覆盖率热力图、月度趋势、阶段对照、配对体检。与其维护三份空壳，
+  // 不如指过去 —— 旧链接不会 404，也不会再对读者说「开发中」。
+  { path: '/analysis/progress', redirect: '/summary' },
+  { path: '/analysis/trend', redirect: '/summary' },
+  { path: '/analysis/correlation', redirect: '/summary' },
 
   // 展厅（对外输出端口）—— 可被潜在客户走进去看的策展空间。
   // 预览是只读展示，策展编辑是「选什么、怎么写」的唯一出口。

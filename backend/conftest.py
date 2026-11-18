@@ -1031,7 +1031,7 @@ CREATE TABLE IF NOT EXISTS `selfrun_stage` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
-# selfrun 0008（v3.65.0）：给 `selfrun_stage` 加「上级阶段」与「账本参数」。
+# selfrun 0008（v3.64.17）：给 `selfrun_stage` 加「上级阶段」与「账本参数」。
 # ⚠️ 与 survival / treasure / showroom 同款问题：`--reuse-db` 的旧测试库里这张表
 #    已经存在，`CREATE TABLE IF NOT EXISTS` 会**静默跳过** ⇒ 新列永远补不上，
 #    随后 ORM 一 SELECT `parent_id` 就报 `Unknown column`（看着像「迁移没跑」）。
@@ -1201,6 +1201,23 @@ CREATE TABLE IF NOT EXISTS `selfrun_pool_inject` (
   UNIQUE KEY `bill_id` (`bill_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
+# selfrun 0013（v3.64.76）：日结表（一天一格）。
+#    DDL 与 `manage.py sqlmigrate selfrun 0013` 的结构逐字对齐（本文件的新表镜像
+#    一律不写 `COMMENT`，与 `book_reading_focus` 那段保持一致）。
+#    ⚠️ 无外键、无依赖 ⇒ 建表顺序随便放；`cell_date` 上的 `UNIQUE` 必须带 ——
+#       它挡的是「同一天两格」，少了它就是「一天能定两次档」而用例看不出来。
+_CREATE_SELFRUN_DAY_CELL_SQL = """
+CREATE TABLE IF NOT EXISTS `selfrun_day_cell` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `cell_date` date NOT NULL UNIQUE,
+  `quadrant` varchar(10) NOT NULL,
+  `outcome` varchar(10) NOT NULL,
+  `note` varchar(200) NOT NULL,
+  `is_backfilled` bool NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
 _CREATE_SELFRUN_METRIC_PLAN_SQL = """
 CREATE TABLE IF NOT EXISTS `selfrun_metric_plan` (
   `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -1348,6 +1365,22 @@ CREATE TABLE IF NOT EXISTS `showroom_work` (
   `created_at` datetime(6) NOT NULL,
   `work_id` bigint NULL,
   CONSTRAINT `showroom_work_work_id_fe8809ad_fk_works_work_id` FOREIGN KEY (`work_id`) REFERENCES `works_work` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+# book 0005（v3.65.x）：当前在读指针（全库一行）。
+# ⚠️ 与 survival / works / showroom 同款问题：`--reuse-db` 的旧测试库里
+#    `book_read_list` 早已存在，但 `book_reading_focus` 是**新表** ——
+#    迁移在 pytest 下不执行（`--no-migrations`），不镜像就会
+#    「指针查询报 Table doesn't exist」，看着像模型写错、其实是环境缺表。
+#    列定义对齐 `sqlmigrate book 0005`（列注释不镜像，与本文件既有条目一致）。
+_CREATE_BOOK_READING_FOCUS_SQL = """
+CREATE TABLE IF NOT EXISTS `book_reading_focus` (
+  `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
+  `started_on` date NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `book_id` integer NULL,
+  CONSTRAINT `book_reading_focus_book_id_2a4250fb_fk_book_read_list_bid` FOREIGN KEY (`book_id`) REFERENCES `book_read_list` (`bid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
@@ -1555,6 +1588,31 @@ def _patch_showroom_media_columns(cursor) -> None:
             )
 
 
+# health 0009（v3.64.73）：体重表去掉 `uk_weight_user_date`，允许一天记多条。
+#
+# 🔴 这是「往反方向改」的第一例：前面所有 patch 都是给旧测试库**补**列 / 加索引，
+#    而 `--reuse-db --no-migrations` 的旧库会**继续带着**那条唯一索引 ——
+#    迁移文件（0009）在 pytest 下根本不执行，于是业务代码按新口径插两条，
+#    数据库仍按旧口径拒绝：`Duplicate entry '1-2026-11-16'`。
+#    新增的用例会全红，而且报错点在 INSERT，看着像业务代码写错。
+#    MySQL 里唯一约束就是唯一索引，`DROP INDEX` 即等价于 Django 的 RemoveConstraint。
+def _drop_weight_daily_unique(cursor) -> None:
+    """删掉 `health_weight_record` 上的旧唯一索引（幂等：不存在就跳过）。"""
+    cursor.execute(
+        """
+        SELECT INDEX_NAME FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'health_weight_record'
+           AND INDEX_NAME = 'uk_weight_user_date'
+        """,
+    )
+    if not cursor.fetchall():
+        return          # 新库 / 已删过：当前模型建表本来就没有这条索引
+    cursor.execute(
+        'ALTER TABLE `health_weight_record` DROP INDEX `uk_weight_user_date`',
+    )
+
+
 # 决策追踪 0025（v3.63.20）：给 `toolkit_decision_tracker` 加「结论取前 N 项」与「采纳的选项」。
 # ⚠️ 与 survival / treasure / works / showroom 同款问题：`--reuse-db` 的旧测试库
 #    表已存在，`CREATE TABLE IF NOT EXISTS` 会静默跳过 ⇒ 新列永远补不上，
@@ -1712,10 +1770,12 @@ def django_db_setup(django_db_setup, django_db_blocker):
             # `selfrun_metric_plan.metric_id` 指向 `selfrun_metric`。
             cursor.execute(_CREATE_SELFRUN_TEMPLATE_SQL)
             cursor.execute(_CREATE_SELFRUN_METRIC_PLAN_SQL)
-            # selfrun 0008（v3.65.0）：旧测试库的 stage 表已存在 ⇒ 补 parent / ledger_config
+            # selfrun 0008（v3.64.17）：旧测试库的 stage 表已存在 ⇒ 补 parent / ledger_config
             _patch_selfrun_stage_columns(cursor)
             # selfrun 0009（v3.64.20）：池注入流水（原 redemption_pool_inject）
             cursor.execute(_CREATE_SELFRUN_POOL_INJECT_SQL)
+            # selfrun 0013（v3.64.76）：日结表（今天四格）。无外键、无依赖。
+            cursor.execute(_CREATE_SELFRUN_DAY_CELL_SQL)
             # 作品（v3.62.0）：2 张 managed 表。顺序不能改 ——
             # `works_capture.work_id` 指向 `works_work`。
             cursor.execute(_CREATE_WORKS_WORK_SQL)
@@ -1735,3 +1795,8 @@ def django_db_setup(django_db_setup, django_db_blocker):
             cursor.execute(_CREATE_SHOWROOM_WORK_SQL)
             # 展厅 0002：旧测试库的两张表已存在 ⇒ 补 media 列（幂等）
             _patch_showroom_media_columns(cursor)
+            # health 0009（v3.64.73）：体重改成一天可记多条 ⇒ 删掉旧唯一索引
+            _drop_weight_daily_unique(cursor)
+            # book 0005：当前在读指针。外键指向 `book_read_list`，
+            # 那张表由 Django 早期迁移建好，天然在上方；本表排最后即可。
+            cursor.execute(_CREATE_BOOK_READING_FOCUS_SQL)
