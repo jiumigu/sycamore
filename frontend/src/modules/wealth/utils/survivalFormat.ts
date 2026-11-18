@@ -279,6 +279,29 @@ export function formatClock(iso: string | null | undefined): string {
   return matched ? matched[1] : ''
 }
 
+// ── 库存新鲜度（v3.64.89） ──
+
+/**
+ * 结论条标黄阈值：库存多久没盘就该提醒「这个数可能不准」。
+ *
+ * ⚠️ 这是 **UI 呈现阈值**，不是业务口径 —— 「多少天算旧」与
+ *    「怎么算天数」是两件事；后者在后端 `_stock_stale_days`，
+ *    前者只是决定界面什么时候把它标出来。
+ */
+export const STALE_WARN_DAYS = 14
+
+/**
+ * 结论条的新鲜度警示文案，超阈值才返回，否则空串（不显示）。
+ *
+ * 🔴 `null`（从未盘点）不标：没有「盘过」的基线，「很久没盘」无从谈起 ——
+ *    把「从没盘过」和「盘过但很久了」混成同一种黄，就分不清该去补历史
+ *    还是该去再盘一次。
+ */
+export function stockStaleText(staleDays: number | null | undefined): string {
+  if (staleDays === null || staleDays === undefined || staleDays < STALE_WARN_DAYS) return ''
+  return `库存 ${staleDays} 天未盘，可能不准`
+}
+
 /** 「一次盘点的结论」徽章 —— 三态的顺序与配色在此**单一实现** */
 export interface StocktakeResultTag {
   type: 'warning' | 'danger' | 'success'

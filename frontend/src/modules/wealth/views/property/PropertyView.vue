@@ -33,6 +33,12 @@
   <div class="property-view">
     <!-- 头部一行装三样：标题、页签、页面级动作 -->
     <div class="property-view__header">
+      <!-- 返回（v3.64.89）：入口从侧边栏迁到「资产盘点」页头，必须有回程。
+           用 push 落到 /wealth/cashflow，禁 router.back()（项目老坑）。 -->
+      <el-button text size="small" class="property-view__back" @click="goBack">
+        <el-icon><ArrowLeft /></el-icon>
+        返回资产盘点
+      </el-button>
       <div class="property-view__title-wrap">
         <el-icon class="property-view__title-icon"><Suitcase /></el-icon>
         <span class="property-view__title">物件资产</span>
@@ -194,9 +200,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  InfoFilled, Plus, QuestionFilled, Suitcase, Tickets, Collection, Handbag,
+  ArrowLeft, InfoFilled, Plus, QuestionFilled, Suitcase, Tickets, Collection, Handbag,
 } from '@element-plus/icons-vue'
 import PropertySummaryCards from '../../components/property/PropertySummaryCards.vue'
 import PropertyTable from '../../components/property/PropertyTable.vue'
@@ -214,6 +221,12 @@ import type { PropertyCategory } from '../../types/propertyTypes'
 
 const store = usePropertyStore()
 const bodyStore = useBodyStore()
+const router = useRouter()
+
+/** 返回资产盘点（v3.64.89）—— 入口从侧边栏迁来，回程落回父页，不用 history 后退 */
+function goBack() {
+  router.push('/wealth/cashflow')
+}
 
 /**
  * 页头副标题 —— 一次性的图例，收进标题旁的 ⓘ。

@@ -57,6 +57,7 @@ from ..models import (
     SurvivalRecipe,
     SurvivalRecipeComboLine,
     SurvivalRecipeLine,
+    SurvivalStocktake,
     SurvivalUnit,
 )
 from . import survival_calc as calc
@@ -610,6 +611,26 @@ def delete_recipe(pk: int) -> int:
 # 综合分析
 # ──────────────────────────────────────────────────────────────
 
+def _stock_stale_days(today: date) -> int | None:
+    """库存整体新鲜度 = 距最近一次**盘点**的天数（v3.64.89）。
+
+    「综合能撑 N 天」是拿当前库存数现算的；库存数多久没被「重新数过」，
+    这个 N 的可信度就有多低。用盘点（stocktake）当锚点，不用库存流水（flow）：
+    流水只改了单件（实测 11/9 两条流水只动了 2 件），用它当整体新鲜度会高估 ——
+    那 2 件新鲜 ≠ 57 件都新鲜。盘点才是「重新数了一遍」。
+    从未盘点 → None（没有基线，前端不标黄）。
+    """
+    last = (
+        SurvivalStocktake.objects.filter(user_id=1)
+        .order_by('-created_at')
+        .values_list('created_at', flat=True)
+        .first()
+    )
+    if last is None:
+        return None
+    return (today - last.date()).days
+
+
 def _empty_analysis(reason: str) -> dict:
     return {
         'available': False,
@@ -625,6 +646,7 @@ def _empty_analysis(reason: str) -> dict:
         'coverage': {'pct': None, 'remaining_days': None, 'reason': reason},
         'issues': [],
         'snack_days': None,
+        'stale_days': None,
         'has_any_item': False,
     }
 
@@ -660,6 +682,7 @@ def get_analysis(reference_date: date | None = None) -> dict:
         from .survival_essential_service import get_reconcile as get_essential_reconcile
 
         essentials = get_essential_reconcile(today)
+        stale_days = _stock_stale_days(today)
     except OperationalError:
         return _empty_analysis(MIGRATION_HINT)
 
@@ -733,6 +756,8 @@ def get_analysis(reference_date: date | None = None) -> dict:
         'coverage': coverage,
         'issues': issues,
         'snack_days': snack_days,
+        # 库存新鲜度（v3.64.89）：距最近一次**盘点**的天数 —— 见 _stock_stale_days。
+        'stale_days': stale_days,
         'has_any_item': any(r['item_count'] for r in result_rows),
         # 必需品缺口对账（v3.59.7）—— 与生存天数**并列的第二把尺子**：
         # 天数回答「够撑多久」，对账回答「漏了什么」。两者刻意不互相代入。

@@ -105,6 +105,12 @@
          夹在结论条与四张卡之间，会把「还能撑多久」这一组视觉切开。
          新增物品 / 开始盘点仍跟着各自的面板走，不在这里重复出现。 -->
     <div class="survival-view__header">
+      <!-- 返回（v3.64.89）：入口从侧边栏迁到「资产盘点」页头，必须有回程。
+           用 push 落到 /wealth/cashflow，禁 router.back()（项目老坑）。 -->
+      <el-button text size="small" class="survival-view__back" @click="goBack">
+        <el-icon><ArrowLeft /></el-icon>
+        返回资产盘点
+      </el-button>
       <div class="survival-view__title-wrap">
         <el-icon class="survival-view__title-icon"><Box /></el-icon>
         <span class="survival-view__title">生存资源盘点</span>
@@ -203,6 +209,11 @@
         <div class="survival-view__banner-main">
           <span class="survival-view__banner-label">综合能撑</span>
           <span class="survival-view__banner-value">{{ formatDays(overallExpected) }}</span>
+          <!-- 库存新鲜度警示（v3.64.89）：「综合能撑」拿的是旧库存数，
+               旧多久就该标多久 —— 见 utils/survivalFormat.stockStaleText。 -->
+          <el-tag v-if="staleText" type="warning" size="small" effect="light" class="survival-view__banner-stale">
+            {{ staleText }}
+          </el-tag>
           <MetricTooltip :meta="bannerMeta('pert_expected')" :width="380" />
           <span v-if="analysis?.shortest_category" class="survival-view__banner-shortest">
             短板「{{ analysis.shortest_category }}」
@@ -382,9 +393,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { Component } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  ArrowDown, Box, Camera, Clock, Finished, Odometer, QuestionFilled, Tickets, WarningFilled,
+  ArrowDown, ArrowLeft, Box, Camera, Clock, Finished, Odometer, QuestionFilled, Tickets, WarningFilled,
 } from '@element-plus/icons-vue'
 import MetricTooltip from '../../components/common/MetricTooltip.vue'
 import SurvivalCategoryCard from '../../components/survival/SurvivalCategoryCard.vue'
@@ -402,17 +414,25 @@ import SurvivalStocktakePanel from '../../components/survival/SurvivalStocktakeP
 import SurvivalSnapshotPanel from '../../components/survival/SurvivalSnapshotPanel.vue'
 import { useSurvivalStore } from '../../stores/survivalStore'
 import { useSurvivalFlowStore } from '../../stores/survivalFlowStore'
-import { bottleneckType, formatDays } from '../../utils/survivalFormat'
+import { bottleneckType, formatDays, stockStaleText } from '../../utils/survivalFormat'
 import type { SurvivalCategoryResult } from '../../types/survivalTypes'
 import type { RatioMeta } from '../../types/wealthTypes'
 
 const store = useSurvivalStore()
+const router = useRouter()
+
+/** 返回资产盘点（v3.64.89）—— 入口从侧边栏迁来，回程落回父页，不用 history 后退 */
+function goBack() {
+  router.push('/wealth/cashflow')
+}
 
 /** 页头副标题 —— 一次性的图例，收进标题旁的 ⓘ（见模板注释） */
 const PAGE_SUBTITLE = '物资 = 项目资源 · 生存时长 = 项目周期 · 三年赎回期 = 里程碑'
 
 const analysis = computed(() => store.analysis)
 const overallExpected = computed(() => analysis.value?.overall.expected ?? null)
+/** 库存新鲜度警示（v3.64.89）—— 空串 = 不标黄（含「从未盘点」） */
+const staleText = computed(() => stockStaleText(analysis.value?.stale_days))
 
 /** 明细区标题上的类别名（v3.59.10）—— 页签行撤掉后由它声明「现在看的是哪一类」 */
 const activeCategoryName = computed(

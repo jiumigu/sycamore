@@ -500,6 +500,8 @@ export interface SurvivalAnalysis {
   coverage: SurvivalCoverage
   issues: SurvivalIssue[]
   snack_days: number | null
+  /** 库存新鲜度（v3.64.89）：距最近一次**盘点**的天数，null = 从未盘点 */
+  stale_days: number | null
   has_any_item: boolean
   /** 必需品缺口对账 —— 与生存天数**并列的第二把尺子**：天数答「够撑多久」，它答「漏了什么」 */
   essentials: SurvivalEssentialReconcile

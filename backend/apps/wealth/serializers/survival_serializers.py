@@ -592,6 +592,9 @@ class SurvivalAnalysisSerializer(serializers.Serializer):
     coverage = SurvivalCoverageSerializer()
     issues = SurvivalIssueSerializer(many=True)
     snack_days = serializers.FloatField(allow_null=True)
+    # 库存新鲜度（v3.64.89）：距最近一次**盘点**的天数，None = 从未盘点。
+    # 前端据此给结论条标黄 —— 「综合能撑」拿的是旧库存数，旧多久就该标多久。
+    stale_days = serializers.IntegerField(allow_null=True)
     has_any_item = serializers.BooleanField()
     # 必需品缺口对账（v3.59.7）—— 与生存天数**并列的第二把尺子**：
     # 天数回答「够撑多久」，对账回答「漏了什么」。不合并成一个数：

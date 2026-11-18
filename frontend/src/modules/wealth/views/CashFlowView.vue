@@ -11,14 +11,9 @@
           <el-icon><Plus /></el-icon>
           新增盘点
         </el-button>
-        <el-button @click="switchToMonthly">
-          <el-icon><Calendar /></el-icon>
-          月度日历
-        </el-button>
-        <el-button @click="switchToReview">
-          <el-icon><DataAnalysis /></el-icon>
-          月度复盘
-        </el-button>
+        <!-- 「月度日历」「月度复盘」不在此重复（v3.64.90）：
+             顶部 WealthHub 的 6 个 tab 已覆盖这两个入口，页头再放等于双重导航。
+             删掉后页头从 9 个按钮减到 7 个，不再把标题「资产盘点」挤成两行。 -->
         <el-button @click="openConfig">
           <el-icon><Setting /></el-icon>
           口径配置
@@ -30,6 +25,16 @@
         <el-button @click="gotoReceivable">
           <el-icon><Wallet /></el-icon>
           应收借出台账
+        </el-button>
+        <!-- 生存资源 / 物件资产（v3.64.89）：原为侧边栏独立菜单，改挂此处。
+             判据见 menuConfig.ts 的财富分组注释 —— 它们与「资产盘点」是同一件事的三个尺度。 -->
+        <el-button @click="gotoSurvival">
+          <el-icon><Box /></el-icon>
+          生存资源
+        </el-button>
+        <el-button @click="gotoProperty">
+          <el-icon><Suitcase /></el-icon>
+          物件资产
         </el-button>
         <el-button @click="handleRefresh">
           <el-icon><Refresh /></el-icon>
@@ -166,7 +171,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Refresh, Calendar, DataAnalysis, Setting, CreditCard, Wallet } from '@element-plus/icons-vue'
+import { Plus, Refresh, Setting, CreditCard, Wallet, Box, Suitcase } from '@element-plus/icons-vue'
 import { useCashflowStore } from '../stores/cashflowStore'
 import { useAssetStore } from '../stores/assetStore'
 import { useClassifyStore } from '../stores/classifyStore'
@@ -250,10 +255,6 @@ function scrollToAssetSnapshot() {
   if (!el) return
   el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
-function switchToReview() {
-  router.push('/wealth/review')
-}
-
 /**
  * 两个台账独立页（v3.60.20）。
  *
@@ -266,6 +267,15 @@ function gotoLiability() {
 }
 function gotoReceivable() {
   router.push('/wealth/cashflow/receivable')
+}
+// 生存资源 / 物件资产（v3.64.89）：入口从侧边栏迁来，路由保留在 /wealth 下。
+// ⚠️ 与两个台账不同，它们不挂在 /wealth/cashflow/ 之下 —— 它们是**并列**的第三、
+//    第四个尺度（物 / 耐用品），不是「资产盘点的下一层」。
+function gotoSurvival() {
+  router.push('/wealth/survival')
+}
+function gotoProperty() {
+  router.push('/wealth/property')
 }
 function handleRefresh() {
   store.fetchOverview()
@@ -316,11 +326,14 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* 标题 + 口径标签是「页面身份」，绝不能被按钮区压缩成两行（v3.64.90） */
+  flex-shrink: 0;
 }
 .page-title {
   margin: 0;
   font-size: 24px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .module-tag { font-size: 12px; }
 .header-actions {
