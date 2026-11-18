@@ -23,10 +23,14 @@ let chart: echarts.ECharts | null = null
 const option = computed(() => {
   if (!props.trend) return {}
 
-  const records = props.trend.records || []
-  const dates = records.map(r => r.date)
-  const weights = records.map(r => (r.weight_kg * 2))  // kg → 斤
-  const weights_jin = weights  // 斤
+  /**
+   * 🔴 画 `daily` 而不是 `records`：一天记两条时，category 轴会出现两个同名日期，
+   * 折线在同一天折返一段 —— 看起来像「当天暴跌又涨回」，其实是两次称重。
+   * 也不在 `daily` 缺失时回退 `records`：那会把「后端没给这个字段」伪装成能画。
+   */
+  const points = props.trend.daily ?? []
+  const dates = points.map(p => p.date)
+  const weights_jin = points.map(p => p.weight_jin)
 
   // 当前阶段目标：第一个未达成的里程碑，或最后一个
   const currentMilestone = props.trend.milestones?.find(m => !m.is_achieved)
@@ -70,12 +74,23 @@ const option = computed(() => {
       trigger: 'axis',
       formatter: (params: any[]) => {
         const items = params as Array<Record<string, unknown>>
+        const day = points[Number(items[0]?.dataIndex ?? -1)]
         let html = `<div style="font-weight:600;margin-bottom:4px">${items[0]?.axisValue || ''}</div>`
         for (const p of items) {
           if (p.value === null || p.value === undefined) continue
           html += `<div style="display:flex;justify-content:space-between;gap:12px">
             <span>${p.marker as string} ${p.seriesName as string}</span>
             <b>${Number(p.value).toFixed(1)} 斤</b>
+          </div>`
+        }
+        // 一天称了多次：把每一声都列出来，说清画的是哪一条。
+        // 只说「2 次」不说数值，用户会怀疑另一次没存进去；只说数值不说「取最后一次」，又会问这是哪次。
+        if (day && day.count > 1) {
+          const each = day.readings
+            .map(r => `${r.weight_jin}${r.measure_time_display ? `（${r.measure_time_display}）` : ''}`)
+            .join(' / ')
+          html += `<div style="margin-top:4px;color:#909399;font-size:11px;line-height:1.5">
+            当天记了 ${day.count} 次：${each}<br/>图上这一点取最后一次
           </div>`
         }
         return html

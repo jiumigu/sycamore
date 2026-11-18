@@ -35,7 +35,25 @@ HealthStatsService 提供 7 方法：summary / milestones / daily_trend / calend
 ### Models
 | Model | Table | 用途 |
 |-------|-------|------|
-| WeightRecord | health_weight_record | 每日体重记录（kg/bmi/body_fat） |
+| WeightRecord | health_weight_record | 体重记录：**一天可记多条**（早/晚各称一次） |
+
+### 一天多条的三个口径（v3.64.73）
+
+原来表上有 `uk_weight_user_date`（每人每天一条），晚复称必然 400。去掉之后，凡是「取哪一条」的地方都必须有答案，
+否则同一个问题会有两个答案：
+
+| 问题 | 答案 | 实现 |
+|---|---|---|
+| 现在多重？ | 最后一天的**当天结果** | `WeightService.latest_record()` |
+| 趋势图画什么？ | 一天一个点 = 当天结果 | `get_trend()['daily']` |
+| 列表同日两条谁在前？ | 后录入的在前 | `Meta.ordering = ['-record_date', '-id']` |
+
+「当天结果」= 按称重时刻排（早晨 → 下午 → 晚上），**未填时刻视为当天最早**；同一时刻按 `id` 取后录入的。
+这条规则只写在 `measure_sort_key()` 一处 —— `get_stats` / `check_weight_goal_status` / `daily` 聚合都调它。
+
+🔴 不要写 `order_by('-record_date').first()`：同日多条时谁先谁后由数据库决定，「当前体重」会在两个数之间随机跳且不报错。
+🔴 `get_trend` 里 `records` 是逐条、`daily` 是按天聚合，**折线只能画 `daily`**：同日两点落在 category 轴的同名刻度上，
+会画出一段折返线，看起来像当天暴跌又涨回。
 | WeightGoal | health_weight_goal | 减重目标（起止体重/月目标/当前月/状态） |
 | WeightMilestone | health_weight_milestone | 月度里程碑（每月目标/是否达成） |
 | WeightGoalAdjustment | health_weight_goal_adjustment | 目标调整流水（调整前/后值/原因） |

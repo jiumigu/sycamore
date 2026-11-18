@@ -85,6 +85,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { apiErrorText } from '@/shared/utils/apiError'
 import { Plus, ArrowLeft } from '@element-plus/icons-vue'
 import { useWeightStore } from '../../stores/healthStore'
 import type { WeightRecord } from '../../types/healthTypes'
@@ -152,8 +153,10 @@ async function handleDeleteRecord(id: number) {
     // 删除前 `recordsTotal` 还是旧数：减 1 才是删完的总数
     clampPage(store.recordsTotal - 1)
     await Promise.all([loadRecords(), store.fetchStats(), store.fetchTrend()])
-  } catch {
-    ElMessage.error('删除失败')
+  } catch (e) {
+    // 🔴 不再写死「操作失败」：那时用户唯一能拿到的信息是「错了」，
+    //    而真正的原因（字段校验 / 权限 / 500）全被这句话吞掉，只能靠猜。
+    ElMessage.error(apiErrorText(e, '删除失败'))
   }
 }
 
@@ -172,8 +175,9 @@ async function handleFormSubmit(data: Record<string, unknown>) {
     // 新增的记录按 `-record_date` 排在第 1 页顶部 —— 人在第 1 页时会立刻看到，
     // 人在后页时由 toast + 统计卡变化告知，不把人拽走。
     await Promise.all([loadRecords(), store.fetchStats(), store.fetchTrend()])
-  } catch {
-    ElMessage.error('操作失败')
+  } catch (e) {
+    // 同「删除」：原因必须来自后端（如字段校验失败），不要换成一句「操作失败」。
+    ElMessage.error(apiErrorText(e, '保存失败'))
   } finally {
     submitting.value = false
   }
@@ -199,8 +203,8 @@ async function handleGoalSubmit(data: Record<string, unknown>) {
     showGoalModal.value = false
     ElMessage.success('目标设定成功！加油！💪')
     await store.loadAll(recordParams())
-  } catch {
-    ElMessage.error('操作失败')
+  } catch (e) {
+    ElMessage.error(apiErrorText(e, '目标保存失败'))
   } finally {
     submitting.value = false
   }

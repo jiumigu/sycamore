@@ -59,13 +59,13 @@ class WeightRecord(models.Model):
 
     class Meta:
         db_table = 'health_weight_record'
-        db_table_comment = '体重记录：每人每天一条；体重与体脂率'
+        db_table_comment = '体重记录：一天可记多条（早/晚各称一次），当天结果取最晚一条；体重与体脂率'
         verbose_name = '体重记录'
         verbose_name_plural = '体重记录'
-        ordering = ['-record_date']
-        constraints = [
-            models.UniqueConstraint(fields=['user_id', 'record_date'], name='uk_weight_user_date'),
-        ]
+        # 🔴 次级键 `-id` 不是装饰：一天多条之后，只按 `-record_date` 排，
+        #    同日那几条的先后**由数据库自行决定**（MySQL 无 ORDER BY 保证），
+        #    于是「当前体重」会在两行之间随机跳，且没有任何报错。
+        ordering = ['-record_date', '-id']
         indexes = [
             models.Index(fields=['record_date']),
             models.Index(fields=['user_id']),

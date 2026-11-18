@@ -36,7 +36,7 @@
 | `components/weight/WeightSubHeader.vue` | 三个子页面共用页头（返回按钮恒定回 `health-weight`，不用 `router.back()`） |
 | `components/weight/MonthlyProgress.vue` | 月度进度追踪卡片（环形进度 + 阶段列表折叠/展开 + 4 项概览；`page-mode` 时全展开且不画卡内标题） |
 | `components/weight/BMIStatus.vue` | BMI 状态指示器（`page-mode` 时数字与刻度条放大一档） |
-| `components/weight/WeightTrendChart.vue` | 体重趋势 ECharts 折线图（markLine 目标线 + 动态 Y 轴） |
+| `components/weight/WeightTrendChart.vue` | 体重趋势 ECharts 折线图（markLine 目标线 + 动态 Y 轴；画 `trend.daily` 一天一个点，hover 列出当天每次读数） |
 | `components/weight/WeightStatsCards.vue` | 4 张统计卡片 |
 | `components/weight/WeightRecordList.vue` | 体重记录列表（后端分页，默认 20 条/页 + 编辑/删除；`total` 取后端 `count`，不是 `records.length`） |
 | `components/weight/WeightForm.vue` | 记录添加/编辑弹窗 |
@@ -44,3 +44,13 @@
 | `api/healthApi.ts` | 体重模块 API（`getWeightStats`/`getWeightTrend`/`getWeightGoal`/`getWeightMilestones`/`getWeightAdjustments` 等） |
 | `stores/healthStore.ts` | `useWeightStore` — 体重模块 Pinia 状态管理 |
 | `types/healthTypes.ts` | 体重模块类型定义（`WeightRecord`/`WeightGoal`/`WeightMilestone`/`WeightGoalAdjustment`/`WeightStats`/`WeightTrend`） |
+
+### 两条约定（v3.64.73）
+
+- **提示条不写死「操作失败」**：增 / 改 / 删 / 目标四处 catch 都走 `apiErrorText(e, 兜底)`，
+  把后端原因原样弹出来。原来撞库层唯一约束时后端回的是英文列名，前端一句「操作失败」把它整句吞掉，
+  用户唯一能拿到的信息是「错了」。
+- **趋势图画 `daily` 不画 `records`**：一天可记多条，同日两点落在 category 轴的同名刻度上会画出一段折返线，
+  看着像当天暴跌又涨回。`daily` 是后端按「当天最后一次」聚合的，`records` 仍逐条留给核对。
+- 新增表单的**日期默认今天**，且必须用 `todayLocal()` 而不是 `new Date().toISOString()` —— 后者是 UTC，
+  晚上 8 点后会变成昨天，界面上看不出异常。

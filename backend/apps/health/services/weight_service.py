@@ -14,13 +14,42 @@ from ..models import (
     WeightRecord,
 )
 
+# 「一天可记多条」之后，必须先回答「这一天算哪一条」。
+# 尺子只此一份：按**称重时刻**排（早晨 → 下午 → 晚上），未填时刻的视为当天最早
+# —— 理由是填了时刻的那条更具体，且补录的人通常会补「今天早上」而不是补「今晚」。
+# 同一天同一时刻（几乎只出现在补录）落到 `id` 上：后录入的算后一次。
+MEASURE_ORDER = {'morning': 0, 'afternoon': 1, 'evening': 2}
+
+
+def measure_sort_key(record) -> tuple:
+    return (MEASURE_ORDER.get(record.measure_time, -1), record.id)
+
+
 class WeightService:
     """体重管理业务逻辑"""
 
     @staticmethod
+    def latest_record(user_id: int = 1):
+        """「现在多重」= 最后一天的**当天结果**（口径见 `measure_sort_key`）。
+
+        🔴 不能写成 `order_by('-record_date').first()`：一天多条时，
+        同一天那几条谁先谁后由数据库决定，当前体重会在两个数之间随机跳，且不报错。
+        """
+        last_date = (
+            WeightRecord.objects.filter(user_id=user_id)
+            .order_by('-record_date')
+            .values_list('record_date', flat=True)
+            .first()
+        )
+        if last_date is None:
+            return None
+        same_day = list(WeightRecord.objects.filter(user_id=user_id, record_date=last_date))
+        return max(same_day, key=measure_sort_key) if same_day else None
+
+    @staticmethod
     def get_stats(user_id: int = 1) -> dict:
         """获取体重统计概览"""
-        latest = WeightRecord.objects.filter(user_id=user_id).order_by('-record_date').first()
+        latest = WeightService.latest_record(user_id)
         goal = WeightGoal.objects.filter(user_id=user_id, is_active=True).first()
         body_info = UserBodyInfo.objects.filter(user_id=user_id).first()
 
@@ -110,19 +139,60 @@ class WeightService:
 
     @staticmethod
     def get_trend(user_id: int = 1) -> dict:
-        """获取体重趋势数据"""
-        records = WeightRecord.objects.filter(user_id=user_id).order_by('record_date')
+        """获取体重趋势数据。
+
+        返回两组数，用途不同，**不要混着画**：
+
+        - `records`：逐条原始记录（一天几条就有几条），列表与核对用；
+        - `daily`：一天一个点，取**当天结果**（口径见 `measure_sort_key`），画折线用。
+
+        🔴 折线不能直接画 `records`：同一天两个点落在 category 轴的同名刻度上，
+        会出现重复日期标签与一段垂直的「折返线」—— 看着像体重当天暴跌又涨回。
+        """
+        records = list(
+            WeightRecord.objects.filter(user_id=user_id).order_by('record_date', 'id')
+        )
         goal = WeightGoal.objects.filter(user_id=user_id, is_active=True).first()
 
         record_data = [
             {
+                'id': r.id,
                 'date': r.record_date.isoformat(),
                 'weight_kg': float(r.weight_kg),
                 'weight_jin': r.weight_jin,
                 'body_fat': float(r.body_fat) if r.body_fat else None,
+                'measure_time': r.measure_time or '',
+                'measure_time_display': r.get_measure_time_display() if r.measure_time else '',
             }
             for r in records
         ]
+
+        by_day: dict[date, list] = {}
+        for r in records:
+            by_day.setdefault(r.record_date, []).append(r)
+
+        daily_data = []
+        for day in sorted(by_day):
+            items = sorted(by_day[day], key=measure_sort_key)
+            chosen = items[-1]
+            daily_data.append({
+                'date': day.isoformat(),
+                'weight_kg': float(chosen.weight_kg),
+                'weight_jin': chosen.weight_jin,
+                'body_fat': float(chosen.body_fat) if chosen.body_fat is not None else None,
+                # 当天记了几次 —— 前端 tooltip 用它说明「这个点是当天最后一次」，
+                # 不能只画一个点让人以为另一次没存进去。
+                'count': len(items),
+                'readings': [
+                    {
+                        'weight_kg': float(x.weight_kg),
+                        'weight_jin': x.weight_jin,
+                        'measure_time': x.measure_time or '',
+                        'measure_time_display': x.get_measure_time_display() if x.measure_time else '',
+                    }
+                    for x in items
+                ],
+            })
 
         milestone_data = []
         if goal:
@@ -140,6 +210,7 @@ class WeightService:
 
         return {
             'records': record_data,
+            'daily': daily_data,
             'milestones': milestone_data,
             'target_weight_kg': float(goal.target_weight_kg) if goal else None,
         }
@@ -230,7 +301,7 @@ class WeightService:
         if goal.status != 'in_progress':
             return goal.status
 
-        latest = WeightRecord.objects.filter(user_id=goal.user_id).order_by('-record_date').first()
+        latest = WeightService.latest_record(goal.user_id)
         if not latest:
             return goal.status
 

@@ -191,16 +191,37 @@ export interface WeightStats {
 }
 
 export interface WeightTrend {
+  /** 逐条原始记录（一天几条就有几条）—— 核对用，**不要拿来画折线** */
   records: WeightTrendItem[]
+  /** 一天一个点，取当天最后一次；和 `records` 是同一份数的两种粒度 */
+  daily: WeightTrendDay[]
   milestones: WeightTrendMilestone[]
   target_weight_kg: number | null
 }
 
 export interface WeightTrendItem {
+  id?: number
   date: string
   weight_kg: number
   weight_jin: number
   body_fat: number | null
+  measure_time?: string
+  measure_time_display?: string
+}
+
+/** 趋势图上的一个点 = 一天。`count > 1` 说明这天称过多次，取的是最后一次。 */
+export interface WeightTrendDay {
+  date: string
+  weight_kg: number
+  weight_jin: number
+  body_fat: number | null
+  count: number
+  readings: {
+    weight_kg: number
+    weight_jin: number
+    measure_time: string
+    measure_time_display: string
+  }[]
 }
 
 export interface WeightTrendMilestone {

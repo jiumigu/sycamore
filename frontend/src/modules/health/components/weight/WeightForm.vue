@@ -71,6 +71,7 @@ import { ref, computed } from 'vue'
 import type { FormInstance } from 'element-plus'
 import { MEASURE_TIME_OPTIONS } from '../../types/healthTypes'
 import type { WeightRecord } from '../../types/healthTypes'
+import { todayLocal } from '@/shared/utils/datetime'
 
 type UnitMode = 'kg' | 'jin'
 
@@ -190,7 +191,10 @@ function handleUnitChange(value: string | number | boolean | undefined): void {
 
 function resetForm() {
   form.value = {
-    record_date: '',
+    // 默认「今天」：体重记录的就是「刚称的这一下」，日期几乎总是今天。
+    // 🔴 用本地的 `todayLocal()`，不用 `new Date().toISOString().slice(0,10)` ——
+    //    后者是 UTC，晚上 8 点后会变成昨天，而界面上看不出任何异常。
+    record_date: todayLocal(),
     weight: undefined,
     body_fat: undefined,
     measure_time: '',
