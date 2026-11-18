@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from django.db import transaction
@@ -15,13 +16,12 @@ from .constants import (
     SUGAR_HAPPINESS_BANDS,
     SUGAR_HAPPINESS_MAX,
     SUGAR_HAPPINESS_MIN,
+    TAG_PARAM,
+    TAG_UNTAGGED_LABEL,
+    TAG_UNTAGGED_PARAM,
 )
-from .energy_service import EnergyService
-from .models import EnergyLog, EnergyTemplate, SugarRecord, SugarTemplate
+from .models import SugarRecord, SugarTemplate
 from .serializers import (
-    EnergyCompleteSerializer,
-    EnergyLogSerializer,
-    EnergyTemplateSerializer,
     SugarCategoryStatsSerializer,
     SugarRecordSerializer,
     SugarTemplateSerializer,
@@ -34,8 +34,35 @@ class SugarPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
 
 
+def _split_tags(raw: str | None) -> list[str]:
+    """把逗号分隔的 `tags` 拆成标签项 —— 「有哪些标签」与「按标签筛」共用这一把尺子。
+
+    前端 `openEdit` 解析同一个字段时也 `map(t => t.trim())`，说明存储里理论上
+    可能存在逗号后的空格（早期手工录入）。两处判据必须一致，否则会出现
+    「下拉里能看到『成就』，选中却筛不到任何记录」。
+    """
+    if not raw:
+        return []
+    return [t.strip() for t in raw.split(',') if t.strip()]
+
+
+def _tag_item_q(tag: str) -> Q:
+    """按**标签项**精确匹配，不是按子串匹配。
+
+    🔴 这是本功能唯一容易做错的地方。库里「成就」「内在成就」「外在成就」三个标签
+       互为子串，用 `tags__contains='成就'` 筛「成就」会得到 19 条（实测），
+       而真正的「成就」只有 6 条。数字看着合理、不报错、也不会有任何提示，
+       是典型的静默错数。
+
+    换成正则锚在逗号边界上：`(^|,)\\s*成就\\s*(,|$)`。
+    `\\s*` 不是多余的 —— 见 `_split_tags` 里对带空格历史数据的说明。
+    """
+    pattern = rf'(^|,)\s*{re.escape(tag.strip())}\s*(,|$)'
+    return Q(tags__regex=pattern)
+
+
 def _apply_record_scope(qs, params):
-    """按年份 / 月份 / 分类 / 快乐类型过滤 —— 列表与几处统计**共用这一把尺子**。
+    """按年份 / 月份 / 分类 / 快乐类型 / 标签过滤 —— 列表与几处统计**共用这一把尺子**。
 
     为什么必须共用：这几个参数决定「屏幕上哪些记录算数」。如果只给列表加了
     `joy_type`，而顶部「累计奖励」「平均快乐」还按全量算，同一屏就会出现两个
@@ -64,6 +91,14 @@ def _apply_record_scope(qs, params):
         qs = qs.filter(Q(joy_type='') | Q(joy_type__isnull=True))
     elif joy_type:
         qs = qs.filter(joy_type=joy_type)
+
+    tag = params.get('tag')
+    if tag == TAG_UNTAGGED_PARAM:
+        # 同 `joy_type` 的未标注：NULL 与空串是同一个意思（这条记录没打标签），
+        # 分两种状态对用户毫无意义，但 SQL 上是两回事，漏一个就会少几十条。
+        qs = qs.filter(Q(tags__isnull=True) | Q(tags=''))
+    elif tag:
+        qs = qs.filter(_tag_item_q(tag))
 
     return qs
 
@@ -291,6 +326,52 @@ class SugarRecordViewSet(viewsets.ModelViewSet):
         return Response({'unlabeled_value': JOY_TYPE_UNLABELED_PARAM, 'options': options})
 
     @action(detail=False, methods=['get'])
+    def tags(self, request):
+        """标签筛选项 —— 列表页标签下拉框的唯一来源。
+
+        `tags` 是逗号分隔字符串，没有独立的标签表，所以「有哪些标签」只能从数据里
+        现算。三类都要出现，缺任何一类都会让用户「看得见、筛不到」：
+
+        1. 库里出现过的每一个标签项 —— 包括只在旧记录里出现过的自定义标签
+           （你手打的「内在成就」这类不在预设里的词）。
+        2. 「无标签」哨兵 —— 库里现在 30/74 条没打标签（NULL）。不给这个选项，
+           那批记录既不能通过标签筛到，也没法与「清空筛选」区分开。
+        3. 条数为 0 的标签**仍然保留**（选项集合取全库）：某个标签的最后一条记录
+           落在别的月份时，选项不该忽隐忽现 —— 下拉框自己会变比缺选项更难察觉。
+
+        `count` 只按 year/month/category/joy_type 统计，**不含 `tag` 自身**：
+        选了「成就」之后再拿它去统计，别的标签会全部变成 0，等于堵死换一个看看的路。
+        """
+        params = self.request.query_params
+        scope = params.copy()
+        scope.pop(TAG_PARAM, None)
+
+        counts: dict[str, int] = {}
+        for raw in _apply_record_scope(SugarRecord.objects, scope).values_list('tags', flat=True):
+            # `set()` 是口径不是优化：一条记录上同一个标签写两遍也只算一条。
+            for tag in set(_split_tags(raw)):
+                counts[tag] = counts.get(tag, 0) + 1
+
+        # 选项集合取全库（不随当期筛选增减），与 `joy_types` 同一判据
+        known: set[str] = set()
+        for raw in SugarRecord.objects.values_list('tags', flat=True):
+            known.update(_split_tags(raw))
+
+        options = [
+            {'value': tag, 'label': tag, 'count': counts.get(tag, 0), 'kind': 'tag'}
+            for tag in sorted(known, key=lambda t: (-counts.get(t, 0), t))
+        ]
+        options.append({
+            'value': TAG_UNTAGGED_PARAM,
+            'label': TAG_UNTAGGED_LABEL,
+            'count': _apply_record_scope(SugarRecord.objects, scope).filter(
+                Q(tags__isnull=True) | Q(tags=''),
+            ).count(),
+            'kind': 'untagged',
+        })
+        return Response({'untagged_value': TAG_UNTAGGED_PARAM, 'options': options})
+
+    @action(detail=False, methods=['get'])
     def categories(self, request):
         """获取分类统计及整体汇总"""
         # 与列表同一套筛选（含 joy_type）—— 顶部「累计获得 / 平均快乐」必须
@@ -336,88 +417,3 @@ class SugarTemplateViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user_id=1)
 
-
-class EnergyViewSet(viewsets.ViewSet):
-    """能量清单视图集"""
-
-    permission_classes = [AllowAny]
-
-    @action(detail=False, methods=['get', 'post'])
-    def templates(self, request):
-        """获取/创建能量清单模板"""
-        if request.method == 'GET':
-            service = EnergyService()
-            qs = service.get_templates(user_id=1)
-            serializer = EnergyTemplateSerializer(qs, many=True)
-            return Response(serializer.data)
-
-        ser = EnergyTemplateSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        service = EnergyService()
-        template = service.create_custom_template(
-            content=ser.validated_data['content'],
-            default_energy=ser.validated_data.get('default_energy', 1),
-            category=ser.validated_data.get('category', 'daily'),
-            icon=ser.validated_data.get('icon', '✨'),
-            estimated_seconds=ser.validated_data.get('estimated_seconds', 60),
-            user_id=1,
-        )
-        return Response(EnergyTemplateSerializer(template).data, status=201)
-
-    @action(detail=False, methods=['post'])
-    def complete(self, request):
-        """完成一个能量任务"""
-        ser = EnergyCompleteSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        service = EnergyService()
-        result = service.complete_task(
-            template_id=ser.validated_data.get('template_id'),
-            content=ser.validated_data['content'],
-            energy_gained=ser.validated_data.get('energy_gained', 1),
-            is_custom=ser.validated_data.get('is_custom', False),
-            completed_at=ser.validated_data.get('completed_at') or datetime.now(),
-            user_id=1,
-        )
-        return Response(result, status=201)
-
-    @action(detail=False, methods=['get'])
-    def stats(self, request):
-        """获取能量统计"""
-        service = EnergyService()
-        return Response(service.get_stats(user_id=1))
-
-    @action(detail=False, methods=['get'])
-    def history(self, request):
-        """获取能量历史记录"""
-        qs = EnergyLog.objects.filter(user_id=1).select_related('template')
-        day = request.query_params.get('date')
-        if day:
-            qs = qs.filter(completed_at__date=day)
-        page = int(request.query_params.get('page', 1))
-        size = int(request.query_params.get('size', 20))
-        start = (page - 1) * size
-        total = qs.count()
-        items = qs.order_by('-completed_at')[start:start + size]
-        serializer = EnergyLogSerializer(items, many=True)
-        return Response({'results': serializer.data, 'count': total, 'page': page})
-
-    @action(detail=False, methods=['get'])
-    def daily(self, request):
-        """获取每日已完成列表"""
-        service = EnergyService()
-        day_str = request.query_params.get('date')
-        if day_str:
-            from datetime import date as date_cls
-            stat_date = date_cls.fromisoformat(day_str)
-        else:
-            stat_date = datetime.now().date()
-        logs = service.get_daily_completed(stat_date=stat_date, user_id=1)
-        serializer = EnergyLogSerializer(logs, many=True)
-        return Response({'date': stat_date.isoformat(), 'items': serializer.data})
-
-    @action(detail=False, methods=['get'])
-    def trend(self, request):
-        """获取能量趋势"""
-        days = int(request.query_params.get('days', 30))
-        service = EnergyService()
-        return Response(service.get_energy_trend(days=days, user_id=1))

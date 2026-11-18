@@ -64,3 +64,17 @@ def resolve_happiness_band(level):
         if value <= band['max_level']:
             return band
     return SUGAR_HAPPINESS_BANDS[-1]
+
+
+# ─── 标签筛选 ───
+#
+# 标签是**逗号分隔字符串**（`SugarRecord.tags`），不是外键表。所以「有哪些标签」
+# 只能从数据里现算出一份下发，前端不许自己攒 —— 一旦前端从当前页的记录里推标签，
+# 翻页/筛选一变，下拉框里的选项就跟着变，用户会看到「刚才还能选的标签不见了」。
+TAG_PARAM = 'tag'
+
+# 「无标签」同 `JOY_TYPE_UNLABELED_PARAM` 的理由：必须用一个**非空**值表达。
+# `?tag=` 在 query string 里等于「没传」，`params.get('tag')` 两种情况都回 `''`
+# ⇒ 清空筛选与「只看无标签」会合并成同一件事，而失效的那边不会报错。
+TAG_UNTAGGED_PARAM = '__untagged__'
+TAG_UNTAGGED_LABEL = '无标签'

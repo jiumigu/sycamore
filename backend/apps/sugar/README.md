@@ -1,15 +1,12 @@
 # Sugar — 小确幸
 
-> 文档对齐 v3.64.38 ｜ 最后核对 2026-11-08
+> 文档对齐 v3.64.66 ｜ 最后核对 2026-11-14
 
 ## Models
 | Model | Table | 用途 |
 |-------|-------|------|
 | SugarRecord | sugar_record | 小确幸记录（s_id PK, 快乐程度5-20, 奖励金额优先取前端传入值否则=快乐值, 同步标记, joy_type 五种分类） |
 | SugarTemplate | sugar_template | 小确幸模板（预置记录，一键套用） |
-| EnergyTemplate | sugar_energy_template | 能量清单模板（模板项 + 分值） |
-| EnergyLog | sugar_energy_log | 能量清单完成记录 |
-| EnergyDailyStats | sugar_energy_daily_stats | 每日能量统计（按日聚合，供趋势） |
 
 ## 快乐程度→奖励（v3.63.21 起单一刻度）
 
@@ -92,6 +89,56 @@
   选项会忽隐忽现（下拉自己会变，比缺选项更难察觉）。
 
 
+## 标签筛选（v3.64.66）
+
+`GET /records/?tag=<标签>`。
+
+`tags` 是**逗号分隔字符串**（`CharField(max_length=255)`），不是外键表，也没有独立的
+标签字典 —— 所以「有哪些标签」只能从数据里现算。
+
+### 🔴 必须按「标签项」精确匹配，不能按子串
+
+库里同时存在 `成就`（6 条）、`内在成就`（11 条）、`外在成就`（2 条），三者**互为子串**。
+用 `tags__contains='成就'` 会筛出 19 条而不是 6 条：
+
+| 写法 | 筛「成就」得到 | 后果 |
+|---|---|---|
+| `tags__contains='成就'` | 19 条 | 多给 13 条，不报错、不返空、数字看着合理 |
+| `_tag_item_q('成就')`（正则锚在逗号边界） | 6 条 | 正确 |
+
+实现是 `_tag_item_q()`，正则 `(^|,)\s*成就\s*(,|$)`：
+
+- `(^|,)` 与 `(,|$)` 各管字符串的一头 —— 标签可能在串首、串尾或中间；
+- `\s*` 不是多余的：早期手工录入可能存在逗号后的空格（前端 `openEdit` 解析时
+  也 `map(t => t.trim())`），没有这两个 `\s*` 就会出现「下拉里能看到『成就』，
+  选中却筛不到」。
+
+### 无标签用哨兵值
+
+| 参数 | 含义 |
+|---|---|
+| 不传 / `tag=` | 不按标签筛 |
+| `tag=__untagged__` | `tags IS NULL OR tags = ''` |
+
+理由与 `joy_type` 的「未标注」完全相同：`?tag=` 与「没传」在 query string 里长得一样，
+两者都不做过滤 ⇒ 若拿空串表示「无标签」，「清空筛选」和「只看无标签」就会是同一件事，
+而失效的那一边不报错。
+
+⚠️ NULL 与空串**都算无标签**。该列 `null=True` 且历史上有 30 条从未打过标签，
+漏掉 `isnull` 那半边会静默少几十条。
+
+### 选项接口
+
+`GET /records/tags/` → `{ untagged_value, options: [{value, label, count, kind}] }`
+
+- `kind` 为 `tag` / `untagged`；
+- `count` 按 year/month/category/joy_type 统计，**剔除 `tag` 自身**（否则选完一个标签，
+  其它标签全变 0，换一个看看的路就堵死了）；
+- 选项集合取**全库**，当期 0 条也列出 —— 与 `joy_types` 同一判据；
+- 同一条记录里同一个标签写两遍只算一条（计数单位是「记录」不是「出现」）。
+
+筛选同样走 `_apply_record_scope()`，列表 / 分类统计 / 两份选项接口**四者共用**。
+
 ## API Endpoints
 
 前缀 `/api/sugar/`
@@ -102,16 +149,16 @@
 | GET/PUT/DELETE | /records/&lt;pk&gt;/ | 详情/更新/删除 |
 | GET | /records/joy_type_stats/ | 快乐类型统计 |
 | GET | /records/joy_types/ | **快乐类型筛选项**（`{unlabeled_value, options:[{value,label,count,kind}]}`，下拉框唯一来源） |
+| GET | /records/tags/ | **标签筛选项**（`{untagged_value, options:[{value,label,count,kind}]}`，下拉框唯一来源） |
 | GET | /records/happiness_bands/ | **快乐程度档位表**（`{min, max, bands:[{max_level,label,color}]}`，前端零副本） |
 | GET | /records/categories/ | 分类统计 |
 | GET | /categories/ | 分类统计（与上一条同实现，旧入口兼容） |
 | GET/POST | /templates/ | 小确幸模板列表/创建 |
 | GET/PUT/DELETE | /templates/&lt;pk&gt;/ | 模板详情/更新/删除 |
-| GET/POST | /energy/templates/ | 能量清单模板列表/创建 |
-| POST | /energy/complete/ | 完成一项能量清单 |
-| GET | /energy/stats/ | 能量统计 |
-| GET | /energy/history/ | 完成历史 |
-| GET | /energy/daily/ | 按日明细 |
-| GET | /energy/trend/ | 能量趋势 |
 
 ⚠️ 记录端点的路径是 `/records/`，**不是** `/sugar/` —— viewset 注册名为 `records`（`urls.py:7`）。
+
+⚠️ 能量清单（`/energy/*` 六个端点 + 三张 `sugar_energy_*` 表）已于 2026-11-14 退役：
+前端只写了组件、从来没接进任何页面，收件箱的「转为能量」只写不读，成了单向黑洞。
+`InboxProcessLog.ACTION_CHOICES` 里仍保留 `convert_to_sugar` 只为让旧日志显示中文标签，
+新请求已在 `BatchActionSerializer` 层被拒。

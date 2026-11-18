@@ -2,8 +2,8 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as sugarApi from '../api/sugarApi'
 import type {
-  EnergyLog, EnergyStats, EnergyTemplate, JoyTypeOptions, SugarRecord, SugarCategoryStats,
-  SugarHappinessBands, SugarTemplate,
+  JoyTypeOptions, SugarRecord, SugarCategoryStats,
+  SugarHappinessBands, SugarTemplate, TagOptions,
 } from '../types/sugarTypes'
 
 export const useSugarStore = defineStore('sugar', () => {
@@ -35,6 +35,26 @@ export const useSugarStore = defineStore('sugar', () => {
       // 取不到就让下拉为空 —— 不退回前端硬编码的五个标准型：
       // 那会让「旧词表」和「未标注」凭空消失，而且看起来一切正常。
       joyTypeOptions.value = null
+      return null
+    }
+  }
+
+  // ─── 标签筛选项（标签下拉唯一来源，见 types 里的说明） ───
+  //
+  // 不能从 `sugarList` 里现收标签：列表只有当前页 10 条，翻页/筛选一变，
+  // 下拉里的选项就跟着变 —— 看起来像「标签丢了」，其实是数据范围变了。
+  const tagOptions = ref<TagOptions | null>(null)
+
+  async function fetchTagOptions(params?: Record<string, unknown>) {
+    try {
+      const response = await sugarApi.getTagOptions(params)
+      tagOptions.value = response.data as TagOptions
+      return tagOptions.value
+    } catch (error) {
+      console.error('获取标签筛选项失败:', error)
+      // 取不到就留空，不退回「从列表里凑一份」——
+      // 那样筛出来的标签和下拉里的标签不是同一批，且没有任何报错。
+      tagOptions.value = null
       return null
     }
   }
@@ -232,6 +252,8 @@ export const useSugarStore = defineStore('sugar', () => {
     currentPage, pageSize, total, handlePageChange,
     // ─── 快乐类型筛选项 ───
     joyTypeOptions, fetchJoyTypeOptions,
+    // ─── 标签筛选项 ───
+    tagOptions, fetchTagOptions,
     // ─── 统计汇总 ───
     statsSummary,
     // ─── 模板 ───
@@ -239,42 +261,8 @@ export const useSugarStore = defineStore('sugar', () => {
     fetchTemplates, createTemplate, updateTemplate, deleteTemplate,
     // ─── 快乐档位表 ───
     happinessBands, fetchHappinessBands,
-    // ─── 能量清单 ───
-    energyTemplates, energyDailyLogs, energyStatsValue, energyLoading,
-    fetchEnergyTemplates, completeEnergyTask, fetchEnergyStats, fetchEnergyDaily,
   }
 })
-
-// ─── 能量清单状态 ───
-const energyTemplates = ref<EnergyTemplate[]>([])
-const energyDailyLogs = ref<EnergyLog[]>([])
-const energyStatsValue = ref<EnergyStats | null>(null)
-const energyLoading = ref(false)
-
-async function fetchEnergyTemplates() {
-  const res = await sugarApi.getEnergyTemplates()
-  energyTemplates.value = res.data
-  return res.data
-}
-
-async function completeEnergyTask(data: Record<string, unknown>) {
-  const res = await sugarApi.completeEnergyTask(data)
-  await fetchEnergyDaily()
-  await fetchEnergyStats()
-  return res.data
-}
-
-async function fetchEnergyStats() {
-  const res = await sugarApi.getEnergyStats()
-  energyStatsValue.value = res.data
-  return res.data
-}
-
-async function fetchEnergyDaily(date?: string) {
-  const res = await sugarApi.getEnergyDaily(date)
-  energyDailyLogs.value = res.data.items || []
-  return res.data
-}
 
 // 开发期热更新：Vite 只重建 `.vue`，**Pinia 的 store 实例不会重建** ——
 // 改本文件之后，页面上跑的还是旧定义（模板是新的、数据逻辑是旧的，

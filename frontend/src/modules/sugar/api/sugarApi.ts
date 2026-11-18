@@ -40,6 +40,18 @@ export function getJoyTypeOptions(params?: Record<string, unknown>) {
 }
 
 /**
+ * 标签筛选项（标签下拉框唯一来源）。
+ *
+ * 传 `year` / `month` / `category` / `joy_type` 让每个选项带上「当期有多少条」；
+ * ⚠️ **不要传 `tag`** —— 后端会故意忽略它，但前端也不该假装自己在筛。
+ *
+ * 与 `getJoyTypeOptions` 同构：选项集合取全库，条数跟着筛选走。
+ */
+export function getTagOptions(params?: Record<string, unknown>) {
+  return request({ url: '/sugar/records/tags/', method: 'get', params })
+}
+
+/**
  * 快乐程度档位表（后端唯一真源）。
  *
  * 录入弹窗要在**拖滑块时**立刻显示档位词，那时还没有记录、拿不到 `reward_label`，
@@ -66,30 +78,4 @@ export function updateSugarTemplate(id: number, data: Record<string, unknown>) {
 
 export function deleteSugarTemplate(id: number) {
   return request({ url: `/sugar/templates/${id}/`, method: 'delete' })
-}
-
-// ─── 能量清单 API ───
-
-export function getEnergyTemplates() {
-  return request({ url: '/sugar/energy/templates/', method: 'get' })
-}
-
-export function createEnergyTemplate(data: Record<string, unknown>) {
-  return request({ url: '/sugar/energy/templates/', method: 'post', data })
-}
-
-export function completeEnergyTask(data: Record<string, unknown>) {
-  return request({ url: '/sugar/energy/complete/', method: 'post', data })
-}
-
-export function getEnergyStats() {
-  return request({ url: '/sugar/energy/stats/', method: 'get' })
-}
-
-export function getEnergyDaily(date?: string) {
-  return request({ url: '/sugar/energy/daily/', method: 'get', params: date ? { date } : {} })
-}
-
-export function getEnergyTrend(days = 30) {
-  return request({ url: '/sugar/energy/trend/', method: 'get', params: { days } })
 }

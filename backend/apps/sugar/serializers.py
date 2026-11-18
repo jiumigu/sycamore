@@ -7,7 +7,7 @@ from .constants import (
     SUGAR_HAPPINESS_MIN,
     resolve_happiness_band,
 )
-from .models import EnergyLog, EnergyTemplate, SugarRecord, SugarTemplate
+from .models import SugarRecord, SugarTemplate
 
 
 class SugarRecordSerializer(serializers.ModelSerializer):
@@ -91,49 +91,3 @@ class SugarCategoryStatsSerializer(serializers.Serializer):
     category = serializers.CharField()
     count = serializers.IntegerField()
     total_reward = serializers.FloatField()
-
-
-class EnergyTemplateSerializer(serializers.ModelSerializer):
-    """能量清单模板序列化器"""
-
-    category_label = serializers.SerializerMethodField()
-    estimated_minutes = serializers.SerializerMethodField()
-
-    class Meta:
-        model = EnergyTemplate
-        fields = [
-            'id', 'content', 'default_energy', 'category', 'category_label',
-            'icon', 'estimated_seconds', 'estimated_minutes',
-            'is_system', 'is_active', 'sort_order',
-        ]
-        read_only_fields = ['id', 'is_system']
-
-    def get_category_label(self, obj):
-        return obj.get_category_display()
-
-    def get_estimated_minutes(self, obj):
-        return round(obj.estimated_seconds / 60, 1)
-
-
-class EnergyCompleteSerializer(serializers.Serializer):
-    """完成能量清单请求序列化器"""
-
-    template_id = serializers.IntegerField(required=False, allow_null=True)
-    content = serializers.CharField(max_length=200)
-    energy_gained = serializers.IntegerField(default=1, min_value=1, max_value=5)
-    is_custom = serializers.BooleanField(default=False)
-    completed_at = serializers.DateTimeField(required=False)
-
-
-class EnergyLogSerializer(serializers.ModelSerializer):
-    """能量清单完成记录序列化器"""
-
-    template_icon = serializers.CharField(source='template.icon', read_only=True, default='✨')
-
-    class Meta:
-        model = EnergyLog
-        fields = [
-            'id', 'template', 'template_icon', 'content', 'energy_gained',
-            'is_custom', 'completed_at', 'reward_processed', 'created_at',
-        ]
-        read_only_fields = ['id', 'reward_processed', 'created_at']

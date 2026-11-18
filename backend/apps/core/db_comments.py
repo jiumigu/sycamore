@@ -381,15 +381,11 @@ COLUMN_COMMENT_OVERRIDES = {
     'treasure_good_thing.still_available': '还能找到吗 —— 实物专属；False = 绝版 / 买不到了',
     'treasure_good_thing.rating': '评分 —— 前端已撤下（零信息量，与好 / 歹 + 理由重复）；列留着只为不动存量',
 
-    # ── 小确幸 / 能量 ───────────────────────────────────
-    'sugar_energy_log.template_id': '关联模板 —— 空 = 当时是自定义内容（模板被删也留空，不连坐）',
-    'sugar_energy_log.is_custom': '是否自定义内容 —— True 时「关联模板」为空',
-    'sugar_energy_log.reward_processed': '是否已处理奖励池 —— 幂等标记：True 时不再重复发奖',
+    # ── 小确幸 ──────────────────────────────────────────
     'sugar_record.reward_synced': '奖励是否已同步 —— 幂等标记：True 时不再重复发奖',
     'sugar_record.reward_amount': '本记录产生的奖励金额（元）—— 落库是为了撤销时知道该退多少',
     'sugar_record.years': '年份 —— 与「发生日期」同源的冗余列（录入时一并写入，应始终一致）；按年月聚合走它，避免对日期做函数运算',
     'sugar_record.month': '月份 —— 与「发生日期」同源的冗余列，同「年份」',
-    'sugar_energy_template.user_id': '用户 ID —— is_system 为 False 时记录是谁自建的',
 
     # ── 奖励 ────────────────────────────────────────────
     'reward_pool.balance': '当前余额（元）—— 与流水对照：余额 ≈ 累计获得 − 累计提取',

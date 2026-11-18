@@ -86,46 +86,6 @@ export function happinessLabelOf(
   return happinessBandOf(meta, level)?.label ?? ''
 }
 
-// ─── 能量清单 ───
-
-export interface EnergyTemplate {
-  id: number
-  content: string
-  default_energy: number
-  category: string
-  category_label: string
-  icon: string
-  estimated_seconds: number
-  estimated_minutes: number
-  is_system: boolean
-  is_active: boolean
-  sort_order: number
-}
-
-export interface EnergyLog {
-  id: number
-  template: number | null
-  template_icon: string
-  content: string
-  energy_gained: number
-  is_custom: boolean
-  completed_at: string
-  reward_processed: boolean
-  created_at: string
-}
-
-export interface EnergyStats {
-  today: { total_energy: number; completed_count: number }
-  week: { total_energy: number; completed_count: number }
-  month: { total_energy: number; completed_count: number }
-  streak: { current: number; longest: number }
-}
-
-export interface EnergyTrendPoint {
-  date: string
-  total_energy: number
-}
-
 // ─── 小确幸模板 ───
 
 export interface SugarTemplate {
@@ -201,6 +161,29 @@ export interface JoyTypeOptions {
   /** 「未标注」对应的请求值 —— 用它跟 `undefined`（= 没筛选）区分开 */
   unlabeled_value: string
   options: JoyTypeOption[]
+}
+
+/**
+ * 标签筛选的选项 —— 由 `GET /sugar/records/tags/` 下发，前端零副本。
+ *
+ * 🔴 标签是**逗号分隔字符串**（`SugarRecord.tags`），不是外键表，所以「有哪些标签」
+ *    只能由后端从数据里现算。前端若从 `store.sugarList` 里收集标签，选项就会跟着
+ *    当前页/当前筛选变 —— 用户会看到「刚才还能选的标签不见了」，而这不是错误，
+ *    只是数据范围变了，最难察觉。
+ */
+export interface TagOption {
+  /** 筛选用值：普通标签就是标签名，无标签是后端下发的哨兵（**不是空串**） */
+  value: string
+  label: string
+  /** 按当前 年/月/分类/类型 统计的条数；不随 `tag` 自身的选择变化 */
+  count: number
+  kind: 'tag' | 'untagged'
+}
+
+export interface TagOptions {
+  /** 「无标签」对应的请求值 —— 用它跟 `undefined`（= 没筛选）区分开 */
+  untagged_value: string
+  options: TagOption[]
 }
 
 export const JOY_TYPE_COLORS: Record<string, string> = {

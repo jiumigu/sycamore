@@ -5,7 +5,6 @@ from . import views
 
 router = DefaultRouter()
 router.register('records', views.SugarRecordViewSet, basename='sugar-record')
-router.register('energy', views.EnergyViewSet, basename='sugar-energy')
 router.register('templates', views.SugarTemplateViewSet, basename='sugar-template')
 
 urlpatterns = [

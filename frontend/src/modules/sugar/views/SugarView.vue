@@ -105,6 +105,31 @@
               </span>
             </el-option>
           </el-select>
+          <!-- 标签筛选：选项由后端从数据里现算（前端不从当前页凑），
+               因为 `tags` 是逗号分隔字符串，没有独立的标签表。
+               `filterable` 是「搜索」那一半 —— 标签十几个，打字比滚动快。 -->
+          <el-select
+            v-model="filterTag"
+            placeholder="标签"
+            clearable
+            filterable
+            class="filter-select filter-select-tag"
+            @change="fetchData"
+          >
+            <el-option
+              v-for="o in tagOptions"
+              :key="o.value"
+              :label="o.label"
+              :value="o.value"
+            >
+              <!-- 条数同「快乐类型」：0 也照常显示，藏起来会变成
+                   「这个标签是不是没有记录」的猜测 -->
+              <span style="display:flex;justify-content:space-between;gap:12px;width:100%">
+                <span>{{ o.label }}</span>
+                <span style="color:#9CA3AF;font-size:12px">{{ o.count }}</span>
+              </span>
+            </el-option>
+          </el-select>
         </div>
         <div class="filter-right">
           <span class="total-reward">累计奖励+¥{{ formatAmount(stats.totalReward) }}</span>
@@ -273,13 +298,19 @@ const filterYear = ref<number | undefined>()
 const filterMonth = ref<number | undefined>()
 const filterCategory = ref<string>()
 const filterJoyType = ref<string>()
+const filterTag = ref<string>()
 
 // 筛选项来自后端（含旧词表残留与「未标注」），前端不自己拼一份 ——
 // 一旦在前端 v-for `JOY_TYPE_OPTIONS`，那 4 条旧值 + 36 条未标注就筛不出来。
 const joyTypeOptions = computed(() => store.joyTypeOptions?.options ?? [])
 
+// 标签选项同理：`tags` 是逗号分隔字符串、没有标签表，从当前页 10 条记录里收标签
+// 会让下拉跟着翻页变 —— 只有后端能给出「全库有哪些标签」。
+const tagOptions = computed(() => store.tagOptions?.options ?? [])
+
 const hasFilter = computed(() => Boolean(
-  filterYear.value || filterMonth.value || filterCategory.value || filterJoyType.value,
+  filterYear.value || filterMonth.value || filterCategory.value
+  || filterJoyType.value || filterTag.value,
 ))
 
 // 「没有记录」和「筛选后没结果」是两件事：前者是没记，后者是条件太窄 ——
@@ -460,6 +491,8 @@ function getFilters(): Record<string, unknown> {
   // 「未标注」也是一个非空值（后端下发的哨兵），所以这里只需判空 ——
   // 若用 `if (filterJoyType.value !== '')` 之类的写法，清空筛选会被当成「只看未标注」。
   if (filterJoyType.value) params.joy_type = filterJoyType.value
+  // 「无标签」同理：`__untagged__` 是非空哨兵，空串只代表「清空了下拉」。
+  if (filterTag.value) params.tag = filterTag.value
   return params
 }
 
@@ -468,6 +501,9 @@ function getFilters(): Record<string, unknown> {
  *
  * 选完某个类型如果再拿它去统计，其它类型的条数会一起变成 0，
  * 下拉框就再也指不出「别处还有多少条」。
+ *
+ * `tag` 保留：用户筛了标签之后再看类型分布，正是他想知道的
+ * 「这批记录里各类型分别多少」。两个下拉各去掉自己那一维，互为条件。
  */
 function getOptionFilters(): Record<string, unknown> {
   const params = getFilters()
@@ -475,15 +511,28 @@ function getOptionFilters(): Record<string, unknown> {
   return params
 }
 
+/**
+ * 只给「标签选项条数」用的筛选 —— 去掉 `tag` 自身。
+ *
+ * 与 `getOptionFilters` 对称：选了「成就」之后，其它标签还得各显示多少条。
+ * 若把 `tag` 也算进去，选完只剩被选中那一项有数字 —— 看起来像「别的标签没数据了」。
+ */
+function getTagOptionFilters(): Record<string, unknown> {
+  const params = getFilters()
+  delete params.tag
+  return params
+}
+
 async function fetchData() {
   store.currentPage = 1
   const params = getFilters()
-  // 三件事同一批记录：列表、顶部统计、下拉条数。
+  // 四件事同一批记录：列表、顶部统计、类型下拉条数、标签下拉条数。
   // 只刷列表会让顶部「累计获得」停在筛选前的总数，同屏两个数互相矛盾。
   await Promise.all([
     store.fetchSugarList(params),
     store.fetchCategories(params),
     store.fetchJoyTypeOptions(getOptionFilters()),
+    store.fetchTagOptions(getTagOptionFilters()),
   ])
 }
 
@@ -497,6 +546,7 @@ async function refreshAll() {
     store.fetchSugarList(filters),
     store.fetchCategories(filters),
     store.fetchJoyTypeOptions(getOptionFilters()),
+    store.fetchTagOptions(getTagOptionFilters()),
   ])
 }
 
@@ -583,6 +633,9 @@ onMounted(() => {
     .filter-select { width: 130px; }
     // 快乐类型带 emoji，还可能出现「社交（旧词表）」—— 130px 会把词截断
     .filter-select-joy { width: 158px; }
+    // 标签名最长是「内在成就」「意外惊喜」这类四五个字，140px 够；
+    // 下拉本身 `filterable`，太长的可以打字搜，不必靠宽度硬撑
+    .filter-select-tag { width: 140px; }
 
     .filter-right {
       .total-reward {
@@ -593,6 +646,33 @@ onMounted(() => {
         background: #D1FAE5;
         border-radius: 8px;
       }
+    }
+
+    // ── 窄屏：改成 3 列网格，别让第 5 个框自己掉到第二行 ──
+    //
+    // 五个框加起来 728px（130+130+130+158+140+四个 10px 间距），加上右侧
+    // 「累计奖励」约 150px，横向需要 ≈ 878px。窗口窄于约 1240 时放不下，
+    // 而 `flex-wrap` 的换行结果是「4 个 + 1 个孤零零 + 奖励再换一行」——
+    // 第 2 行只有「标签」一个框，右边空掉一大半，看起来像排版坏了。
+    //
+    // 改 3 列网格后是整齐的 3 + 2，奖励右对齐单独一行；每个框反而更宽，
+    // 「社交（旧词表）」这种长词也就不容易被截断。
+    @media (max-width: 1240px) {
+      flex-direction: column;
+      align-items: stretch;
+
+      .filter-left {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        width: 100%;
+      }
+      .filter-select,
+      .filter-select-joy,
+      .filter-select-tag { width: 100%; }
+
+      // 奖励条自己一行，靠右 —— 留左对齐会跟着第 2 行第 1 格起头，看着像另一个筛选框
+      .filter-right { align-self: flex-end; }
     }
   }
 }
