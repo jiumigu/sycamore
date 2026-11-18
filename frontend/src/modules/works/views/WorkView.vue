@@ -10,7 +10,7 @@
  */
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight, Search } from '@element-plus/icons-vue'
 import { useWorkStore } from '../stores/workStore'
 import ComposeDialog from '../components/ComposeDialog.vue'
 import PendingDialog from '../components/PendingDialog.vue'
@@ -55,10 +55,49 @@ type WorkFilter = 'all' | 'published' | 'ready'
 
 const workFilter = ref<WorkFilter>('all')
 
+/** 类型筛选：空串 = 不限。
+ *
+ *  ⚠️ 选项取 `store.kindOptions`（后端 9 类**全量**），不是「当前在用的那几类」——
+ *     筛选项回答的是「我有没有做过刺绣」，选到空是真答案（0 件），
+ *     把没数据的类型藏起来就没法问这个问题了。 */
+const kindFilter = ref('')
+
+/** 关键词：名称 / 摘要 / 备注 / 来源标题。
+ *
+ *  ⚠️ **不匹配 `kind_display` / `status_display`** —— 那两个已经有专门的入口，
+ *     在这里再匹配一次等于同一个问题有两个答案（搜「文章」既像类型又像关键词）。 */
+const keyword = ref('')
+
+const kw = computed(() => keyword.value.trim().toLowerCase())
+
+/** 三把筛子是**相乘**的：计数卡（出口）× 类型 × 关键词。
+ *  任一把生效就进「筛选中」态 —— 空态文案、计数、清零按钮都只认这一个判据，
+ *  各自判各自的会漏（只判 `workFilter` 时，只输关键词的空结果会被说成「还没有作品」）。 */
+const narrowed = computed(
+  () => workFilter.value !== 'all' || !!kindFilter.value || !!kw.value,
+)
+
 const filteredWorks = computed(() => {
-  if (workFilter.value === 'all') return store.works
-  return store.works.filter((w) => w.status === workFilter.value)
+  let list = store.works
+  if (workFilter.value !== 'all') list = list.filter((w) => w.status === workFilter.value)
+  if (kindFilter.value) list = list.filter((w) => w.kind === kindFilter.value)
+  if (kw.value) {
+    const k = kw.value
+    list = list.filter((w) =>
+      [w.name, w.summary, w.note, ...w.origin.map((o) => o.title)]
+        .some((s) => (s ?? '').toLowerCase().includes(k)),
+    )
+  }
+  return list
 })
+
+/** 一次清到「全部」—— 三个筛子是相乘的，只清一个会剩个说不清的结果。
+ *  `workFilter` 也清，是因为按钮就叫「累计件数」：点它的意图就是看全部。 */
+function clearFilters() {
+  workFilter.value = 'all'
+  kindFilter.value = ''
+  keyword.value = ''
+}
 
 /** 点已选中的那项 = 取消筛选（再点一次回「累计件数」）。 */
 function toggleFilter(f: Exclude<WorkFilter, 'all'>) {
@@ -70,7 +109,7 @@ function toggleFilter(f: Exclude<WorkFilter, 'all'>) {
  *  那是用一句看着合理的话把故障盖过去（本项目最怕的那种失败）。 */
 const listEmptyText = computed(() => {
   if (notReady.value) return '列表没取到 —— 先看上面那条黄字'
-  if (workFilter.value !== 'all') return '这个筛选下没有 —— 点「累计件数」看全部'
+  if (narrowed.value) return '这些筛子下没有 —— 点「清除」看全部'
   return '还没有作品 —— 从上面「整理这周的标记」开始'
 })
 
@@ -173,6 +212,32 @@ async function remove(w: Work) {
   }
 }
 
+// ── 媒体 ──────────────────────────────────────────────────────
+// 🔴 列表里只露出**第一件**（40px 缩略图），点开看全部。
+//    角标 `+N` 与「点开后能翻几张」必须是同一个数 —— 所以两者都只数**图片**。
+//    （按 `media.length` 数会把视频算进角标，点开却翻不到那一件，说 +1 实际 +0。）
+// ⚠️ 已知边界：视频只有排在第一位时才会露面（点它在本页播）。
+//    目前库里 4 张媒体全是图片，等真有混合媒体再处理「封面是图、后面跟视频」。
+const previewVideo = ref<string | null>(null)
+const videoVisible = computed({
+  get: () => previewVideo.value !== null,
+  set: (v: boolean) => { if (!v) previewVideo.value = null },
+})
+
+/** 这一件的全部图片：既是预览列表，也是 `+N` 的分母
+ *
+ *  🔴 取的是 `url`（**原图**），不是 `thumb` —— 预览要能看细节。
+ *     列表格子那 40px 才走 `thumb`（见模板里的 `:src`）。
+ */
+function imageUrls(w: Work): string[] {
+  return (w.media ?? []).filter((m) => m.type === 'image').map((m) => m.url)
+}
+
+/** 除封面外还剩几张图 */
+function extraImages(w: Work): number {
+  return Math.max(0, imageUrls(w).length - 1)
+}
+
 // ── 导出 ──────────────────────────────────────────────────────
 // ⚠️ 在**前端**拼文本，不落库、不走接口 —— 它是「取出去看看」，
 //    不是系统里的第二份数据。
@@ -241,7 +306,7 @@ function downloadAll() {
       <div class="wv-counts-row">
         <!-- 「累计件数」= 复位（它不是筛选，所以**没有选中态** ——
              一个常年亮着的大号彩色数字比「少一个高亮」更吵）。 -->
-        <button type="button" class="wv-count" @click="workFilter = 'all'">
+        <button type="button" class="wv-count" @click="clearFilters()">
           <span class="wv-count-num">{{ store.overview?.total ?? 0 }}</span>
           <span class="wv-count-label">累计件数</span>
         </button>
@@ -291,6 +356,32 @@ function downloadAll() {
           >
             只看「{{ filterLabel }}」
           </el-tag>
+          <!-- 🔴 计数必须**两个数一起给**：只给筛后的数，用户得自己记住原来几件；
+               只给总数，筛完看着「共 14 件」而表里 3 行更莫名其妙。 -->
+          <span class="wv-list-count">
+            共 {{ store.works.length }} 件<template v-if="narrowed"> · 筛出 {{ filteredWorks.length }} 件</template>
+          </span>
+          <div class="wv-list-tools">
+            <el-select
+              v-model="kindFilter"
+              size="small"
+              clearable
+              placeholder="全部类型"
+              class="wv-kind"
+            >
+              <el-option v-for="o in store.kindOptions" :key="o.value" :label="o.label" :value="o.value" />
+            </el-select>
+            <el-input
+              v-model="keyword"
+              size="small"
+              clearable
+              placeholder="搜名称 / 摘要 / 备注 / 来源"
+              class="wv-kw"
+            >
+              <template #prefix><el-icon><Search /></el-icon></template>
+            </el-input>
+            <el-button v-if="narrowed" link size="small" type="primary" @click="clearFilters">清除</el-button>
+          </div>
         </div>
       </template>
       <!-- ⚠️ 空态文案的**顺序有意义**：先问「是不是没取到」，再问「是不是筛掉了」，
@@ -339,14 +430,27 @@ function downloadAll() {
           <template #default="{ row }">
             <span v-if="!row.media?.length" class="wv-muted">—</span>
             <div v-else class="wv-media">
-              <img
+              <!-- 🔴 必须是 el-image 而不是裸 <img>：裸图**没有任何点击行为**，
+                   界面上是个「看起来能点、点了没反应」的小方块。 -->
+              <!-- 🔴 列表格子用 `thumb`（200px，约 10KB），点开预览用 `url`（原图）——
+                   改造前这一格直接下载 110–466KB 的原图来画 40px。
+                   `thumb` 为 `null` = 历史图还没补生成 ⇒ 回退原图，不显示裂图。 -->
+              <el-image
                 v-if="row.media[0]?.type === 'image'"
-                :src="row.media[0].url"
+                :src="row.media[0].thumb || row.media[0].url"
+                :preview-src-list="imageUrls(row)"
+                :preview-teleported="true"
+                fit="cover"
                 class="wv-media-thumb"
-                alt=""
-              >
-              <video v-else :src="row.media[0].url" class="wv-media-thumb" muted />
-              <span v-if="row.media.length > 1" class="wv-media-count">+{{ row.media.length - 1 }}</span>
+              />
+              <video
+                v-else
+                :src="row.media[0].url"
+                class="wv-media-thumb wv-media-thumb--play"
+                muted
+                @click="previewVideo = row.media[0].url"
+              />
+              <span v-if="extraImages(row)" class="wv-media-count">+{{ extraImages(row) }}</span>
             </div>
           </template>
         </el-table-column>
@@ -405,6 +509,17 @@ function downloadAll() {
         <el-button @click="editVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submitEdit">保存</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 视频放大：40px 的缩略图看不出内容，点开在本页播（用原生 controls，不自造播放器） -->
+    <el-dialog
+      v-model="videoVisible"
+      title="这一段"
+      width="640px"
+      append-to-body
+      destroy-on-close
+    >
+      <video v-if="previewVideo" :src="previewVideo" controls autoplay class="wv-video" />
     </el-dialog>
 
     <ComposeDialog v-model="composeVisible" @done="() => {}" />
@@ -467,8 +582,17 @@ function downloadAll() {
   font-size: 12px; color: var(--el-text-color-placeholder);
 }
 
-.wv-list-head { display: flex; align-items: center; gap: 10px; }
+.wv-list-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .wv-list-title { font-weight: 600; }
+.wv-list-count {
+  font-size: 12px; color: var(--el-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+/* 工具区靠右：左边是「这是什么」（标题 / 筛选标签 / 计数），右边是「怎么缩」。
+   两组语义不同，靠边分开比一路排下去更容易扫。 */
+.wv-list-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.wv-kind { width: 118px; }
+.wv-kw { width: 236px; }
 .wv-name { font-weight: 500; }
 .wv-summary { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 2px; }
 .wv-channel { font-size: 12px; color: var(--el-text-color-secondary); margin-left: 6px; }
@@ -490,7 +614,11 @@ function downloadAll() {
 .wv-media-thumb {
   width: 40px; height: 40px; object-fit: cover; border-radius: 6px; display: block;
   border: 1px solid var(--el-border-color-lighter);
+  /* 能点就得看得出来能点 —— 与 MediaGallery 的 zoom-in 保持一致 */
+  cursor: zoom-in;
 }
+.wv-media-thumb--play { cursor: pointer; }
+.wv-video { width: 100%; display: block; border-radius: 8px; background: #000; }
 .wv-media-count {
   position: absolute; right: -8px; bottom: -6px;
   background: var(--el-color-primary); color: #fff;

@@ -19,9 +19,9 @@
     <!-- 右侧：站序 + 选中站的明细 -->
     <aside class="stop-panel">
       <div class="panel-head">
-        <span class="panel-title">📍 {{ plan.stops.length }} 站 · ¥{{ fmt(plan.stops_total) }}</span>
+        <span class="panel-title">📍 {{ plan.stops.length }} 站 · {{ fmt(plan.stops_total) }}</span>
         <span class="panel-note">
-          不含路上 ¥{{ fmt(plan.transfer_total) }}<template v-if="plan.stops.length > 1"> · 点圆点或下面一行切换</template>
+          不含路上 {{ fmt(plan.transfer_total) }}<template v-if="plan.stops.length > 1"> · 点圆点或下面一行切换</template>
         </span>
       </div>
 
@@ -42,7 +42,7 @@
             </el-tooltip>
           </span>
           <span class="row-days">{{ daysLabel(stop.days) }}</span>
-          <span class="row-cost">¥{{ fmt(stop.subtotal) }}</span>
+          <span class="row-cost">{{ fmt(stop.subtotal) }}</span>
         </li>
       </ul>
 
@@ -55,14 +55,14 @@
           </span>
         </div>
         <div class="detail-nums">
-          <span class="detail-cost">¥{{ fmt(activeStop.subtotal) }}</span>
+          <span class="detail-cost">{{ fmt(activeStop.subtotal) }}</span>
           <span v-for="c in countChips(activeStop)" :key="c.key" class="chip">{{ c.icon }}{{ c.n }}</span>
         </div>
         <div v-if="activeItems.length" class="item-list">
           <div v-for="item in activeItems" :key="item.id" class="item" :class="{ done: item.is_completed }">
             <span class="item-icon">{{ itemIcon(item.item_type) }}</span>
             <span class="item-name">{{ item.name }}</span>
-            <span class="item-cost">¥{{ fmt(item.estimate_cost) }}</span>
+            <span class="item-cost">{{ fmt(item.estimate_cost) }}</span>
           </div>
         </div>
         <div v-else class="item-empty">这一站还没排条目</div>
@@ -75,7 +75,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import { formatAmount } from '@/shared/utils/format'
+import { formatMoney } from '@/shared/utils/format'
 import { registerChinaProvinceMap } from '../../utils/chinaProvinceMap'
 import { fitRouteView, type LngLat } from '../../utils/routeView'
 import { arriveLabel, countChips, daysLabel } from '../../utils/stopText'
@@ -87,7 +87,8 @@ const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
 let observer: ResizeObserver | null = null
 
-const fmt = (n: unknown) => formatAmount(Number(n ?? 0), 2)
+/** 金额唯一入口：自带 ¥、空值 —、隐私模式自动掩码（别再手写 `¥`） */
+const fmt = formatMoney
 
 /** 能画到地图上的站：`located=false` 的一律不画（猜坐标会落到海里） */
 const locatedStops = computed(() =>
@@ -156,7 +157,7 @@ function buildOption(): echarts.EChartsOption {
         if (!stop) return d.name
         return `<strong>${d.name}</strong><br/>
           ${arriveLabel(stop.arrive_date)} · ${daysLabel(stop.days)}<br/>
-          本站合计：¥${fmt(stop.subtotal)}<br/>
+          本站合计：${fmt(stop.subtotal)}<br/>
           ${stop.items?.length ? `条目 ${stop.items.length} 条` : '还没排条目'}`
       },
     },

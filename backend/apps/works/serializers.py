@@ -13,7 +13,7 @@ from rest_framework import serializers
 #    （反向依赖是安全的：`selfrun.readers` 只在函数内部 import 本 app 的模型。）
 from apps.selfrun.readers import period_range
 # 🔴 media 结构校验唯一实现（works / showroom 共用）
-from apps.core.media import validate_media_items
+from apps.core.media import validate_media_items, with_thumbs
 
 from .constants import (
     CAPTURE_SOURCE_CHOICES,
@@ -66,6 +66,7 @@ class WorkSerializer(serializers.ModelSerializer):
     kind_display = serializers.CharField(source='get_kind_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     origin = serializers.SerializerMethodField()
+    media = serializers.SerializerMethodField()
     period_key = serializers.SerializerMethodField()
     in_current_period = serializers.SerializerMethodField()
 
@@ -88,6 +89,14 @@ class WorkSerializer(serializers.ModelSerializer):
             }
             for c in obj.captures.all()
         ]
+
+    def get_media(self, obj):
+        """媒体出参：图片多一个 `thumb`（列表用），`url` 仍是原图（预览用）。
+
+        🔴 两者分工不许合并：列表 40px 的格子用缩略图，点开预览必须原图 ——
+           拿缩略图做预览等于把「看细节」这件事悄悄降级成 200px。
+        """
+        return with_thumbs(obj.media)
 
     def get_period_key(self, obj):
         return _period_key(self.context.get('period_type'), obj.created_at)

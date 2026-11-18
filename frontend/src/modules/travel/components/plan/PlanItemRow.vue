@@ -6,7 +6,7 @@
     <el-tooltip v-if="item.wish" content="由旅行心愿单带入；勾完成时会问你要不要顺手记录打卡" placement="top">
       <span class="item-wish-tag">心愿</span>
     </el-tooltip>
-    <span class="item-cost">¥{{ fmt(item.estimate_cost) }}</span>
+    <span class="item-cost">{{ fmt(item.estimate_cost) }}</span>
     <!-- 挪到别站：删站被条目挡住时提示「先挪走」，这里就是那个出口 -->
     <!-- ⚠️ trigger 只放一个按钮：外面再包 el-tooltip 会让下拉拿不到定位锚点 -->
     <span class="item-move" @click.stop>
@@ -42,7 +42,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Close, Sort } from '@element-plus/icons-vue'
-import { formatAmount } from '@/shared/utils/format'
+import { formatMoney } from '@/shared/utils/format'
 import { TRAVEL_PLAN_ITEM_TYPES, type TravelPlanItem } from '../../types/travelTypes'
 
 const props = defineProps<{
@@ -53,7 +53,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{ toggle: []; remove: []; 'move-to': [target: number | null] }>()
 
-const fmt = (n: unknown) => formatAmount(Number(n ?? 0), 2)
+/** 金额唯一入口：自带 ¥、空值 —、隐私模式自动掩码（别再手写 `¥`） */
+const fmt = formatMoney
 
 const icon = computed(() => {
   const hit = TRAVEL_PLAN_ITEM_TYPES.find((t) => t.value === props.item.item_type)

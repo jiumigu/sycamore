@@ -172,7 +172,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, ArrowDown } from '@element-plus/icons-vue'
 import * as api from '../api/travelApi'
-import { formatAmount } from '@/shared/utils/format'
+import { formatMoney } from '@/shared/utils/format'
 import { useMenuArchive } from '@/shared/composables/useMenuArchive'
 import PlanStopList from '../components/plan/PlanStopList.vue'
 import PlanRouteMap from '../components/plan/PlanRouteMap.vue'
@@ -209,9 +209,8 @@ const createForm = reactive<{
   stops: [],
 })
 
-function fmt(n: unknown): string {
-  return formatAmount(Number(n ?? 0), 2)
-}
+/** 金额唯一入口：自带 ¥、空值 —、隐私模式自动掩码（别再手写 `¥`） */
+const fmt = formatMoney
 
 function getStatusType(status: string): string {
   if (status === '进行中') return 'warning'
@@ -239,7 +238,7 @@ function routeText(plan: TravelPlan): string {
 function metaText(plan: TravelPlan): string {
   const stops = `${plan.stops.length} 站`
   const days = plan.total_days === null ? '天数待定' : `${plan.total_days} 天`
-  return `${stops} · ${days} · ¥${fmt(plan.total_estimate)}`
+  return `${stops} · ${days} · ${fmt(plan.total_estimate)}`
 }
 
 // ===== 弹窗 =====

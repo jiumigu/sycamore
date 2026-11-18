@@ -53,19 +53,19 @@
         <el-col :span="8">
           <div class="big-number">
             <div class="label">每天睁开眼就要花</div>
-            <div class="value">¥{{ fmt(result.total_daily) }}</div>
+            <div class="value">{{ fmt(result.total_daily) }}</div>
           </div>
         </el-col>
         <el-col :span="8">
           <div class="big-number">
             <div class="label">每月固定开销</div>
-            <div class="value">¥{{ fmt(result.total_monthly) }}</div>
+            <div class="value">{{ fmt(result.total_monthly) }}</div>
           </div>
         </el-col>
         <el-col :span="8">
           <div class="big-number highlight">
             <div class="label">每年固定开销</div>
-            <div class="value">¥{{ fmt(result.total_yearly) }}</div>
+            <div class="value">{{ fmt(result.total_yearly) }}</div>
           </div>
         </el-col>
       </el-row>
@@ -77,14 +77,14 @@
         <div v-for="item in positiveItems" :key="item.name + item.amount + item.period" class="breakdown-item">
           <div class="breakdown-head">
             <span class="breakdown-name">{{ item.icon }} {{ item.name }}</span>
-            <span class="breakdown-original">原始 ¥{{ fmt(item.amount) }} / 每{{ periodUnit(item.period) }}</span>
+            <span class="breakdown-original">原始 {{ fmt(item.amount) }} / 每{{ periodUnit(item.period) }}</span>
           </div>
           <div class="breakdown-conversion">
-            <span>每日 ¥{{ fmt(convertToDaily(item)) }}</span>
+            <span>每日 {{ fmt(convertToDaily(item)) }}</span>
             <span class="arrow">→</span>
-            <span>每月 ¥{{ fmt(convertToMonthly(item)) }}</span>
+            <span>每月 {{ fmt(convertToMonthly(item)) }}</span>
             <span class="arrow">→</span>
-            <span>每年 ¥{{ fmt(convertToYearly(item)) }}</span>
+            <span>每年 {{ fmt(convertToYearly(item)) }}</span>
           </div>
           <div class="breakdown-bar">
             <el-progress :percentage="getPercent(convertToDaily(item))" :stroke-width="6" :show-text="false" />
@@ -109,13 +109,13 @@
           <template #default="{ row }">{{ row.name || '未命名记录' }}</template>
         </el-table-column>
         <el-table-column label="每天" width="90">
-          <template #default="{ row }">¥{{ maskAmountText(fmt(row.total_daily), privacyStore.privacyMode) }}</template>
+          <template #default="{ row }">{{ fmt(row.total_daily) }}</template>
         </el-table-column>
         <el-table-column label="每月" width="100">
-          <template #default="{ row }">¥{{ maskAmountText(fmt(row.total_monthly), privacyStore.privacyMode) }}</template>
+          <template #default="{ row }">{{ fmt(row.total_monthly) }}</template>
         </el-table-column>
         <el-table-column label="每年" width="100">
-          <template #default="{ row }">¥{{ maskAmountText(fmt(row.total_yearly), privacyStore.privacyMode) }}</template>
+          <template #default="{ row }">{{ fmt(row.total_yearly) }}</template>
         </el-table-column>
         <el-table-column label="项目数" width="70">
           <template #default="{ row }">{{ (row.items || []).length }}</template>
@@ -154,8 +154,8 @@
           </div>
           <div v-for="item in (viewingRecord.items || [])" :key="item.name + item.amount + item.period" class="table-row">
             <span class="col-name">{{ item.icon }} {{ item.name || '未命名项目' }}</span>
-            <span class="col-original">¥{{ maskAmountText(fmt(item.amount), privacyStore.privacyMode) }}/{{ periodLabel(item.period) }}</span>
-            <span class="col-monthly">¥{{ maskAmountText(fmt(convertToMonthly(item)), privacyStore.privacyMode) }}</span>
+            <span class="col-original">{{ fmt(item.amount) }}/{{ periodLabel(item.period) }}</span>
+            <span class="col-monthly">{{ fmt(convertToMonthly(item)) }}</span>
           </div>
         </div>
         <el-empty v-if="!viewingRecord.items?.length" description="无明细项目" :image-size="40" />
@@ -165,11 +165,11 @@
         <div class="detail-summary">
           <div class="summary-row">
             <span>月固定开销</span>
-            <span class="summary-value">¥{{ maskAmountText(fmt(viewingRecord.total_monthly), privacyStore.privacyMode) }}</span>
+            <span class="summary-value">{{ fmt(viewingRecord.total_monthly) }}</span>
           </div>
           <div class="summary-row">
             <span>日固定开销</span>
-            <span class="summary-value">¥{{ maskAmountText(fmt(viewingRecord.total_daily), privacyStore.privacyMode) }}</span>
+            <span class="summary-value">{{ fmt(viewingRecord.total_daily) }}</span>
           </div>
         </div>
 
@@ -193,10 +193,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFixedExpenseList, createFixedExpense, updateFixedExpense, deleteFixedExpense } from '../../api/toolkitApi'
 import type { FixedExpenseRecord } from '../../types/toolkitTypes'
-import { maskAmountText } from '@/shared/utils/privacy'
-import { usePrivacyStore } from '@/core/privacy/stores/privacyStore'
-
-const privacyStore = usePrivacyStore()
+import { formatMoney } from '@/shared/utils/format'
 
 type Period = 'daily' | 'monthly' | 'yearly'
 
@@ -239,10 +236,8 @@ const viewingRecord = ref<FixedExpenseRecord | null>(null)
 
 const positiveItems = computed(() => form.items.filter(i => i.amount > 0))
 
-function fmt(val: number | string) {
-  const n = typeof val === 'string' ? parseFloat(val) : val
-  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
+/** 金额唯一入口：自带 ¥、空值 —、隐私模式自动掩码（别再手写 `¥`） */
+const fmt = formatMoney
 
 function periodUnit(period: Period): string {
   return { daily: '天', monthly: '月', yearly: '年' }[period]
@@ -281,9 +276,9 @@ function getPercent(daily: number) {
 
 function generateInsight(totalDaily: number, totalMonthly: number, totalYearly: number): string {
   if (totalDaily <= 0) return '先填上各项金额，才能看清每个月的固定成本。'
-  if (totalDaily < 50) return `日均 ¥${fmt(totalDaily)}，固定开销很克制，这些成本没给你太大压力，可以把更多钱花在真正在意的事上。`
-  if (totalDaily < 150) return `日均 ¥${fmt(totalDaily)}，每年约 ¥${fmt(totalYearly)}，每月留出 ¥${fmt(totalMonthly)} 预算即可，心里有数就不慌。`
-  return `日均 ¥${fmt(totalDaily)} 不算低，每年要 ¥${fmt(totalYearly)}，建议逐项复盘：哪些是必要、哪些可以砍掉，省下的都是纯利润。`
+  if (totalDaily < 50) return `日均 ${fmt(totalDaily)}，固定开销很克制，这些成本没给你太大压力，可以把更多钱花在真正在意的事上。`
+  if (totalDaily < 150) return `日均 ${fmt(totalDaily)}，每年约 ${fmt(totalYearly)}，每月留出 ${fmt(totalMonthly)} 预算即可，心里有数就不慌。`
+  return `日均 ${fmt(totalDaily)} 不算低，每年要 ${fmt(totalYearly)}，建议逐项复盘：哪些是必要、哪些可以砍掉，省下的都是纯利润。`
 }
 
 async function fetchHistory() {

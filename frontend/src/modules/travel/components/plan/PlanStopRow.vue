@@ -15,7 +15,7 @@
       </span>
       <span class="stop-meta">{{ daysLabel(stop.days) }}</span>
       <span class="stop-meta">{{ arriveLabel(stop.arrive_date) }}</span>
-      <span class="stop-subtotal">¥{{ fmt(stop.subtotal) }}</span>
+      <span class="stop-subtotal">{{ fmt(stop.subtotal) }}</span>
       <span class="stop-counts">
         <span v-for="c in countChips(stop)" :key="c.key" class="count-chip">{{ c.icon }}{{ c.n }}</span>
       </span>
@@ -100,7 +100,7 @@ import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowDown, Bottom, Top } from '@element-plus/icons-vue'
 import { apiErrorText } from '@/shared/utils/apiError'
-import { formatAmount } from '@/shared/utils/format'
+import { formatMoney } from '@/shared/utils/format'
 import PlanItemRow from './PlanItemRow.vue'
 import * as api from '../../api/travelApi'
 import { arriveLabel, countChips, daysLabel } from '../../utils/stopText'
@@ -132,7 +132,8 @@ const emit = defineEmits<{
 /** 只有第一站默认展开：一进来全部摊开，5 站 × 20 条会看不到路线本身 */
 const expanded = ref(props.index === 0)
 
-const fmt = (n: unknown) => formatAmount(Number(n ?? 0), 2)
+/** 金额唯一入口：自带 ¥、空值 —、隐私模式自动掩码（别再手写 `¥`） */
+const fmt = formatMoney
 
 // 天数 / 到达日期 / 四类计数的文案与图标统一在 utils/stopText（地图侧栏共用一份）
 

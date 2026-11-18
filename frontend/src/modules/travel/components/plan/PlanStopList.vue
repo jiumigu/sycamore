@@ -46,7 +46,7 @@
     <div class="transfer-block">
       <div class="transfer-head">
         <span class="transfer-title">🚄 路上（城际交通）</span>
-        <span class="transfer-cost">¥{{ fmt(plan.transfer_total) }}</span>
+        <span class="transfer-cost">{{ fmt(plan.transfer_total) }}</span>
         <span class="transfer-hint">不归属任何城市，不计入各站合计</span>
       </div>
       <PlanItemRow
@@ -86,11 +86,11 @@
 
     <!-- 三层合计：各站 + 路上 = 全程（就是总额，别处不再加一遍） -->
     <div class="totals-bar">
-      <span>各站合计 <b>¥{{ fmt(plan.stops_total) }}</b></span>
+      <span>各站合计 <b>{{ fmt(plan.stops_total) }}</b></span>
       <span class="op">＋</span>
-      <span>路上 <b>¥{{ fmt(plan.transfer_total) }}</b></span>
+      <span>路上 <b>{{ fmt(plan.transfer_total) }}</b></span>
       <span class="op">＝</span>
-      <span>全程 <b class="grand">¥{{ fmt(plan.total_estimate) }}</b></span>
+      <span>全程 <b class="grand">{{ fmt(plan.total_estimate) }}</b></span>
     </div>
 
     <!-- 打卡录入：整份列表只留一个弹窗（每个条目一个会白挂 100 多个实例） -->
@@ -124,7 +124,7 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiErrorText } from '@/shared/utils/apiError'
-import { formatAmount } from '@/shared/utils/format'
+import { formatMoney } from '@/shared/utils/format'
 import { todayLocal } from '@/shared/utils/datetime'
 import PlanItemRow from './PlanItemRow.vue'
 import PlanStopRow from './PlanStopRow.vue'
@@ -140,7 +140,8 @@ import {
 const props = defineProps<{ plan: TravelPlan }>()
 const emit = defineEmits<{ changed: [] }>()
 
-const fmt = (n: unknown) => formatAmount(Number(n ?? 0), 2)
+/** 金额唯一入口：自带 ¥、空值 —、隐私模式自动掩码（别再手写 `¥`） */
+const fmt = formatMoney
 
 function iconOf(type: string): string {
   const hit = TRAVEL_PLAN_ITEM_TYPES.find((t) => t.value === type)

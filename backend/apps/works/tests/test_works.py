@@ -374,7 +374,11 @@ class TestMedia:
         assert resp.status_code == 400
 
     def test_work_with_media_roundtrip(self, client):
-        """新建带 media 的作品 ⇒ 列表出参带同一份 media。"""
+        """新建带 media 的作品 ⇒ 列表出参带同一份 media。
+
+        ⚠️ 出参比入参多一个 `thumb`（v3.64.72）：**没生成过是 `None`，不是缺键** ——
+           前端据此回退原图。所以这里逐键断言，不做整字典等值。
+        """
         media = [{'type': 'image', 'url': '/media/works/202610/a.png'}]
         resp = client.post(
             f'{URL}/items/',
@@ -382,9 +386,16 @@ class TestMedia:
             format='json',
         )
         assert resp.status_code == 201
-        assert resp.json()['work']['media'] == media
+
+        def _stable(items):
+            return [{k: v for k, v in m.items() if k != 'thumb'} for m in items]
+
+        assert _stable(resp.json()['work']['media']) == media
+        assert resp.json()['work']['media'][0]['thumb'] is None
+
         rows = client.get(f'{URL}/items/').json()
-        assert rows[0]['media'] == media
+        assert _stable(rows[0]['media']) == media
+        assert rows[0]['media'][0]['thumb'] is None
 
     def test_work_rejects_bad_media_shape(self, client):
         """media 结构不合法必须 400 —— 脏数据进库前端会静默画空。"""
