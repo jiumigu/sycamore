@@ -5,6 +5,20 @@ from . import views
 # 🔴 顺序：字面路径（`current/` `close/` `copy/`）一律排在 `<int:pk>/` **之前** ——
 #    虽然 `int` 转换器不会匹配它们，但排前面读起来不依赖这条隐式规则。
 urlpatterns = [
+    # ── T0 今天（v3.64.75 / 76）────────────────────────────────
+    # 🔴 它不属于 T1～T4 里的任何一段：读的是 goals / inbox / works / book，
+    #    不依赖阶段存在。
+    # ⚠️ v3.64.76 起**没有** `today/candidates/` —— 候选随 `cell` 一起下发。
+    #    留一个「不写库的预览」端点是多余的第二形状：它和 cell 里的候选
+    #    迟早会不一样，而不一样的时候两个页面都看着正常。
+    path('today/', views.TodayView.as_view(), name='selfrun-today'),
+    # 日结（定档 / 改档 / 结算）：写入口只这一组，别的模块不许碰这张表
+    path('day-cells/', views.DayCellListCreateView.as_view(), name='selfrun-day-cells'),
+    # 色带：`week/` 排在 `<int:pk>/` 前 —— 后者只吃整数，但仍然先写先读，
+    # 免得将来有人把它改成 `<str:pk>` 之后 `week` 静默变成一条详情请求。
+    path('day-cells/week/', views.DayWeekView.as_view(), name='selfrun-day-cells-week'),
+    path('day-cells/<int:pk>/', views.DayCellDetailView.as_view(), name='selfrun-day-cell-detail'),
+
     # ── T1 制定配置 ──────────────────────────────────────────
     path('templates/', views.TemplateListView.as_view(), name='selfrun-templates'),
     path('templates/<int:pk>/', views.TemplateDetailView.as_view(), name='selfrun-template-detail'),

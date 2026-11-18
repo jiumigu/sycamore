@@ -24,7 +24,12 @@
 
     <template v-else-if="whatHappened.days.length">
       <div class="whc-attr-row">
-        <span v-for="a in whatHappened.attr_totals" :key="a.label" class="whc-attr">
+        <!-- 与历史复盘列表同一把尺子：占比最大的一类加粗（`isTopShare` 唯一实现）。
+             这里原本六个数都是常规字重，加粗只是「补重音」，不改任何数。 -->
+        <span
+          v-for="a in whatHappened.attr_totals" :key="a.label"
+          class="whc-attr" :class="{ 'whc-hi': isTopShare(a, whatHappened.attr_totals) }"
+        >
           {{ a.label }} <b>{{ fmt(a.hours) }}</b>h
         </span>
       </div>
@@ -77,7 +82,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import WhatHappenedTimeline from './WhatHappenedTimeline.vue'
-import { fmt } from '../types/selfrunTypes'
+import { fmt, isTopShare } from '../types/selfrunTypes'
 import type { PeriodType, WhatHappened } from '../types/selfrunTypes'
 
 const props = defineProps<{
@@ -130,10 +135,16 @@ watch(() => props.periodKey, () => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
+/* 🔴 `<b>` 天生就是 700 —— 六个数本来就一样粗，这里「加粗最大项」等于没加。
+   所以先把常规项**降**回 400（重音靠其余项变轻才成立），与列表同一判据。 */
 .whc-attr b {
+  font-weight: 400;
   color: var(--el-text-color-primary);
   font-variant-numeric: tabular-nums;
 }
+/* 占比最大的一类：类别与数字一起加重音 — — 与列表「时间去向」列同一判据。 */
+.whc-attr.whc-hi { color: var(--el-text-color-primary); font-weight: 700; }
+.whc-attr.whc-hi b { font-weight: 700; }
 
 /* 清单：按天一条，具体的事才勾得起回忆 */
 .whc-days { display: flex; flex-direction: column; max-height: 320px; overflow: auto; }

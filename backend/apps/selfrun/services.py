@@ -22,6 +22,9 @@ from django.utils import timezone
 
 from .constants import (
     BACKFILL_WARN_DAYS,
+    DAY_CELL_BACKFILL_DAYS,
+    DAY_CELL_SETTLE_DAYS,
+    DAY_QUADRANT_LABEL,
     MODULE_VALUE_WHITELIST,
     MONTHLY_QUESTION_COUNT,
     MONTHLY_QUESTION_KEYS,
@@ -41,8 +44,9 @@ from .constants import (
     TARGET_SOURCE_SINGLE,
 )
 from .models import (
-    SelfRunCheckin, SelfRunMetric, SelfRunMetricLog, SelfRunMetricPlan,
-    SelfRunPeriod, SelfRunPoolInject, SelfRunStage, SelfRunTemplate,
+    SelfRunCheckin, SelfRunDayCell, SelfRunMetric, SelfRunMetricLog,
+    SelfRunMetricPlan, SelfRunPeriod, SelfRunPoolInject, SelfRunStage,
+    SelfRunTemplate,
 )
 from .readers import (
     config_fingerprint, period_range, pool_inject_totals, run_reader, temporal_rows,
@@ -83,7 +87,7 @@ def _cmp(value, line, direction):
 def get_open_stage():
     """当前进行中的**叶子**阶段（= 那一个挂 KPI 的）。没有则 `None`。
 
-    🔴 v3.65.0 起阶段可以分两层，所以「全局唯一 open」不成立了：
+    🔴 v3.64.17 起阶段可以分两层，所以「全局唯一 open」不成立了：
        长阶段与它的小阶段会**同时**处于 open。本函数只回答
        「**哪一层在跑 KPI**」—— 期判定、当期目标、心跳、归档全都只认这一层。
 
@@ -146,7 +150,7 @@ def list_stages(kind=STAGE_KIND_RUN, status=None, shape=None):
       · `record` —— 只记一笔的人生阶段；
       · `all` —— 两者都要（阶段总览页专用）。
 
-    `shape`（沿用 v3.65.0 的分层判据，只在 `kind='run'` 下有意义）：
+    `shape`（沿用 v3.64.17 的分层判据，只在 `kind='run'` 下有意义）：
       · `leaf` —— 有 active KPI 的叶子（「哪一层在跑 KPI」）；
       · `long` —— 顶级 + 零 KPI 的长阶段。
     """
@@ -916,7 +920,7 @@ def create_stage(payload):
       + `Metric × N`
       + `MetricLog × N`（`created` —— 「创建」也是「一次配置变更」）
 
-    v3.65.0 起两种形态，**必须由调用方显式声明**（见下方 `is_long_stage`）：
+    v3.64.17 起两种形态，**必须由调用方显式声明**（见下方 `is_long_stage`）：
 
     | 形态 | `is_long_stage` | `parent` | `metrics` | 写几张表 |
     |---|---|---|---|---|
@@ -2143,6 +2147,27 @@ def _build_blocks(rows, attr):
     return blocks, span, truncated
 
 
+def _attr_totals(rows, attr):
+    """按 L1 归因（成长 / 体验 / 维持 / 流失）汇总小时，顺序取 `ATTRIBUTION_ORDER`。
+
+    🔴 **唯一实现**，两个调用方：抽屉里那张卡的顶部（`what_happened.attr_totals`）
+       与历史复盘列表的「时间去向」列（`period_time_use`）。两处各写一份，
+       就一定会在某个边界上分叉（睡眠类排在哪一步、`未归类` 怎么兜底），
+       而分叉不报错 —— 列表写 44.6h、点进去写 47.2h，看着像「归档后补记了」。
+    """
+    from apps.temporal.constants import ATTRIBUTION_ORDER
+
+    by_attr = {}
+    for r in rows:
+        k = attr.get(r.task_name) or '未归类'
+        by_attr[k] = by_attr.get(k, 0.0) + float(r.duration_hours or 0)
+    order = {k: i for i, k in enumerate(ATTRIBUTION_ORDER)}
+    return [
+        {'label': k, 'hours': round(v, 1)}
+        for k, v in sorted(by_attr.items(), key=lambda x: order.get(x[0], 99))
+    ]
+
+
 def _what_happened(rows, attr, excluded, start, end):
     """「这一周我做了什么」——按**本地日期**分组，每天取时长最长的几件。
 
@@ -2161,7 +2186,7 @@ def _what_happened(rows, attr, excluded, start, end):
        两套都从这里出，不各写一份取数：一旦分成两个函数，「这周做了什么」
        就会在列表和图里给出两组不同的记录（铁律「同一事实一把尺子」）。
     """
-    from apps.temporal.constants import ATTRIBUTION_ORDER, WEEKDAY_LABELS
+    from apps.temporal.constants import WEEKDAY_LABELS
 
     rows = [r for r in rows if r.task_name not in excluded]
 
@@ -2196,15 +2221,7 @@ def _what_happened(rows, attr, excluded, start, end):
             'more': max(len(ranked) - WHAT_HAPPENED_PER_DAY, 0),
         })
 
-    by_attr = {}
-    for r in rows:
-        k = attr.get(r.task_name) or '未归类'
-        by_attr[k] = by_attr.get(k, 0.0) + float(r.duration_hours or 0)
-    order = {k: i for i, k in enumerate(ATTRIBUTION_ORDER)}
-    attr_totals = [
-        {'label': k, 'hours': round(v, 1)}
-        for k, v in sorted(by_attr.items(), key=lambda x: order.get(x[0], 99))
-    ]
+    attr_totals = _attr_totals(rows, attr)
 
     blocks, span, truncated = _build_blocks(rows, attr)
 
@@ -2229,6 +2246,76 @@ def _what_happened(rows, attr, excluded, start, end):
         'span': span,
         'truncated': truncated,
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# 历史复盘列表的「时间去向」（v3.64.67 · 只读现算，不落库）
+# ══════════════════════════════════════════════════════════════
+
+def period_time_use(periods):
+    """给历史复盘列表的每一期补上「这段时间花在哪」的归因合计。
+
+    回答的是「W45 那周我到底在干什么」—— 不看钱、不看 KPI，只看四类时间的
+    多少。它必须出现在**列表**上：逐期点开抽屉读一行小字，等于没有这个信息。
+
+    🔴 **一次取数、逐期分组**：列表默认取近 100 期，按期逐个调 `temporal_rows()`
+       就是 100 次区间扫描（外加 100 次 `TaskMeta` 全表）。它们的窗口本来首尾
+       相接，取 `[最早起, 最晚止)` 一次就够，再按**本地日期**判归属 ——
+       日期口径与 `_what_happened` 逐字相同（`localtime` 后再取 `.date()`）。
+
+    🔴 与抽屉里 `what_happened.attr_totals` **同源**：`_attr_totals` + 同一份
+       `contrib_excluded_names()`（睡眠类两边都排掉）。列表写 44.6h、点进去写
+       47.2h 是最坏的一种错 —— 它看起来像「归档后又补记了」。
+
+    ⚠️ 这是**现算**值，不属于归档快照：补记时间后，历史各期这一列会跟着变。
+       同屏的「判定 / 分数」才是冻结的 —— 表头必须说清（否则两个数各说各话）。
+
+    返回 `{period_id: {'attr_totals': [...], 'total_hours': x, 'day_count': n}}`。
+    该期一条时间记录都没有 ⇒ `attr_totals=[]`、`total_hours=0.0` ——
+    这是**真 0**（「那段时间没记」是事实），不是「取不到」，所以不给 `None`。
+    """
+    from apps.temporal.services import contrib_excluded_names, resolve_attribution
+
+    periods = [p for p in periods if p.period_start and p.period_end]
+    if not periods:
+        return {}
+
+    start = min(p.period_start for p in periods)
+    end = max(p.period_end for p in periods)
+    rows = [
+        r for r in temporal_rows({}, start, end)
+        if r.start_time is not None and r.task_name not in contrib_excluded_names()
+    ]
+    names = sorted({r.task_name for r in rows})
+    attr = resolve_attribution(names) if names else {}
+
+    # 本地日期 → 当天的记录。一条记录只分一次桶，之后各期只是「取自己那几天」——
+    # 周与月在「全部」筛选下会重叠，同一条记录被两个期读到是对的（两行各答各的窗口）。
+    by_day = {}
+    for r in rows:
+        by_day.setdefault(timezone.localtime(r.start_time).date(), []).append(r)
+
+    out = {}
+    for p in periods:
+        mine = []
+        d = p.period_start
+        while d < p.period_end:
+            got = by_day.get(d)
+            if got:
+                mine.extend(got)
+            d += dt.timedelta(days=1)
+        totals = _attr_totals(mine, attr)
+        out[p.id] = {
+            'attr_totals': totals,
+            # 合计 = **显示精度下各项之和**，不是原始和再取整 ——
+            # 这一列用户唯一能自查的就是「四个数加起来等于合计」，
+            # 拿原始值取整会让它对不上（铁律：会被加总的格子）。
+            'total_hours': round(sum(t['hours'] for t in totals), 1),
+            'day_count': len({
+                timezone.localtime(r.start_time).date() for r in mine
+            }),
+        }
+    return out
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2313,11 +2400,16 @@ def _period_outcomes(start, end, done_milestones):
         })
 
     # ② 完成了里程碑（口径见 `compute_period_extras` docstring：本期该交且已交）
+    # ⚠️ `self_review` 带下来是**空串**，不是 `null`：这列在模型上 `default=''`，
+    #    空串 = 「这条完成没留下批阅」（历史数据 + 按日程打卡推进的），
+    #    `null` 才表示「取不到」。前端只渲染有值的那一行，不做「未填」占位 ——
+    #    九十多条历史完成会变成满屏「未填」，那是把缺省说成缺陷。
     milestone_items = [
         {
             'id': m.id,
             'title': m.title,
             'goal': m.goal.title if m.goal_id else '',
+            'self_review': m.self_review or '',
             **_md_weekday(m.target_date),
         }
         for m in reversed(done_milestones)
@@ -2801,3 +2893,126 @@ def set_pool_inject(bill_id, marked):
     else:
         SelfRunPoolInject.objects.filter(bill_id=bill_id).delete()
     return bill_id, bool(marked)
+
+
+# ══════════════════════════════════════════════════════════════
+# 十、「今天」的日结（v3.64.76）
+#
+# 🔴 这张表只存「走了哪一格、成没成、那句话」。候选与计数**一律现算**
+#    （`today.py`）—— 落库就成了第二份真源，迟早跟 goals / inbox / works 漂移。
+#
+# 🔴 三个动作共用一条约束：**一天只有一格**。
+#    · 定档（POST）挡重复（409，不幂等更新 —— 静默覆盖会让「改过」无痕）
+#    · 改档（PATCH quadrant）只准**当天**：昨天定了就定了，这是约束力的来源
+#    · 结算（PATCH outcome）给 7 天窗口：成没成要过一夜才看得清
+# ══════════════════════════════════════════════════════════════
+
+class DayCellError(SelfRunError):
+    """带**原因码**的 400/409 —— 前端按 `code` 查表，不按文案猜。
+
+    ⚠️ `extra` 只放 JSON 能直接序列化的东西（数字/字符串），
+       不放模型实例 —— 那会让错误响应依赖某个序列化器的实现。
+    """
+
+    def __init__(self, code, message, status_code=400, extra=None):
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.extra = extra or {}
+
+
+def get_day_cell(day):
+    """那一天定了哪一格；没定返回 `None`（**不是**造一个空对象）。"""
+    return SelfRunDayCell.objects.filter(cell_date=day).first()
+
+
+def create_day_cell(*, cell_date, quadrant, note='', today=None):
+    """定档（每个 `cell_date` 只允许一次）。
+
+    `is_backfilled` 由**日期差**算，不由调用方传 —— 传进来就能撒谎。
+    """
+    today = today or timezone.localdate()
+    if quadrant not in DAY_QUADRANT_LABEL:
+        raise DayCellError('bad_quadrant', f'没有「{quadrant}」这一格')
+    if cell_date > today:
+        raise DayCellError('future_date', '不能给未来的某天定档')
+    days = (today - cell_date).days
+    if days > DAY_CELL_BACKFILL_DAYS:
+        raise DayCellError(
+            'too_late', f'只能补最近 {DAY_CELL_BACKFILL_DAYS} 天，再往前就不叫补记了',
+        )
+
+    existing = get_day_cell(cell_date)
+    if existing is not None:
+        # 🔴 不改成幂等更新：那样「今天是不是改过」就无痕了，
+        #    而这一天只有一格，改没改过是这件事的全部信息。
+        raise DayCellError(
+            'already_set',
+            f'{cell_date.isoformat()} 已经定过「{existing.get_quadrant_display()}」了',
+            status_code=409,
+            extra={'cell_id': existing.pk},
+        )
+
+    return SelfRunDayCell.objects.create(
+        cell_date=cell_date, quadrant=quadrant, note=note,
+        is_backfilled=days > 0,
+    )
+
+
+def update_day_cell(cell, *, quadrant=None, outcome=None, today=None):
+    """改档 / 结算。返回 `(cell, changed)` —— `changed` 是**真的变了**的字段。"""
+    today = today or timezone.localdate()
+    if quadrant is None and outcome is None:
+        raise DayCellError('empty_patch', '没有要改的东西')
+
+    changed = []
+    if quadrant is not None:
+        if quadrant not in DAY_QUADRANT_LABEL:
+            raise DayCellError('bad_quadrant', f'没有「{quadrant}」这一格')
+        if cell.cell_date != today:
+            raise DayCellError(
+                'locked',
+                f'{cell.cell_date.isoformat()} 已经过去了，那一格改不动了',
+            )
+        if quadrant != cell.quadrant:
+            cell.quadrant = quadrant
+            changed.append('quadrant')
+            # 🔴 改成风干时把结算清掉：风干不问「成没成」。
+            #    不清的话，先前结的 done/missed 会挂在一格叫「今天不排活」的记录上，
+            #    周色带于是显示「风干 · 成了」—— 自相矛盾，而且没人知道该改哪边。
+            if quadrant == 'rest' and cell.outcome:
+                cell.outcome = ''
+                changed.append('outcome')
+
+    if outcome is not None:
+        if cell.quadrant == 'rest':
+            raise DayCellError('rest_not_settled', '风干不结算 —— 休了就是休了')
+        days = (today - cell.cell_date).days
+        if days > DAY_CELL_SETTLE_DAYS:
+            raise DayCellError(
+                'too_late', f'过了 {DAY_CELL_SETTLE_DAYS} 天就不再问「成没成」了',
+            )
+        if outcome != cell.outcome:
+            cell.outcome = outcome
+            changed.append('outcome')
+
+    if changed:
+        cell.save(update_fields=changed + ['updated_at'])
+    return cell, changed
+
+
+def latest_unsettled_cell(today):
+    """最近一条「定了、还没结算、且不是风干」的格子（7 天内）。
+
+    🔴 不收窄到「只看昨天」：昨天没定档、前天定了没结算时，按字面实现
+       那一格就**永远不会被问到**，周色带上永久留一个「未结算」，
+       而系统同时不给任何出口 —— 那不是不追债，是丢记录。
+    """
+    start = today - dt.timedelta(days=DAY_CELL_SETTLE_DAYS)
+    return (
+        SelfRunDayCell.objects
+        .filter(cell_date__lt=today, cell_date__gte=start, outcome='')
+        .exclude(quadrant='rest')
+        .order_by('-cell_date')
+        .first()
+    )

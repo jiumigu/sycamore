@@ -210,16 +210,46 @@
       :period-key="view.key"
     />
 
+    <!-- ── ⑦ 这一周每天走的哪一格（v3.64.77）────────────────
+         只在本周页出现：7 格表示不了 30 天，月页摆一条 7 格色带会被读成
+         「这个月」，那是最容易骗过自己的一种排版。
+         🔴 与上面的判定卡是**两把尺子** —— 色带不参与判定、不进档位。
+         翻到历史周时画的是**那一周**，不是「最近 7 天」。 -->
+    <div v-if="periodType === 'weekly'" class="pp-week-band">
+      <DayWeekStrip
+        v-if="weekBand"
+        :days="weekBand.days"
+        :summary="weekBand.summary"
+        :legend="weekBand.legend"
+        :today="weekBand.end === todayStr ? todayStr : ''"
+      />
+      <div v-else-if="weekBandFailed" class="pp-week-fail">
+        这一周的色带没取到
+        <el-button link size="small" type="primary" @click="loadWeekBand">重试</el-button>
+      </div>
+      <!-- 色带的出口（v3.64.80）：七个方块是**只读**的，定档与结算都在「今天」页。
+           没有这句时，色带是一个看得见、点不动的死胡同 —— 用户在这一页问过
+           「定档入口在哪」。只在**本周**出现：翻到历史周时今天不在这一段里。 -->
+      <div v-if="bandCta" class="pp-week-cta">
+        {{ bandCta.text }}
+        <el-button link size="small" type="primary" @click="goToday">{{ bandCta.act }}</el-button>
+      </div>
+    </div>
+
     <ComposeDialog v-model="composeVisible" @done="() => {}" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import ReadingCard from '../components/ReadingCard.vue'
 import WhatHappenedCard from '../components/WhatHappenedCard.vue'
+import DayWeekStrip from '../components/DayWeekStrip.vue'
+import { getDayWeek } from '../api/selfrunApi'
+import { todayLocal, shiftDate } from '@/shared/utils/datetime'
 import { useSelfRunStore } from '../stores/selfrunStore'
 // 「这周留下了什么」扁条要读作品库 —— 这是自我运转与作品的**唯一接合点**。
 // ⚠️ 作品有自己的 store（它跨四个模块取来源，不属于自我运转）。
@@ -230,7 +260,7 @@ import {
   FALLBACK_COLOR, MONTHLY_QUESTION_COUNT, MONTHLY_QUESTIONS, PERIOD_PREFIX,
   PERIOD_STATUS_LABEL, periodStatusLabel,
 } from '../types/selfrunTypes'
-import type { AnswerSheet, PeriodType, Reading, SelfRunMetric } from '../types/selfrunTypes'
+import type { AnswerSheet, DayWeekPayload, PeriodType, Reading, SelfRunMetric } from '../types/selfrunTypes'
 
 const props = defineProps<{
   periodType: PeriodType
@@ -242,6 +272,7 @@ const emit = defineEmits<{ (e: 'changed'): void }>()
 
 const store = useSelfRunStore()
 const workStore = useWorkStore()
+const router = useRouter()
 const closing = ref(false)
 const savingAnswers = ref(false)
 const skippedIds = ref<number[]>([])
@@ -265,6 +296,72 @@ const loading = computed(() => store.loading)
  *    归档后仍可写**只有** `review_text` / `answer_sheet`（记忆型 ≠ 数据型）。
  */
 const canEdit = computed(() => props.editable && !isClosed.value)
+
+// ── 色带（这一周每天走的哪一格）────────────────────────────────
+const weekBand = ref<DayWeekPayload | null>(null)
+/** 取不到时**说出来**。空着不画与「这周没定过档」长得一样，那是另一句话。 */
+const weekBandFailed = ref(false)
+const todayStr = todayLocal()
+
+/**
+ * 色带的最后一天：这一期末日与今天的**较小者**。
+ *
+ * `period_end` 是「含起不含止」的下一个周期起点，所以要减一天才是这一期
+ * 真正走过的最后一天。
+ *
+ * 🔴 不能直接传今天：周一早上打开系统、而后端的「当前期」还停在上周时，
+ *    色带若画「最近 7 天」，就会把上周的格子和本周还没走的日子混在一起 ——
+ *    而这一段与「上周」在同一屏上并排出现，看不出来。
+ *    取较小者：期已过完就画到期末，期还没过完就画到今天。
+ */
+const weekEnd = computed(() => {
+  const p = period.value
+  if (!p) return ''
+  const last = shiftDate(p.period_end, -1)
+  return last < todayStr ? last : todayStr
+})
+
+async function loadWeekBand() {
+  if (props.periodType !== 'weekly' || !weekEnd.value) return
+  weekBandFailed.value = false
+  try {
+    weekBand.value = (await getDayWeek(weekEnd.value)).data
+  } catch {
+    weekBand.value = null
+    weekBandFailed.value = true
+  }
+}
+
+watch([weekEnd, () => props.periodType], loadWeekBand, { immediate: true })
+
+/**
+ * 色带下面那一句出口（v3.64.80）。
+ *
+ * 🔴 色带本身**不做点击**：七个 16px 的方块表达的是「这几天各走了哪一格」，
+ *    一旦能点，就分不清「点它是定档」还是「点它是查看那天」；而且它出现在
+ *    两个页面上，行为却只在本周页有意义。
+ *    可这个死胡同是真的：用户在这条色带下面问「定档入口在哪」。
+ *    所以指路，不改语义 —— 定档和结算都只有「今天」页那一处。
+ *
+ * 只在**本周**出现（`w.end === todayStr`）：翻到历史周时今天不在这一段里，
+ * 给一个「去今天定档」的按钮会把人从正在看的旧周带走。
+ */
+const bandCta = computed(() => {
+  const w = weekBand.value
+  if (!w || w.end !== todayStr) return null
+  const d = w.days.find((x) => x.date === todayStr)
+  if (!d) return null
+  if (!d.quadrant) return { text: '今天还没定档', act: '去选一格' }
+  // 风干不结算（它没有「成没成」），所以只有其余三格才提示结算
+  if (d.quadrant !== 'rest' && !d.outcome) {
+    return { text: '今天这一格走过了，还没结算', act: '去结算' }
+  }
+  return null
+})
+
+function goToday() {
+  router.push('/selfrun/today')
+}
 
 /** 月度三问里还没答的个数（按本地编辑态算 —— 归档提交的就是这份 `answers`） */
 const unansweredCount = computed(() => {
@@ -477,4 +574,15 @@ function onChanged() {
 .pp-tip { max-width: 340px; font-size: 12px; line-height: 1.8; }
 .pp-tip p { margin: 0 0 6px; }
 .pp-tip p:last-child { margin-bottom: 0; }
+
+/* 色带：7 个方块的样式在 `DayWeekStrip.vue`（唯一实现），这里只管间距 */
+.pp-week-band { margin-top: 16px; }
+.pp-week-fail { font-size: 12px; color: var(--el-text-color-secondary); }
+/* 色带出口：缩进对齐色带左边缘（`.dws-band` 没有左内边距），
+   12px 正文 + 一个链接按钮 —— 它是一句说明，不是第二个主按钮。 */
+.pp-week-cta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
 </style>

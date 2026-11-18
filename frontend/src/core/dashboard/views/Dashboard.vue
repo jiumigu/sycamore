@@ -71,6 +71,13 @@
       </el-col>
     </el-row>
 
+    <!-- 今天走哪一格（v3.64.77）：整屏**唯一**回答「今天做什么」的卡。
+         🔴 放在「今天的三条线」之上：那三条是护栏（别过度），
+            这一张是方向（先做哪件）。打开系统第一眼该看到方向。
+         🔴 只显示已选的那一格与前 2 件，**不显示四格选择器** ——
+            定档要在整页里做，仪表盘上顺手点掉的一下，第二天不会有印象。 -->
+    <TodayFocusCard />
+
     <!-- 今天的三条线（v3.64.13）：睡眠 / 午睡 / 流失
          🔴 放在「自我运转」之上：那一张是**周**尺子（这周有没有在动），
             这一张是**今天**（今天有没有过度）。裸辞后最先滑坡的是当天，
@@ -176,6 +183,7 @@ import { getYearlyOverview } from '@/modules/summary/api/summaryApi'
 import { getWeekCount, getWeekStats } from '@/modules/temporal/api/temporalApi'
 import { getRandomRetro } from '@/modules/summary/api/summaryApi'
 import SelfRunCard from '@/modules/selfrun/components/SelfRunCard.vue'
+import TodayFocusCard from '@/modules/selfrun/components/TodayFocusCard.vue'
 import RunwayCard from '@/modules/selfrun/components/RunwayCard.vue'
 import DailyGuardCard from '@/modules/temporal/components/DailyGuardCard.vue'
 import QuoteCard from '@/modules/toolkit/components/QuoteCard.vue'

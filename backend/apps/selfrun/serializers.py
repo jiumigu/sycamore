@@ -11,13 +11,14 @@
 from rest_framework import serializers
 
 from .constants import (
-    AGG_CHOICES, DIRECTION_CHOICES, METRIC_STATUS_CHOICES, PAUSE_REASON_CHOICES,
+    AGG_CHOICES, DAY_OUTCOME_CHOICES, DAY_QUADRANT_CHOICES, DIRECTION_CHOICES,
+    METRIC_STATUS_CHOICES, PAUSE_REASON_CHOICES,
     PERIOD_STATUS_CHOICES, PERIOD_TYPE_CHOICES, PLAN_SCOPE_CHOICES,
     SOURCE_KIND_CHOICES, STAGE_STATUS_CHOICES,
 )
 from .models import (
-    SelfRunCheckin, SelfRunMetric, SelfRunMetricLog, SelfRunMetricPlan,
-    SelfRunPeriod, SelfRunStage, SelfRunTemplate,
+    SelfRunCheckin, SelfRunDayCell, SelfRunMetric, SelfRunMetricLog,
+    SelfRunMetricPlan, SelfRunPeriod, SelfRunStage, SelfRunTemplate,
 )
 
 
@@ -158,6 +159,28 @@ class SelfRunPeriodSerializer(serializers.ModelSerializer):
         if not obj.status:
             return '进行中'
         return dict(PERIOD_STATUS_CHOICES).get(obj.status, obj.status)
+
+
+class SelfRunPeriodListSerializer(SelfRunPeriodSerializer):
+    """历史复盘**列表**项 = 周期快照 + 这一期的「时间去向」（v3.64.67）。
+
+    🔴 为什么另开一个、而不是直接加在 `SelfRunPeriodSerializer` 上：那个类还被
+       归档 / 重开 / 补写 / 阶段详情用，那些响应里本来就没有这份现算数据 ——
+       加在那里会让同一个键在有些响应里是 `null`、有些是对象；而 `null` 会被
+       前端读成「这一期没记录」，与「这个接口没算」混成一件事
+       （`null`≠`0`≠「取不到」，三种状态不能压成两种）。
+
+    数据由视图**一次算好**塞进 `context['time_use']`（`services.period_time_use`）——
+    在 `get_time_use` 里逐个 `obj` 去查库，就退回「N 期 N 次扫表」了。
+    """
+
+    time_use = serializers.SerializerMethodField()
+
+    class Meta(SelfRunPeriodSerializer.Meta):
+        fields = '__all__'
+
+    def get_time_use(self, obj):
+        return (self.context.get('time_use') or {}).get(obj.id)
 
 
 class SelfRunCheckinSerializer(serializers.ModelSerializer):
@@ -422,6 +445,50 @@ class PlanSetSerializer(serializers.Serializer):
     goal_why = serializers.CharField(max_length=200, required=False, allow_blank=True)
     floor_why = serializers.CharField(max_length=200, required=False, allow_blank=True)
     note = serializers.CharField(max_length=200, required=False, allow_blank=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# 日结（「今天」四格）—— v3.64.76
+# ══════════════════════════════════════════════════════════════
+
+class SelfRunDayCellSerializer(serializers.ModelSerializer):
+    """一条日结。
+
+    🔴 `outcome=''` = **还没结算**，不是「没成」。前端按空串分流，
+       不许用 `!outcome` 把「没结算」和「没成」当同一件事。
+    """
+
+    quadrant_label = serializers.CharField(source='get_quadrant_display', read_only=True)
+    outcome_label = serializers.CharField(source='get_outcome_display', read_only=True)
+
+    class Meta:
+        model = SelfRunDayCell
+        fields = (
+            'id', 'cell_date', 'quadrant', 'quadrant_label',
+            'outcome', 'outcome_label', 'note', 'is_backfilled',
+            'created_at', 'updated_at',
+        )
+        read_only_fields = fields
+
+
+class DayCellInputSerializer(serializers.Serializer):
+    """定档入参。`cell_date` 省略 = 今天（由视图填 `timezone.localdate()`）。"""
+
+    cell_date = serializers.DateField(required=False, allow_null=True)
+    quadrant = serializers.ChoiceField(choices=DAY_QUADRANT_CHOICES)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=200)
+
+
+class DayCellPatchSerializer(serializers.Serializer):
+    """改档 / 结算入参。
+
+    🔴 两个字段**都不给默认值**：`outcome` 一旦有默认值，「只传 quadrant」
+       的请求就会顺手把结算改成那个默认值（静默改口径，页面上看不出来）。
+       两个都没传 ⇒ 服务层报 `empty_patch`。
+    """
+
+    quadrant = serializers.ChoiceField(choices=DAY_QUADRANT_CHOICES, required=False)
+    outcome = serializers.ChoiceField(choices=DAY_OUTCOME_CHOICES, required=False)
 
 
 # 供视图层复用的清单（避免两处各写一份）

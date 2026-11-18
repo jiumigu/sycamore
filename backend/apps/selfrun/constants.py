@@ -371,6 +371,66 @@ OPEN_STAGE_STATUSES = ('active', 'paused')
 #    于是**数据上合法、界面上准确**，不必为此再加一个状态值。
 RECORD_STAGE_STATUS = 'closed'
 
+# ══════════════════════════════════════════════════════════════
+# 七、「今天」四格（播种 / 收割 / 疏苗 / 风干）—— v3.64.75
+#
+# 🔴 这一组**不参与任何判定**：不进 `PERIOD_VERDICT_BANDS`、不进 KPI、
+#    不被 temporal 的 L1 归因读取。它的唯一用途是「今天走哪一格」。
+#    四格是**当天主调**，六词是**事后归因** —— 两把尺子，不互为输入。
+#
+# 🔴 标签只放二字词（2026-09-18 定的命名标准：口语可直说、不要括号注解）。
+#    每个格子的解释放首次进入的气泡，不放标题。
+# ══════════════════════════════════════════════════════════════
+
+DAY_QUADRANT_CHOICES = [
+    ('sow', '播种'),      # 为以后做的，今天看不到结果
+    ('reap', '收割'),     # 今天能交出去、能看见结果
+    ('tend', '疏苗'),     # 收拾、清理、维持系统运转
+    ('rest', '风干'),     # 今天不排活
+]
+
+DAY_QUADRANT_LABEL = dict(DAY_QUADRANT_CHOICES)
+
+# 结算只有两值：风干不问「成没成」（`quadrant == 'rest'` 时不发结算提示，
+# 🔴 不落一个 `na` 值 —— 多一个值就多一个需要解释的状态）。
+DAY_OUTCOME_CHOICES = [
+    ('done', '成了'),
+    ('missed', '没成'),
+]
+
+DAY_OUTCOME_LABEL = dict(DAY_OUTCOME_CHOICES)
+
+# 阈值（只此一份，前端 0 个数字）
+DAY_CELL_BACKFILL_DAYS = 7      # 补记窗口：超过 7 天不给补，避免回溯编造
+DAY_CELL_CANDIDATE_LIMIT = 3    # 每格最多给 3 件
+DAY_WEEK_DAYS = 7               # 周色带恒 7 格
+
+# 结算窗口：那天过去 7 天就不再问「成没成」。
+# 🔴 与补记窗口现在都是 7，但它们是**两件事**的尺子（记一次 / 判成没成），
+#    所以分成两个常量 —— 将来只调其中一个时，不会连带改掉另一条的语义。
+DAY_CELL_SETTLE_DAYS = 7
+
+# 四格配色：沿用书里的红/蓝/绿/黑。
+# ⚠️ 只准出现在「今天」这一页，**不做成全局 token**。财务侧的「红涨绿跌」
+#    是涨跌语义，这里红/蓝/绿/黑是四类劳动 —— 不同页面不同语义，不冲突。
+DAY_QUADRANT_COLORS = {
+    'sow': '#B4553F',
+    'reap': '#3D6B8E',
+    'tend': '#4A6F4E',
+    'rest': '#4A4A4A',
+}
+
+# 空态原因码：后端给码，前端只查表拼文案（文案写死就是零态）。
+#   `null`          有候选
+#   `no_focus`      播种格没有「当前这本」（但可能有里程碑）
+#   `no_candidates` 这一类今天真的没有活
+#   `all_empty`     四格全空（只在首屏给：有候选的格子自己说自己的事）
+DAY_EMPTY_NO_FOCUS = 'no_focus'
+DAY_EMPTY_NO_CANDIDATES = 'no_candidates'
+DAY_EMPTY_ALL = 'all_empty'
+
+DAY_WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
 # 归档后**只读**的 Period 字段（序列化器用同一份，避免两处清单漂移）
 PERIOD_FROZEN_FIELDS = (
     'readings',

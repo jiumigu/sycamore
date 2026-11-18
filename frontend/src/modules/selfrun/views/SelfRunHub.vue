@@ -17,24 +17,27 @@
         <!-- ⚠️ 账本页不显示这个状态标签：页头此刻说的是要看的那个**长阶段**，
              而 `stage` 指的是「正在跑的那个小阶段」—— 两者不是一回事，
              并排放在一行会被读成同一个阶段的两个状态。长阶段自己的状态在账本卡里。 -->
-        <el-tag v-if="stage && !isLedger" size="small" :type="stageTagType" effect="plain">{{ stage.status_display }}</el-tag>
+        <!-- ⚠️ 「今天」页不显示阶段状态与区间：那一页不参与 KPI，
+             把阶段口径摆上去等于暗示「今天选的格子也要被考核」。 -->
+        <el-tag v-if="stage && !isLedger && !isToday" size="small" :type="stageTagType" effect="plain">{{ stage.status_display }}</el-tag>
         <!-- 🔴 区间必须在页头：它下面每一块的数字都落在这一段里
              （「计入 2 周 + 2 残缺」就是阶段起于周中造成的）。
              曾经这里只印 `days_label`，而那时它的未开始分支是「未开始 · 11-01 起」
              —— 整页**只有起点、没有终点**。 -->
-        <span v-if="stage && !isLedger" class="sh-sub">
+        <span v-if="stage && !isLedger && !isToday" class="sh-sub">
           {{ stage.name }} · {{ stage.range_label }} · {{ stage.days_label }} · {{ stage.metric_count }} 条 KPI
         </span>
       </div>
       <div class="header-actions">
-        <el-button v-if="heartbeat?.message && !isLedger" text size="small" @click="doHeartbeat">
+        <el-button v-if="heartbeat?.message && !isLedger && !isToday" text size="small" @click="doHeartbeat">
           <el-icon><Bell /></el-icon>{{ heartbeat.message }}
         </el-button>
-        <!-- 暂停/恢复是对「正在跑的那个阶段」的动作，账本页不提供：那页不碰 KPI，也不碰阶段状态 -->
-        <el-button v-if="!isLedger && stage && stage.status === 'active'" size="small" @click="pauseVisible = true">
+        <!-- 暂停/恢复是对「正在跑的那个阶段」的动作，账本页与「今天」页都不提供：
+             账本不碰 KPI、不碰阶段状态；今天页与阶段无关（没有阶段也要能用）。 -->
+        <el-button v-if="!isLedger && !isToday && stage && stage.status === 'active'" size="small" @click="pauseVisible = true">
           暂停阶段
         </el-button>
-        <el-button v-else-if="!isLedger && stage && stage.status === 'paused'" size="small" type="success" @click="doResume">
+        <el-button v-else-if="!isLedger && !isToday && stage && stage.status === 'paused'" size="small" type="success" @click="doResume">
           恢复
         </el-button>
         <el-button size="small" @click="reload">刷新</el-button>
@@ -48,6 +51,28 @@
             摆出页签只会让人点进去看到空。
          ⚠️ 与上面那 8 条路由指向同一个组件，但走的是 `v-if` 的另一支：
             页签整体不渲染（见下方 `<template v-else>`）。 -->
+    <!-- ── 账本页的平级出口（v3.64.70）─────────────────────────────
+         🔴 问题：账本**不是页签里的第六格**（长阶段不产生 `Period` ⇒ 本周/本月/
+            按期修订/归档在这页一件都做不了，见下方 v-if 的说明），于是它也吃不到
+            「点页签换页」那条通路 —— 从页头下拉进来后，整页没有一处能去
+            制定配置 / 周 / 月 / 复盘，唯一出口是页头那个下拉，等于把人关在这一页。
+         🔴 修法只给**平级快捷方式**，不摆页签：页签摆出来会亮在「无」上
+            （账本不属于任何一格），读起来像「六格全都点不了」。
+         🔴 走显式路由（`goTab`），禁 `router.back()`：从页头下拉直接进来时没有历史。
+         ⚠️ 文案不许写「这一段路的 KPI」：周 / 月 / 复盘认的是**当前在跑的那个
+            小阶段**，与这里用下拉挑的某段长阶段不一定是同一段。
+         ⚠️ 必须放在 `<StageLedgerPanel v-if>` **之前** —— 它与后面的
+            `<template v-else>` 是一对，中间插东西会把这条链拆断。 -->
+    <div v-if="isLedger" class="sh-parent sh-nav">
+      <span class="sh-parent-hint">
+        账本只讲这一段路（钱 / 时间 / 作品）；周、月、复盘是<b>小阶段</b>的事：
+      </span>
+      <el-button link size="small" class="sh-nav-link" @click="goTab('setup')">制定配置</el-button>
+      <el-button link size="small" class="sh-nav-link" @click="goTab('week')">本周状态</el-button>
+      <el-button link size="small" class="sh-nav-link" @click="goTab('month')">本月状态</el-button>
+      <el-button link size="small" class="sh-nav-link" @click="goTab('review')">历史复盘</el-button>
+    </div>
+
     <StageLedgerPanel v-if="isLedger" ref="ledgerRef" />
 
     <template v-else>
@@ -56,7 +81,9 @@
             `back()` 会把人送出模块（本项目老坑）。
          ⚠️ 只有在 `parent` 存在时才出现 —— 顶级阶段没有上级，
             印一句「属于：无」比不印更糊涂。 -->
-    <div v-if="stage?.parent" class="sh-parent">
+    <!-- ⚠️ 「今天」页不显示：它读的是 goals / inbox / works / book，与这段路无关，
+         点「返回」会把人带去一个跟今天要做的事没有关系的页面。 -->
+    <div v-if="stage?.parent && !isToday" class="sh-parent">
       <el-button link size="small" class="sh-parent-back" @click="goParent">
         <el-icon><ArrowLeft /></el-icon>返回「{{ stage.parent_name }}」
       </el-button>
@@ -70,8 +97,11 @@
       :description="`自 ${stage.paused_since ?? '—'} 起${stage.resume_at ? `，预计 ${stage.resume_at} 恢复` : ''}。周期照常流转，归档时这一期判「休耕」—— 休耕不是失败。`"
     />
 
-    <!-- ── 两把尺子**并列**（只有跑着阶段时才有读数）──────── -->
-    <template v-if="stage">
+    <!-- ── 两把尺子**并列**（只有跑着阶段时才有读数）────────
+         🔴 「今天」页不摆：四格明确**不参与任何判定**，而这两把尺子写着
+            「周量有没有在动、月量动出结果没有」—— 并排摆着，读起来就是
+            「今天选的格子也要被考核」。口径矛盾的暗示比不显示更糟。 -->
+    <template v-if="stage && !isToday">
       <div class="sh-rulers">
         <div
           v-for="r in rulers" :key="r.type"
@@ -101,6 +131,16 @@
             否则一进页面 6 个面板会把接口全打一遍。
     -->
     <el-tabs v-model="activeTab" class="sh-tabs" @tab-click="onTabClick">
+      <!-- ⓪ 今天（T0，v3.64.75）—— **每天用的那一格，所以排第一**。
+           位置判据是读频率（高频在前），不是生命周期顺序：它读的是
+           goals / inbox / works / book，**与阶段无关**，没有阶段的人照样要用。
+           ⚠️ 它不参与 KPI：四格是当天主调，六词是事后归因，两把尺子不互为输入。
+           ⚠️ `/selfrun` 的 redirect 仍指向 `week` —— 改默认落地页会让
+              「点开自我运转」的肌肉记忆失效（见 router 里的注释）。 -->
+      <el-tab-pane label="今天" name="today" lazy>
+        <TodayPanel />
+      </el-tab-pane>
+
       <!-- ① 制定配置（T1）—— 生命周期的第一段，唯一能「从零开始」的地方。
 
            🔴 这一页是「配置总台」，**主视图只留一块**（用户 2026-10-13 二轮拍板）：
@@ -349,6 +389,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { TabsPaneContext } from 'element-plus'
 import { ArrowLeft, Bell, QuestionFilled } from '@element-plus/icons-vue'
 import PeriodPanel from './PeriodPanel.vue'
+import TodayPanel from './TodayPanel.vue'
 import PeriodTargetsPanel from './PeriodTargetsPanel.vue'
 import ReviewPanel from './ReviewPanel.vue'
 import StageSummaryPanel from './StageSummaryPanel.vue'
@@ -379,6 +420,7 @@ type SetupView = 'kpi' | 'templates' | 'targets' | 'logs' | 'stages'
  *  ⚠️ 「制定配置」的页内子页面也映射回 `setup` ——
  *     点进去时页签仍亮「制定配置」（那是它们的父页）。 */
 const TAB_OF_ROUTE: Record<string, string> = {
+  'selfrun-today': 'today',
   'selfrun-setup': 'setup',
   'selfrun-setup-templates': 'setup',
   'selfrun-setup-targets': 'setup',
@@ -474,6 +516,18 @@ const editable = computed(() => !!stage.value && stage.value.status !== 'closed'
  *    于是页头天然读成「制定配置 › KPI 模板库」（左边那个回退按钮就是「›」）。
  */
 const pageTitle = computed(() => (route.meta.title as string | undefined) || '自我运转')
+
+/**
+ * 现在在「今天」这一页（T0）。
+ *
+ * 🔴 它决定了页头要**收掉**哪些东西：阶段状态、阶段区间、面包屑、两把尺子、
+ *    心跳与暂停。原因不是「不好看」，是**口径矛盾** ——
+ *    两把尺子写着「周量有没有在动、月量动出结果没有」，四格却明确
+ *    **不参与任何判定**；并排摆着，读起来就是「今天选的格子也要被考核」。
+ *    这一页只讲一件事：今天走哪一格。
+ * ⚠️ 只收页头，不收页签：页签是「去别的页」的路，收了等于把人关在这页。
+ */
+const isToday = computed(() => route.name === 'selfrun-today')
 
 /** 切子页 = 走路由（不另存状态）。页签、页头两把尺子、空态里的按钮都走这一条。 */
 function goTab(tab: string) {
@@ -745,6 +799,17 @@ onMounted(reload)
 .sh-parent-back { font-size: 13px; color: var(--el-text-color-secondary); }
 .sh-parent-back:hover { color: var(--el-color-primary); }
 .sh-parent-hint { font-size: 12px; color: var(--el-text-color-placeholder); }
+
+/* 账本页那条平级出口（v3.64.70）：一句说明 + 四颗 link 按钮。
+   ⚠️ EP 给相邻按钮加了 `margin-left: 12px`，与 `.sh-parent` 的 `gap: 10px` 叠加
+      会让「说明→第一个按钮」与「按钮→按钮」间距不一样 ⇒ 清掉，间距只由 gap 给。 */
+.sh-nav { gap: 4px 10px; }
+.sh-nav .el-button + .el-button { margin-left: 0; }
+/* 这四颗是账本页**唯一的出口**（页签不在这页），所以给主色 ——
+   ⚠️ 与 `.sh-parent-back`（回程，压暗）不同档：那个是往回走、有箭头指路，
+      这几颗是「去别处」，跟说明文字一样灰就会被读成一句话里的几个词。 */
+.sh-nav-link { font-size: 13px; color: var(--el-color-primary); }
+.sh-nav-link:hover { color: var(--el-color-primary-light-3); }
 
 /* 无阶段时那条「为什么空」—— 它留在页面上，不进气泡 */
 .sh-lead { margin: 14px 0 0; }

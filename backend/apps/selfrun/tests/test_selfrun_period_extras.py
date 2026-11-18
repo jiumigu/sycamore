@@ -657,6 +657,35 @@ def test_outcomes_milestones_reuse_goals_items():
 
 
 @pytest.mark.django_db
+def test_outcomes_milestones_carry_the_review_note():
+    """成果卡带下「完成时写的那句批阅」—— 批阅得在它该被读到的时刻自己回来。
+
+    原先只有目标页展开里程碑才看得见：在「今天」页写完那句话，要回看必须
+    「进目标 → 找目标 → 展开 → 找那条」四步，等于没写。
+    """
+    goal = Goal.objects.create(title='目标A', user_id=1, status='in-progress')
+    Milestone.objects.create(
+        goal=goal, title='写了批阅的', status='completed',
+        self_review='难在开头那半天，下次先做十分钟再说',
+        target_date=WEEK_START + dt.timedelta(days=2),
+    )
+    Milestone.objects.create(
+        goal=goal, title='没写批阅的', status='completed',
+        target_date=WEEK_START + dt.timedelta(days=3),
+    )
+
+    items = services.compute_period_extras('weekly', WEEK_START, WEEK_END)[
+        'outcomes'
+    ]['milestones']['items']
+    by_title = {i['title']: i for i in items}
+
+    assert by_title['写了批阅的']['self_review'] == '难在开头那半天，下次先做十分钟再说'
+    # 没写的是**空串**，不是 `None`、也不是缺这个键 ——
+    # 前端 `v-if` 判空即不渲染，不做「未填」占位（九十多条历史会变成满屏红字）。
+    assert by_title['没写批阅的']['self_review'] == ''
+
+
+@pytest.mark.django_db
 def test_outcomes_truncates_but_keeps_full_count():
     """`count` 是全量、`items` 可截断 —— 前端才能说「还有 N 条」。"""
     for i in range(25):

@@ -472,6 +472,21 @@ export interface Heartbeat {
   message: string | null
 }
 
+/** 「这一期的时间去向」——历史复盘**列表**那一列（v3.64.67）。
+ *
+ * 🔴 它是**现算**的（`services.period_time_use`），不属于归档快照：
+ *    补记时间后，历史各期这一列会跟着变；同屏的判定 / 分数才是冻结的。
+ *    两句话必须同时在界面上说得清，否则用户会以为「归档后又变了」。
+ */
+export interface PeriodTimeUse {
+  /** 各归因的小时合计，按价值序（后端给顺序，前端不排） */
+  attr_totals: { label: string; hours: number }[]
+  /** 合计 —— **由后端按「显示精度下各项之和」给**，前端不再加一遍 */
+  total_hours: number
+  /** 有记录的天数（≠ 周期天数） */
+  day_count: number
+}
+
 export interface SelfRunPeriod {
   id: number
   stage: number
@@ -497,6 +512,12 @@ export interface SelfRunPeriod {
   reopen_reason: string
   created_at: string
   updated_at: string
+  /**
+   * **只有列表接口给**（`PeriodListView`）—— 详情 / 归档 / 重开 / 阶段详情
+   * 的响应里没有这个键。
+   * ⚠️ `undefined`（这个接口没算）≠ `attr_totals: []`（这一期真没有时间记录）。
+   */
+  time_use?: PeriodTimeUse
 }
 
 export interface MonthlyAnswer {
@@ -981,6 +1002,21 @@ export function fmt(v: string | number | null | undefined, unit = ''): string {
   return unit ? `${s}${unit}` : s
 }
 
+/**
+ * 「时间去向」里占比最大的那一类 —— **只用于加粗，不产出任何新数值**。
+ *
+ * 六类归因共用同一个分母，所以比 `hours` 就是比占比，不必先算百分比
+ * （算了反而多一处四舍五入，可能造出「两个都是 20%」的假并列）。
+ * 并列最大时都返回 `true`：不替用户挑一个赢家；全 0（真没记）时谁都不加粗。
+ *
+ * 列表（`ReviewPanel`）与抽屉（`WhatHappenedCard`）都调它 —— 同一份六个数，
+ * 换一处摆就得是同一个重音，否则同一个「主要在干什么」在两屏给出两种读法。
+ */
+export function isTopShare(a: { hours: number }, list: { hours: number }[]): boolean {
+  const max = Math.max(...list.map(x => x.hours))
+  return max > 0 && a.hours >= max - 1e-9
+}
+
 /** 一条读数的档位文案：「≥ 12h（目标）/ ≥ 5h（底线）」 */
 export function tierText(r: Reading): string {
   const op = r.direction === 'at_least' ? '≥' : '≤'
@@ -1092,6 +1128,12 @@ export interface OutcomeRow {
   status?: string
   /** 只里程碑有：属于哪个目标 */
   goal?: string
+  /** 只里程碑有：完成时写下的那句批阅。
+   *
+   *  ⚠️ 空串 = 「这条完成没留下批阅」（历史数据、按日程打卡推进的），
+   *     不等于 `null`（取不到）—— 所以前端 `v-if` 判空即不渲染，
+   *     不做「未填」占位：那会把九十多条历史完成变成满屏红字。 */
+  self_review?: string
   date: string
   md: string
   weekday: string
@@ -1155,4 +1197,156 @@ export interface PeriodExtras {
   }
   /** 这一期干成了什么 —— 投入之外的**产出**视角（三栏，不给跨源总数） */
   outcomes: PeriodOutcomes
+}
+
+// ══════════════════════════════════════════════════════════════
+// 今天（四格）—— v3.64.75
+//
+// 🔴 这是 `selfrun/constants.py` 的**副本**：漏改不报错（会落 `|| 兜底`
+//    变成灰块、或少一格的文案）。四格只有这两处，改一处必须看另一处。
+//
+// 🔴 与 KPI 无关：不进 `PERIOD_VERDICT_BANDS`、不上仪表盘的判定口径。
+// ══════════════════════════════════════════════════════════════
+
+export type DayQuadrant = 'sow' | 'reap' | 'tend' | 'rest'
+export type DayOutcome = 'done' | 'missed'
+
+/** 一格的形状。`count` 是**这一格今天给几件**（≤ 3），不是池子总量 ——
+ *  格子上写池子总量等于把「几百件待办」搬回首屏，那正是这一页要避免的事。
+ *  池子规模在 `DayPool.total` 里（点开才看得到）。 */
+export interface DayQuadrantCard {
+  quadrant: DayQuadrant
+  label: string
+  color: string
+  count: number
+  has_candidates: boolean
+  /** 🔴 后端单独给：风干恒 `true`。前端**只**看这个字段决定能否点，
+   *  不许写成 `count > 0` —— 风干的 `count` 恒为 0，那样它永远点不了。 */
+  selectable: boolean
+}
+
+/** 候选行的完成动作：**现有接口的真实路径**，今日页不新增任何写端点。 */
+export interface DayCandidateDone {
+  method: 'PATCH' | 'POST'
+  /** 相对 `/api` 的路径（`request` 的 baseURL 已是 `/api`，不要再拼一次） */
+  path: string
+  body: Record<string, unknown>
+}
+
+export interface DayCandidate {
+  kind: 'book' | 'milestone' | 'inbox' | 'work'
+  id: number
+  title: string
+  subtitle: string
+  /** 排序依据，后端生成 —— 前端原样显示，不自己拼「逾期几天」 */
+  reason: string
+  open_route: string
+  /** 🔴 书没有 done（读完由换书动作触发）；其余三种都有 */
+  done: DayCandidateDone | null
+}
+
+/** 空态原因码。前端只查表拼文案，不自己判断「为什么空」。 */
+export type DayEmptyReason = 'no_focus' | 'no_candidates' | 'all_empty'
+
+/** 某一格的池子：候选 + 规模 + 空的原因。
+ *
+ *  🔴 这些字段**只**随日结一起下发（`DayCell`）。v3.64.76 删掉了
+ *     独立的「预览某格」端点：同一份候选有两个形状，迟早会不一样，
+ *     而不一样的时候两个页面都看着正常。
+ */
+export interface DayPool {
+  candidates: DayCandidate[]
+  /** 这一类**总共有多少件**（候选最多 3 条）—— 只在你点开后才说出口 */
+  total: number
+  /** `null` = 有候选，或风干（风干本来就没有清单） */
+  empty_reason: DayEmptyReason | null
+  /** 播种格专用：有候选、但**没有「当前这本」**时为 `true`。
+   *  🔴 它不能由 `empty_reason` 代替：这时候格子不为空，`empty_reason` 是 `null`，
+   *     于是「还没指定当前这本」这条提示会永远不出现 ——
+   *     而播种格的第一条本该就是那本书。 */
+  no_focus: boolean
+}
+
+/** 一周的汇总。**只数天数**，不参与任何判定（不进 KPI、不进档位）。 */
+export interface DayWeekSummary {
+  marked_days: number
+  settled_days: number
+  missed_days: number
+  unsettled_days: number
+}
+
+/** 色带的图例。🔴 **后端下发**，前端不写第二份四格词表与配色 ——
+ *  色带在今日页与本周状态页两处出现，各写一份就是改一处漏一处且不报错。 */
+export interface DayLegendItem {
+  quadrant: DayQuadrant
+  label: string
+  color: string
+}
+
+/** `GET /selfrun/day-cells/week/` 的响应。 */
+export interface DayWeekPayload {
+  /** 这段色带的**最后一天**（含）。就是 `days[days.length - 1]`，
+   *  但由后端给 —— 前端自己推会让「区间错位一天」这类错无声无息。 */
+  end: string
+  days: DayWeekCell[]
+  summary: DayWeekSummary
+  legend: DayLegendItem[]
+}
+
+export interface DayWeekCell {
+  date: string
+  /** `null` = 那天没定档 —— **不是**「没做成」（`outcome === 'missed'` 才是） */
+  quadrant: DayQuadrant | null
+  /** `null` = 那天没定档，**或**定了还没结算 —— 两件事都不许读成「没成」 */
+  outcome: DayOutcome | null
+  is_backfilled: boolean
+}
+
+/** 今天的日结。`outcome` 是空串 = 还没结算（不是「没成」）。 */
+export interface DayCell extends DayPool {
+  id: number
+  cell_date: string
+  quadrant: DayQuadrant
+  quadrant_label: string
+  outcome: DayOutcome | ''
+  note: string
+  is_backfilled: boolean
+}
+
+export interface DaySettlePrompt {
+  cell_id: number
+  date: string
+  quadrant: DayQuadrant
+  quadrant_label: string
+  days_ago: number
+}
+
+/** 可以补记的一天。🔴 **只有日期与周几** —— 后端刻意不带 `count`：
+ *  格子上的计数是「**今天**这一格给几件」，摆进「补 3 天前」的对话框里
+ *  就是拿今天的池子冒充那天的池子，而两个数字看上去都合法。 */
+export interface DayBackfillDay {
+  date: string
+  /** 周几，后端给 —— 前端自己 `new Date()` 会差 8 小时，且差完还是合法日期 */
+  weekday: string
+}
+
+export interface DayBackfill {
+  /** 最近 `limit` 天里还没定档的那几天（**不含今天**），最近的排在前面 */
+  days: DayBackfillDay[]
+  /** 窗口天数（后端 `DAY_CELL_BACKFILL_DAYS`）。前端不写这个数字。 */
+  limit: number
+}
+
+export interface TodayPayload {
+  date: string
+  weekday: string
+  /** 今天定了哪一格。第 2 步恒 `null`（还没定档功能） */
+  cell: DayCell | null
+  quadrants: DayQuadrantCard[]
+  /** 四格全空时 `all_empty`；有候选时 `null`（由各格自己说） */
+  empty_reason: 'all_empty' | null
+  settle_prompt: DaySettlePrompt | null
+  week: DayWeekCell[]
+  week_summary: DayWeekSummary
+  backfill: DayBackfill
 }

@@ -12,13 +12,15 @@
 """
 from django.db.utils import OperationalError, ProgrammingError
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import status as http
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import readers, services
+from . import readers, services, today
 from .constants import (
     DIRECTION_CHOICES, MONTHLY_QUESTION_COUNT, PERIOD_STATUS_CHOICES,
     PERIOD_STATUS_LABEL, PERIOD_TYPE_CHOICES, PERIOD_TYPE_PREFIX,
@@ -28,16 +30,18 @@ from .constants import (
     STAGE_KIND_CHOICES, STAGE_KIND_RECORD, STAGE_KIND_RUN,
 )
 from .models import (
-    SelfRunCheckin, SelfRunMetric, SelfRunMetricLog, SelfRunMetricPlan,
-    SelfRunPeriod, SelfRunStage, SelfRunTemplate,
+    SelfRunCheckin, SelfRunDayCell, SelfRunMetric, SelfRunMetricLog,
+    SelfRunMetricPlan, SelfRunPeriod, SelfRunStage, SelfRunTemplate,
 )
 from .serializers import (
-    CheckinInputSerializer, FROZEN_PERIOD_FIELDS, HeartbeatSerializer,
+    CheckinInputSerializer, DayCellInputSerializer, DayCellPatchSerializer,
+    FROZEN_PERIOD_FIELDS, HeartbeatSerializer,
     MetricPatchSerializer, MetricPreviewSerializer, PauseSerializer,
     PeriodCloseSerializer, PeriodReviewSerializer, PlanSetSerializer,
     ReasonSerializer, RecordStageInputSerializer, RecordStagePatchSerializer,
-    ReopenSerializer, SelfRunCheckinSerializer,
+    ReopenSerializer, SelfRunCheckinSerializer, SelfRunDayCellSerializer,
     SelfRunMetricLogSerializer, SelfRunMetricPlanSerializer, SelfRunMetricSerializer,
+    SelfRunPeriodListSerializer,
     SelfRunPeriodSerializer, SelfRunStageSerializer, SelfRunTemplateSerializer,
     StageCopySerializer, StageCreateSerializer, StagePatchSerializer, SummarySerializer,
     TemplateInputSerializer, TemplatePatchSerializer,
@@ -58,7 +62,17 @@ class SelfRunBaseView(APIView):
 
     def handle_exception(self, exc):
         if isinstance(exc, services.SelfRunError):
-            return Response({'detail': str(exc)}, status=exc.status_code)
+            body = {'detail': str(exc)}
+            # `code` / `extra` 是**可选的**：只有日结那组错误带（v3.64.76）。
+            # 别在这里给所有错误补 `code` —— 老接口没有码，补一个空串
+            # 会让前端以为「有码可查表」。
+            code = getattr(exc, 'code', '')
+            if code:
+                body['code'] = code
+            extra = getattr(exc, 'extra', None)
+            if extra:
+                body.update(extra)
+            return Response(body, status=exc.status_code)
         return super().handle_exception(exc)
 
 
@@ -722,7 +736,12 @@ class HeartbeatView(SelfRunBaseView):
 # ══════════════════════════════════════════════════════════════
 
 class PeriodListView(SelfRunBaseView):
-    """历史周期列表（裸数组）。**归档后读数取自快照，绝不重算。**"""
+    """历史周期列表（裸数组）。**归档后读数取自快照，绝不重算。**
+
+    ⚠️ 唯一例外是 `time_use`（「时间去向」列）：它是**现算**的时间汇总，
+       不属于归档快照 —— 补记时间后历史各期会跟着变。这也是它不在
+       `SelfRunPeriodSerializer` 里、而由本视图一次算好塞进 context 的原因。
+    """
 
     pagination_class = None
 
@@ -740,7 +759,13 @@ class PeriodListView(SelfRunBaseView):
                 qs = qs[: max(int(limit), 1)]
             except ValueError:
                 pass
-        return Response(SelfRunPeriodSerializer(qs, many=True).data)
+        periods = list(qs)
+        # 🔴 一次取数、逐期分组（见 `services.period_time_use`）：
+        #    序列化器里按行查库 = N 期 × 各自扫一遍时间表。
+        return Response(SelfRunPeriodListSerializer(
+            periods, many=True,
+            context={'time_use': services.period_time_use(periods)},
+        ).data)
 
 
 class PeriodCloseView(SelfRunBaseView):
@@ -1030,6 +1055,104 @@ class RunwayView(SelfRunBaseView):
 
     def get(self, request):
         return Response({**readers.runway_reading(), 'written': {}})
+
+
+# ══════════════════════════════════════════════════════════════
+# 「今天」四格（v3.64.75）—— 每天第一屏，但**不是** T1～T4 里的任何一段
+#
+# 🔴 它不依赖阶段：没有阶段的人早上起来同样「不知道今天该干哪件」，
+#    而这一页读的是 goals / inbox / works / book，与 KPI 无关。
+#    所以这两个接口**不看** `get_open_stage()`，也不写库。
+# ══════════════════════════════════════════════════════════════
+
+class TodayView(SelfRunBaseView):
+    """`GET /api/selfrun/today/` —— 今日页首屏。🔴 不写库。
+
+    四格的计数照算（早上打开要能看见「播种 3 件 / 疏苗 16 件」）；
+    今天定了档就带上 `cell`（含那一格的候选），没定就 `null`。
+    """
+
+    def get(self, request):
+        return Response({**today.build_today(), 'written': {}})
+
+
+class DayCellListCreateView(SelfRunBaseView):
+    """`POST /api/selfrun/day-cells/` —— 定档（一天一格）。
+
+    🔴 同日重复 → **409**，不改幂等更新：那样「今天改过没有」就无痕了，
+       而这一天只有一格，改没改过就是这件事的全部信息。
+       ⚠️ 409 只带 `cell_id`（不带整条 cell）—— 前端收到后一律重取今日页，
+          少一份手搓的序列化副本要维护。
+    """
+
+    def post(self, request):
+        ser = DayCellInputSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+        cell = services.create_day_cell(
+            cell_date=d.get('cell_date') or timezone.localdate(),
+            quadrant=d['quadrant'],
+            note=d.get('note') or '',
+        )
+        return Response({
+            'cell': SelfRunDayCellSerializer(cell).data,
+            'written': _written(selfrun_day_cell=1),
+        }, status=http.HTTP_201_CREATED)
+
+
+class DayCellDetailView(SelfRunBaseView):
+    """`PATCH /api/selfrun/day-cells/<id>/` —— 改档 / 结算。
+
+    两种用法靠字段区分：传 `quadrant` 只能改**当天**（跨天 400 `locked`）；
+    传 `outcome` 给 7 天窗口。风干格传 `outcome` → 400 `rest_not_settled`。
+    """
+
+    def patch(self, request, pk):
+        cell = get_object_or_404(SelfRunDayCell, pk=pk)
+        ser = DayCellPatchSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        cell, changed = services.update_day_cell(
+            cell,
+            quadrant=ser.validated_data.get('quadrant'),
+            outcome=ser.validated_data.get('outcome'),
+        )
+        return Response({
+            'cell': SelfRunDayCellSerializer(cell).data,
+            'changed': changed,
+            'written': _written(selfrun_day_cell=1 if changed else 0),
+        })
+
+
+class DayWeekView(SelfRunBaseView):
+    """`GET /api/selfrun/day-cells/week/?end=2026-11-18` —— 7 格色带。
+
+    存在理由：色带在**两个页面**出现（今日页 / 本周状态页），而本周状态页
+    翻到历史周时要画的是**那一周**，不是「最近 7 天」。
+
+    · `end` 缺省今天
+    · `end` 是未来 → 400 `future_end`（未来的格子还没走过，画上去就是留白，
+      而留白在这条色带上已经有「没定档」这个含义了 —— 两个含义一个样子）
+    · `end` 格式不对 → 400 `bad_end`。**不静默回落到今天**：那会让前端
+      看到另一段时间却毫无信号（本项目最贵的一类 bug）
+    """
+
+    def get(self, request):
+        raw = (request.query_params.get('end') or '').strip()
+        day = timezone.localdate()
+        if raw:
+            parsed = parse_date(raw)
+            if parsed is None:
+                return Response(
+                    {'detail': f'日期格式应为 YYYY-MM-DD，收到「{raw}」', 'code': 'bad_end'},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+            if parsed > day:
+                return Response(
+                    {'detail': '还没有未来的格子', 'code': 'future_end'},
+                    status=http.HTTP_400_BAD_REQUEST,
+                )
+            day = parsed
+        return Response({**today.build_week_payload(day), 'written': {}})
 
 
 class OverviewView(SelfRunBaseView):

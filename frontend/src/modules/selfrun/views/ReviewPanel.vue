@@ -8,23 +8,28 @@
           <el-radio-button value="monthly">月</el-radio-button>
         </el-radio-group>
         <span class="rp-hint">
-          归档后的读数是<b>冻结快照</b>，永远不重算 —— 所以这里看到的数就是当时的数。
+          判定与分数是<b>归档时的冻结快照</b>，永远不重算；「时间去向」是现算的 ——
+          补记时间后历史各期会跟着变。
         </span>
       </div>
       <el-button size="small" @click="load">刷新</el-button>
     </div>
 
+    <!-- 🔴 全部列用 `min-width` 而不是 `width`（v3.64.68）：
+         `width` 是死宽，列宽之和 1030 < 容器宽时 el-table 不会拉伸，右边缘留一条空白，
+         表格看着「没画完」。`min-width` 的列会被按比例摊掉多余空间 ⇒ 永远铺满，
+         窄屏时也不低于这个值（退回横向滚动，行高不会因挤压而折行）。 -->
     <el-table
       :data="list" size="small" v-loading="loading" empty-text="还没有归档过任何一期"
       @row-click="openDetail"
     >
-      <el-table-column prop="period_key" label="周期" width="120" />
-      <el-table-column label="区间" width="190">
+      <el-table-column prop="period_key" label="周期" min-width="92" />
+      <el-table-column label="区间" min-width="184">
         <template #default="{ row }">
           <span class="rp-mono">{{ row.period_start }} ~ {{ row.period_end }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="判定" width="120">
+      <el-table-column label="判定" min-width="108">
         <template #default="{ row }">
           <el-tag v-if="row.status" size="small" :color="statusColor(row.status)" effect="dark" class="rp-tag">
             {{ periodStatusLabel(row.status, row.period_type) }}
@@ -33,12 +38,12 @@
           <el-tag v-else size="small" type="info" effect="plain" class="rp-tag">未判定</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="分数" width="110">
+      <el-table-column label="分数" min-width="88">
         <template #default="{ row }">
           <span class="rp-mono">{{ okOf(row) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="标记" min-width="200">
+      <el-table-column label="标记" min-width="128">
         <template #default="{ row }">
           <el-tag v-if="row.is_partial" size="small" type="warning" effect="plain">残缺</el-tag>
           <el-tag v-if="row.is_backfilled" size="small" type="warning" effect="plain">事后补算</el-tag>
@@ -48,12 +53,51 @@
           <el-tag v-if="row.review_text" size="small" type="success" effect="plain">写过话</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="closed_at" label="归档于" width="150">
+
+      <!-- ── 时间去向（v3.64.67）─────────────────────────────────
+           回答「那一周我到底在干什么」—— 逐期点开抽屉读一行小字，等于没有这个信息。
+           🔴 与抽屉里「这一期我做了什么」顶部那行**同源**（`services.period_time_use`
+              → `_attr_totals`），不在这里自己加、也不在这里自己筛睡眠类。
+           ⚠️ 这一列是**现算**值，不在归档快照里 —— 表头必须自己说清，
+              否则会与左边的「判定」被读成同一把尺子。
+           🔴 三列网格而不是 flex 折行：归因有六类（成长/体验/关系/维持/谋生/流失），
+              折行时每行项数不定，行与行之间对不齐 —— 网格让「第二行第三格」永远是同一个数。 -->
+      <el-table-column min-width="232">
+        <template #header>
+          <el-tooltip
+            placement="top"
+            content="这一列是现算的：补记时间后，历史各期会跟着变。左边的判定与分数才是归档时冻结的。睡眠类不计入，与抽屉里那张卡同一份数。每行最粗的一类是这一期占比最大的。"
+          >
+            <span class="rp-th">时间去向 (h) <i class="rp-info">ⓘ</i></span>
+          </el-tooltip>
+        </template>
+        <template #default="{ row }">
+          <span v-if="row.time_use?.attr_totals.length" class="rp-time">
+            <!-- 🔴 占比最大的那一类加粗（v3.64.69）：六个数一样重时，这一列只报
+                 「各花了多少」，不报「主要在干什么」—— 而后者才是读这一行的目的。
+                 并列最大时都加粗，不替用户挑一个赢家。
+                 ⚠️ 只决定谁加重音，不产生任何新数字：数值仍来自后端，与抽屉同源。 -->
+            <span
+              v-for="a in row.time_use.attr_totals" :key="a.label"
+              class="rp-time-item"
+              :class="{ 'rp-hi': isTopShare(a, row.time_use.attr_totals) }"
+            >
+              {{ a.label }}<b :class="{ 'rp-warn': a.label === '流失' }">{{ fmt(a.hours) }}</b>
+            </span>
+          </span>
+          <!-- 🔴 三种状态分开说：`attr_totals` 空 = 这一期真的没记（真 0）；
+               整个 `time_use` 没有 = 这个接口没算（不该发生，但不能冒充「无记录」）。 -->
+          <span v-else-if="row.time_use" class="rp-muted">没有记录</span>
+          <span v-else class="rp-muted">—</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column prop="closed_at" label="归档于" min-width="126">
         <template #default="{ row }">
           <span class="rp-mono">{{ (row.closed_at ?? '').slice(0, 16) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="90">
+      <el-table-column label="操作" min-width="72">
         <template #default="{ row }">
           <el-button size="small" text type="primary" @click.stop="openDetail(row)">复盘</el-button>
         </template>
@@ -281,7 +325,7 @@ import OutcomeCard from '../components/OutcomeCard.vue'
 import WhatHappenedCard from '../components/WhatHappenedCard.vue'
 import { useSelfRunStore } from '../stores/selfrunStore'
 import { getPeriodDetail } from '../api/selfrunApi'
-import { FALLBACK_COLOR, MONTHLY_QUESTIONS, fmt, periodStatusLabel } from '../types/selfrunTypes'
+import { FALLBACK_COLOR, MONTHLY_QUESTIONS, fmt, isTopShare, periodStatusLabel } from '../types/selfrunTypes'
 import type { PeriodExtras, PeriodType, SelfRunPeriod } from '../types/selfrunTypes'
 
 const emit = defineEmits<{ (e: 'changed'): void }>()
@@ -333,6 +377,7 @@ const isLatest = computed(() => {
 function statusColor(s: string) {
   return store.colors.period[s] ?? FALLBACK_COLOR
 }
+
 
 /** 三问答案的显示词（`null` 是「没答」，不是「否」——两件事） */
 function answerLabel(a?: boolean | null): string {
@@ -487,6 +532,38 @@ onMounted(load)
 .rp-hint { font-size: 12px; color: var(--el-text-color-secondary); }
 .rp-mono { font-variant-numeric: tabular-nums; font-size: 12px; }
 .rp-tag { border: none; }
+
+/* 表头带说明的小标题：ⓘ 不是装饰，是这个列「跟左边不是一个出处」的唯一提示 */
+.rp-th { display: inline-flex; align-items: center; gap: 3px; cursor: help; }
+.rp-info { font-style: normal; font-size: 11px; color: var(--el-text-color-placeholder); }
+
+/* 时间去向：六类归因（成长/体验/关系/维持/谋生/流失）—— **三列网格**，不是 flex 折行。
+   折行时每行几项取决于字数，行与行对不齐；网格让「第二行第三格」永远是同一个数。 */
+.rp-time {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px 6px;
+  font-size: 12px; color: var(--el-text-color-secondary);
+}
+/* 类别与数字**紧挨着**（3px），靠网格的列宽把一组组隔开 ——
+   反过来（label 顶左、数字顶右）会让「44.6 体验」看起来像一组。 */
+.rp-time-item {
+  display: flex; align-items: baseline; gap: 3px;
+  white-space: nowrap;
+}
+/* 🔴 未加粗的项回到常规字重（v3.64.69）：原本六个数字都是 600，
+   再给最大项「加粗」就没有对照 —— 重音靠**其余项变轻**才成立。 */
+.rp-time-item b {
+  font-weight: 400; color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums;
+}
+/* 占比最大：整组（类别 + 数字）一起加重音 —— 读到的是「这周主要在谋生」；
+   只加粗数字会先给一个孤立的数，再让人回头找它是谁的。 */
+.rp-time-item.rp-hi { color: var(--el-text-color-primary); font-weight: 700; }
+.rp-time-item.rp-hi b { font-weight: 700; color: var(--el-text-color-primary); }
+/* ⚠️ `.rp-time-item b` 的权重是 (0,1,1)，单写 `.rp-warn`(0,1,0) 压不过它 ——
+   这一列的「流失」因此一直没变成警示色（写上去的类在静默失效）。
+   显式提一级；放在 `.rp-hi` 之后，让并列最大时也是警示色 + 加粗。 */
+.rp-time-item b.rp-warn { color: var(--el-color-warning); }
 .rp-d-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .rp-fp { margin-left: auto; font-size: 12px; color: var(--el-text-color-placeholder); cursor: help; }
 .rp-gap { margin-top: 12px; }

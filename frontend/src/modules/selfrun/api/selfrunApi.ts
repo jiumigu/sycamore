@@ -16,6 +16,8 @@ import type {
   PeriodExtras, PlanScope, PreviewResult, SelfRunCheckin, SelfRunMetric, SelfRunMetricLog,
   SelfRunMetricPlan, SelfRunPeriod, SelfRunStage, StageLedger, StageSummary, TargetsResponse,
   StageTimelineResponse, TemplateEnum, Written, RunwayReading,
+  TodayPayload, DayCell, DayOutcome, DayQuadrant, DayCandidateDone,
+  DayWeekPayload,
 } from '../types/selfrunTypes'
 
 // ══════════════════════════════════════════════════════════════
@@ -420,5 +422,78 @@ export function listPoolInjects() {
 export function setPoolInject(billId: number, marked: boolean) {
   return request<{ bill_id: number; marked: boolean; written: Written }>({
     url: '/selfrun/pool-injects/', method: 'post', data: { bill_id: billId, marked },
+  })
+}
+
+// ══════════════════════════════════════════════════════════════
+// T0 · 今天（四格）—— v3.64.75 / 76
+//
+// 🔴 读只有一个入口（`getToday`）：候选**随 `cell` 一起下发**。
+//    候选行的「标完成」调的是 goals / inbox / works 现有的接口，
+//    路径由后端随候选一起下发 —— 前端不持有任何一条别模块的路由。
+// 🔴 写只有三个动作：定档、改档、结算。三者都落到 `day-cells`，
+//    别的模块不许碰这张表。
+// ══════════════════════════════════════════════════════════════
+
+/** 今日页首屏：四格各几件 + 今天那一格（含候选）+ 结算提示 + 周色带。 */
+export function getToday() {
+  return request<TodayPayload>({ url: '/selfrun/today/', method: 'get' })
+}
+
+/** 定档：**一天只能一次**。同日再来 → 409 `already_set`，调用方重取今日页即可。 */
+export function createDayCell(payload: {
+  quadrant: DayQuadrant
+  /** 省略 = 今天。补记才传（窗口 7 天由后端判） */
+  cell_date?: string
+  note?: string
+}) {
+  return request<{ cell: DayCell; written: Written }>({
+    url: '/selfrun/day-cells/', method: 'post', data: payload,
+  })
+}
+
+/** 改档 / 结算。
+ *
+ *  🔴 两个字段都**不传默认值**：只想改档却顺手带上 `outcome`，
+ *     等于替用户把「成没成」答了。
+ */
+export function patchDayCell(
+  id: number,
+  payload: { quadrant?: DayQuadrant; outcome?: DayOutcome },
+) {
+  return request<{ cell: DayCell; changed: string[]; written: Written }>({
+    url: `/selfrun/day-cells/${id}/`, method: 'patch', data: payload,
+  })
+}
+
+/** 候选行「标完成」——**照抄后端给的路径**，只换 method / body。
+ *
+ * 🔴 禁在这里写 `if (kind === 'milestone') url = '/goals/...'`：
+ *    那样今日页就持有了三份别模块的路由副本，改一处漏两处、且不报错。
+ * ⚠️ `done.path` 不含 `/api`（`request` 的 baseURL 已是 `/api`）。
+ *
+ * `extra` 是**调用方收集的补充字段**：里程碑的完成多要一句 `self_review`
+ * （后端强制，见 `goals/services/completion_review.py`）—— 后端给不出这句，
+ * 因为它要的是用户当场写的话。合并而不是替换：`done.body` 里的状态仍然算数。
+ */
+export function completeCandidate(done: DayCandidateDone, extra?: Record<string, unknown>) {
+  return request<Record<string, unknown>>({
+    url: done.path,
+    method: done.method === 'PATCH' ? 'patch' : 'post',
+    data: extra ? { ...done.body, ...extra } : done.body,
+  })
+}
+
+/** 7 格色带。`end` 是**最后一天**，省略 = 今天。
+ *
+ *  今日页不用这个函数（它随 `getToday` 一起下发，少一次往返）；
+ *  本周状态页翻到历史周时用它 —— 那时色带画的必须是**那一周**，
+ *  不是「最近 7 天」，否则「翻到 10 月却在看 11 月的格子」，
+ *  而且两段日期都在过去，界面上看不出错。
+ */
+export function getDayWeek(end?: string) {
+  return request<DayWeekPayload>({
+    url: '/selfrun/day-cells/week/', method: 'get',
+    params: end ? { end } : undefined,
   })
 }

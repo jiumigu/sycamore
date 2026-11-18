@@ -1,4 +1,4 @@
-"""自我运转 · 数据模型（**7 张 managed 表**）
+"""自我运转 · 数据模型（**9 张 managed 表**）
 
 > 走 `sycamore-managed-table-feature` 流水线。设计依据：`docs/自我运转-功能设计-v0.3-20261013.md` §7。
 > ⚠️ **新增 managed 表 ⇒ `backend/conftest.py` 必须同步补镜像 DDL**（`--reuse-db` 下
@@ -83,7 +83,7 @@ class SelfRunStage(models.Model):
 
     状态机（**只对运转型**）：`draft → active ⇄ paused → closed ──[复制]──> 新 draft`
 
-    🔴 约束（v3.65.0 起分两层）：
+    🔴 约束（v3.64.17 起分两层）：
     1. **最多两层**：长阶段（`parent IS NULL`）挂小阶段，小阶段不能再挂。
     2. **同一 `parent` 下只允许一个 `active`/`paused`** —— 不是全局唯一
        （否则长阶段一开，小阶段就开不了）。
@@ -445,3 +445,48 @@ class SelfRunCheckin(models.Model):
 
     def __str__(self):
         return f'{self.metric_id} {self.checkin_date} {self.value}'
+
+
+class SelfRunDayCell(models.Model):
+    """日结：某一天走了哪一格，以及那一格成了没有（v3.64.76）。
+
+    🔴 只存三件事：**走了哪一格、成没成、你那句话**。
+       候选、计数、理由一律**现算** —— 这张表永远不是第二个数据源。
+       一旦把「今天有哪三件」也存进来，它就会跟 milestones / inbox / works
+       漂移，而且漂移是静默的（页面上看着一切正常）。
+
+    🔴 一天一格（`cell_date` 唯一）：四格是**单选框**，不是四个复选框。
+       四个布尔会让人想全勾（「我今天又种又收」），统计时「种了 3 天」与
+       「种 + 收 5 天」也分不清。一天只有一个主调，写在结构里比写在文案里可靠。
+
+    🔴 `outcome` 空串 = **还没结算**，不是「没成」。
+       风干不需要结算（休了就是休了），但那是**派生**的：`quadrant == 'rest'`
+       时不发结算提示、不落 `na` 值 —— 多一个值就多一个要解释的状态。
+
+    ⚠️ `cell_date` 由请求显式给出，**不用 `auto_now_add`** —— 那是无法补记的
+       假合法（既有教训）。允许补最近 7 天，补的自动标 `is_backfilled`。
+    """
+
+    cell_date = models.DateField(unique=True, verbose_name='哪一天')
+    quadrant = models.CharField(
+        max_length=10, choices=C.DAY_QUADRANT_CHOICES, verbose_name='走哪一格',
+    )
+    outcome = models.CharField(
+        max_length=10, choices=C.DAY_OUTCOME_CHOICES,
+        blank=True, default='', verbose_name='那格成了吗',
+    )
+    note = models.CharField(max_length=200, blank=True, default='', verbose_name='一句话')
+    is_backfilled = models.BooleanField(default=False, verbose_name='事后补记')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='记于')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='改于')
+
+    class Meta:
+        managed = True
+        db_table = 'selfrun_day_cell'
+        db_table_comment = '日结：一天一格（播种/收割/疏苗/风干）；不参与 KPI 判定，只统计天数'
+        verbose_name = '自我运转·日结'
+        verbose_name_plural = '自我运转·日结'
+        ordering = ['-cell_date']
+
+    def __str__(self):
+        return f'{self.cell_date} {self.get_quadrant_display()}'
