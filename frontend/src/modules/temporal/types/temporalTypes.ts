@@ -20,6 +20,35 @@ export interface OneDayPage {
   logseq_file: string | null
 }
 
+/** 一句话回顾里的一条：一天一句，不是一行日记 */
+export interface OneLinerItem {
+  oid: number
+  /** YYYY-MM-DD（后端给，前端不做日期换算） */
+  date: string
+  /** `周一` —— 周历表只在后端 `WEEKDAY_LABELS` 一份 */
+  weekday: string
+  one_liner: string
+  /** 那天写了多少字（不是这句话自己的字数），给回顾一点上下文 */
+  total: number
+  otype_display: string
+  tags: string[]
+}
+
+export interface OneLinerReview {
+  items: OneLinerItem[]
+  /** 只列「有过一句话」的年份，倒序；点了必然空的年份不给 */
+  years: number[]
+  summary: {
+    days_with_liner: number
+    /** 有日记的天数（分母），只按年份收窄，不随关键词变 */
+    days_total: number
+    latest_date: string | null
+    earliest_date: string | null
+    year: number | null
+    keyword: string
+  }
+}
+
 export interface OneDayPageStats {
   total_count: number
   month_count: number

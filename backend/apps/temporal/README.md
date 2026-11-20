@@ -457,6 +457,7 @@ CSV 导入复用同一函数但**不传 `end`**（保留 ATracker 自带时长�
 | GET | /oneday/yearly_heatmap/ | 年度热力图 |
 | GET | /oneday/week_count/ | 本周日记篇数 |
 | GET | /oneday/daily_detail/ | 单日日记明细（?date=） |
+| GET | /oneday/one_liners/ | **一句话回顾**（每天的 `remark` 按天倒序；`?year=&q=`，不分页） |
 | GET | /oneday/contrib/ | 日记贡献图 |
 | GET | /oneday/week_stats/ | 周统计 |
 | DELETE | /oneday/bulk_delete/ | 批量删除 |
@@ -486,3 +487,16 @@ v0.2 设计稿**决策 4 彻底移除 30h benchmark**（全记录后周总时长
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `logseq_file` | string\|null | 按 `begin_date` 拼接 Logseq 文件名，检测文件是否存在后返回绝对路径（需配置 `UserProfile.logseq_path`） |
+
+### 「一句话记录今天」= `remark`（v3.64.95，改这个字段前必读）
+
+- 🔴 **不改字段、不加字段**：界面上原来叫「备注」，存量 30 条、平均 18 字，
+  内容就是「当初为什么要离职」「2026 年第一个榴莲」这种一句话。
+  同一天再开一个「一句话」列，会让两处写着不同的句子、没人知道信哪个。
+- 🔴 **一天一句**：`compute_one_liners()` 按 `begin_date` 去重，同日多条取 **oid 最大**
+  （后建的那条）。同一天的两条日记不该在回顾里各占一行。
+- 🔴 **空白 ≠ 写过**：`NULL`、`''`、纯空格都不进列表，`days_with_liner` 由 `items` 算，
+  不会出现「条数 0 但比率 3%」。
+- 🔴 **分母只按年份收窄**：`days_total`（有日记的天数）不随 `q` 变；关键词生效时
+  前端不显示比率，只报「搜到几天」。
+- 前端只做日期字符串截断（`slice(5)`）与 `weekday` 直出，周几来自 `constants.WEEKDAY_LABELS`。

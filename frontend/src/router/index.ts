@@ -63,6 +63,7 @@ const routes: RouteRecordRaw[] = [
   // 目标与项目
   { path: '/temporal/contrib', name: 'temporal-contrib', component: () => import('@/modules/temporal/views/contrib/TemporalContribView.vue'), meta: { title: '时间贡献图' } },
   { path: '/temporal/oneday/contrib', name: 'oneday-contrib', component: () => import('@/modules/temporal/views/contrib/OnedayContribView.vue'), meta: { title: '日记流贡献图' } },
+  { path: '/temporal/oneday/one-liners', name: 'oneday-one-liners', component: () => import('@/modules/temporal/views/OneLinerReviewView.vue'), meta: { title: '一句话回顾' } },
   { path: '/goals', name: 'goals', component: () => import('@/modules/goals/views/GoalHub.vue'), meta: { title: '人生目标' } },
   { path: '/goals/dimension-chart', name: 'DimensionChart', component: () => import('@/modules/goals/views/DimensionChart.vue'), meta: { title: '人生维度分布' } },
   { path: '/output', name: 'output', component: () => import('@/modules/output/views/OutputDashboard.vue'), meta: { title: '个人良品率' } },

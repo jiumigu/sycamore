@@ -10,7 +10,21 @@
 | 页面 | 路由 | 职责 |
 |------|------|------|
 | `views/TemporalView.vue` | `/temporal/daily` | 日记流主页 |
+| `views/OneLinerReviewView.vue` | `/temporal/oneday/one-liners` | 一句话回顾（从日记流页头按钮进；**不进侧栏**） |
 | `views/ScheduleView.vue` | `/temporal/schedule` | 日程视图 |
+
+## 「一句话记录今天」与一句话回顾（v3.64.95）
+
+日记流的新增/编辑表单里，第二个字段是 **「一句话记录今天」**，它写的就是模型上的
+`remark`（原来叫「备注」）。**没有新增字段** —— 存量那 30 条本来记的就是这件事。
+
+页头「💬 一句话回顾」进 `/temporal/oneday/one-liners`，把每天那一句按年分段倒序列出，
+可切年份、可按句中的字搜。点任意一条回 `/temporal/daily?date=YYYY-MM-DD`，
+日记流会把列表收到那一天（`route.query.date` → `searchForm.dateRange`）。
+
+🔴 结论条上的「963 天日记里 30 天写下了这一句」是**覆盖率**，不是「只有 30 天发生过事」：
+这句话是零散记下来的（最早 2022-02-20），别拿它当完整历史。
+🔴 前端只截断日期字符串（`slice(5)`）、`weekday` 直出后端，不做日期换算。
 
 ## 日程视图的数据口径
 

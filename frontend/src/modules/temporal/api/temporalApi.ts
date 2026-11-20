@@ -1,7 +1,8 @@
 import request from '@/shared/utils/request'
 import type {
   CompletenessData, DailyGuardData, FrequentNamesData, ImportPreview, MetaLedgerData,
-  OverlapCheckData, SleepSeriesData, SourceOverview, SunburstData, TaskRenameResult, WeeklyStructure,
+  OverlapCheckData, OneLinerReview, SleepSeriesData, SourceOverview, SunburstData,
+  TaskRenameResult, WeeklyStructure,
 } from '../types/temporalTypes'
 
 // ─── 每日记录 (OneDay) ───
@@ -194,6 +195,16 @@ export function getTaskDailyDetail(params: { date: string; scope?: 'contrib' }) 
 
 export function getOnedayDailyDetail(params: { date: string }) {
   return request<{ date: string; total?: number; items: any[] }>({ url: '/temporal/oneday/daily_detail/', method: 'get', params })
+}
+
+/**
+ * 一句话回顾：每天的 `remark`（界面上的「一句话记录今天」）。
+ *
+ * ⚠️ 不分页 —— 这是「一条一条往下读」的流水，翻了页就断了；
+ *    量级是「有日记的天数」，不是日记行数。
+ */
+export function getOneLiners(params: { year?: number; q?: string } = {}) {
+  return request<OneLinerReview>({ url: '/temporal/oneday/one_liners/', method: 'get', params })
 }
 
 // ─── 三层分类（L1 归因 / L2 活动类型 / L3 task_name）───

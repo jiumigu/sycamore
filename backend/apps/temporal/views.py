@@ -35,6 +35,7 @@ from .services import (
     _ensure_task_meta,
     batches_of_kind,
     compute_daily_guards,
+    compute_one_liners,
     compute_sleep_series,
     contrib_excluded_names,
     delete_task_name,
@@ -1072,6 +1073,24 @@ class OneDayPageViewSet(viewsets.ModelViewSet):
             'remark': p.remark or '',
         } for p in qs]
         return Response({'date': date_str, 'items': items})
+
+    @action(detail=False, methods=['get'])
+    def one_liners(self, request):
+        """一句话回顾：每天的 `remark`（「一句话记录今天」）按天倒序。
+
+        `?year=2026` 只看该年，`?q=离职` 按句子内容筛。参数错就报 400，
+        不做「猜一个年份继续跑」—— 那会返回一份看起来正常的空列表。
+        """
+        raw_year = (request.query_params.get('year') or '').strip()
+        year = None
+        if raw_year:
+            try:
+                year = int(raw_year)
+            except ValueError:
+                return Response({'error': 'year 需为 4 位年份，如 2026'}, status=400)
+            if not 1900 <= year <= 2999:
+                return Response({'error': 'year 超出合理范围'}, status=400)
+        return Response(compute_one_liners(year=year, keyword=request.query_params.get('q') or ''))
 
     @action(detail=False, methods=["get"])
     def contrib(self, request):

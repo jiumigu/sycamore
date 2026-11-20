@@ -7,6 +7,9 @@
         <el-tag type="primary" class="module-tag">时间感知</el-tag>
       </div>
       <div class="header-actions">
+        <el-button @click="$router.push('/temporal/oneday/one-liners')">
+          💬 一句话回顾
+        </el-button>
         <el-button @click="handleRefresh">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -111,7 +114,7 @@
       <div class="filter-bar">
         <el-input
           v-model="searchForm.title"
-          placeholder="搜索主题..."
+          placeholder="搜索主题或一句话..."
           clearable
           class="search-input"
           @input="handleSearch"
@@ -237,7 +240,8 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <!-- 216：Logseq + 编辑 + 删除 三个按钮 200 装不下，删除会单独折到下一行 -->
+        <el-table-column label="操作" width="216" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.logseq_file" size="small" text @click.stop="openLogseq(row)">
               <el-icon><Link /></el-icon> Logseq
@@ -279,9 +283,25 @@
       width="520px"
       @close="handleDialogClose"
     >
-      <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
+      <!-- 118px：7 个字的「一句话记录今天」在 100px 下会折成两行（标签区不会自动加宽） -->
+      <el-form ref="formRef" :model="formData" :rules="formRules" label-width="118px">
         <el-form-item label="主题" prop="title">
           <el-input v-model="formData.title" placeholder="请输入主题" maxlength="255" />
+        </el-form-item>
+
+        <!-- 一句话记录今天：载体就是 `remark`（原来叫「备注」）。
+             存量 30 条「当初为什么要离职」「2026 年第一个榴莲」本来就是这件事，
+             所以改的是**标签**，不是加一个字段 —— 同一天不能有两个「一句话」。 -->
+        <el-form-item label="一句话记录今天">
+          <el-input
+            v-model="formData.remark"
+            type="textarea"
+            :rows="2"
+            maxlength="255"
+            show-word-limit
+            resize="none"
+            placeholder="今天发生了什么？一句就够，例如：第一次自己换灯泡，成了"
+          />
         </el-form-item>
 
         <el-form-item label="创建日期" prop="begin_date">
@@ -353,9 +373,6 @@
           </div>
         </el-form-item>
 
-        <el-form-item label="备注">
-          <el-input v-model="formData.remark" type="textarea" :rows="2" placeholder="备注" maxlength="255" />
-        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -377,6 +394,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Search, Refresh, Plus, Delete, Edit, ArrowLeft, ArrowRight,
@@ -391,12 +409,14 @@ import { getOnedayDailyDetail } from '@/modules/temporal/api/temporalApi'
 import type { OneDayPage } from '../types/temporalTypes'
 import LogseqViewer from '../components/LogseqViewer.vue'
 import { getPresetByType } from '@/shared/api/coreApi'
+import { todayLocal } from '@/shared/utils/datetime'
 // 「值得留」标签 → 作品库的「待提炼」（v3.62.0）。四个入口同一个模式：**前端串联**。
 // ⚠️ 标签选项**不在这里写死** —— 它是 core 的预设表里的一项（迁移 seed 的），
 //    这样用户在「系统预设」页也看得到、也删得掉（界面枚举随接口下发）。
 import { capture as captureWork, getCaptures, uncapture } from '@/modules/works/api/workApi'
 
 const store = useTemporalStore()
+const route = useRoute()
 
 const loading = computed(() => store.loading)
 const onedayList = computed(() => store.onedayList)
@@ -598,7 +618,7 @@ function openCreateDialog() {
   dialogType.value = 'create'
   formData.oid = undefined
   formData.title = ''
-  formData.begin_date = new Date().toISOString().slice(0, 10)
+  formData.begin_date = todayLocal()
   formData.otype = 'ONEDAY'
   formData.oneday = 0
   formData.page = 0
@@ -746,6 +766,11 @@ function handleRefresh() {
 }
 
 onMounted(() => {
+  // 从「一句话回顾」点进来时带 ?date=YYYY-MM-DD：直接把列表收到那一天，
+  // 否则回到日记流还是全部日期、要自己再翻（铁律：落点归页面，别让用户找）
+  const day = typeof route.query.date === 'string' ? route.query.date : ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(day)) searchForm.dateRange = [day, day]
+
   fetchData()
   store.fetchStats()
   fetchYearlyHeatmap(currentYear.value)
@@ -762,7 +787,7 @@ const detailColumns = [
   { prop: 'otype', label: '类型', width: 100 },
   { prop: 'total', label: '总字数', width: 100, align: 'right' as const },
   { prop: 'flag', label: '标签', minWidth: 100 },
-  { prop: 'remark', label: '备注', minWidth: 180 },
+  { prop: 'remark', label: '一句话', minWidth: 180 },
 ]
 
 async function onCellClick(date: string) {

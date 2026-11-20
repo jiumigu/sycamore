@@ -25,6 +25,7 @@ from .constants import (
     SOURCE_KIND_VALUES,
     TASK_CATEGORY_MAPPING,
     TASK_TO_L2,
+    WEEKDAY_LABELS,
 )
 from .models import OneDayPage, TaskMeta, TemporalTask, TimerSession
 
@@ -1434,6 +1435,76 @@ class OneDayPageService:
             'year_stats': year_stats,
             'month_stats': month_stats,
         }
+
+
+# ══════════════════════════════════════════════════════════════
+# 一句话回顾（v3.64.95）
+# ══════════════════════════════════════════════════════════════
+
+def compute_one_liners(year: int | None = None, keyword: str = '') -> dict:
+    """把每天那句「今天发生了什么」抽出来，按天倒序供回看。
+
+    🔴 载体就是 `remark`（界面上原来叫「备注」），**不另开字段**：它本来就在记这件事 ——
+       存量 30 条、平均 18 字、最长 50 字，全是「当初为什么要离职」「2026 年第一个榴莲」
+       这种一句话。同一天再开一个「一句话」字段，只会让两处写着不同的句子、
+       没人知道该信哪个（同一事实一把尺子）。
+    🔴 同一天有多条日记时只取 **oid 最大**的那条（后建的那条）：这是一份「一天一句」
+       的回顾，不是日记行清单；`-begin_date, -oid` 排序后每个日期取第一条即可。
+    🔴 空白串（含纯空格）不算「写了一句话」，直接不进列表 —— 那是「没写」，不是
+       「写了空」。`days_with_liner` 由 `items` 算出来，两者不可能一大一小。
+    🔴 `days_total`（分母）只按年份过滤、**不受关键词影响**：它是「这一年有多少天
+       写过日记」，跟着搜索结果变的话，比率就没意义了。关键词生效时前端不显示比率。
+    """
+    rows = list(
+        OneDayPage.objects.values('oid', 'begin_date', 'remark', 'total', 'otype', 'flag')
+        .order_by('-begin_date', '-oid')
+    )
+
+    seen_days: set[date] = set()
+    all_items: list[dict] = []
+    for r in rows:
+        text = (r['remark'] or '').strip()
+        day = r['begin_date']
+        if not text or day is None or day in seen_days:
+            continue
+        seen_days.add(day)
+        all_items.append({
+            'oid': r['oid'],
+            'date': day.isoformat(),
+            'weekday': WEEKDAY_LABELS[day.weekday()],
+            'one_liner': text,
+            'total': r['total'] or 0,
+            'otype_display': dict(OneDayPage.OTYPE_CHOICES).get(r['otype'], r['otype'] or ''),
+            'tags': [t.strip() for t in (r['flag'] or '').split(',') if t.strip()],
+        })
+
+    # 可选年份只列「有一句话」的年份：给一个点了必然空的年份按钮是在浪费一次点击
+    years = sorted({int(i['date'][:4]) for i in all_items}, reverse=True)
+
+    if year is not None:
+        scoped = [i for i in all_items if i['date'].startswith(f'{year:04d}-')]
+        days_total = len({r['begin_date'] for r in rows
+                          if r['begin_date'] is not None and r['begin_date'].year == year})
+    else:
+        scoped = all_items
+        days_total = len({r['begin_date'] for r in rows if r['begin_date'] is not None})
+
+    kw = (keyword or '').strip()
+    items = [i for i in scoped if kw.lower() in i['one_liner'].lower()] if kw else scoped
+
+    return {
+        'items': items,
+        'years': years,
+        'summary': {
+            'days_with_liner': len(items),
+            'days_total': days_total,
+            # 倒序 ⇒ 第 0 条是最新的那一天；别叫 first/last，读代码时容易反过来
+            'latest_date': items[0]['date'] if items else None,
+            'earliest_date': items[-1]['date'] if items else None,
+            'year': year,
+            'keyword': kw,
+        },
+    }
 
 
 class DailyLogAutoService:
