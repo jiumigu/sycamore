@@ -384,6 +384,8 @@ class AccountSummarySerializer(serializers.Serializer):
     total = serializers.FloatField()
     financial_assets = serializers.FloatField()
     total_assets = serializers.FloatField()
+    # 物件净值（自用资产，v3.64.91）：自用资产这一项就是它，total_assets 已含它
+    property_net_value = serializers.FloatField()
     net_worth = serializers.FloatField()
     borrow = serializers.FloatField()
     lend = serializers.FloatField()
@@ -519,6 +521,10 @@ class NetworthBridgePeriodSerializer(serializers.Serializer):
     assets_start = serializers.FloatField()
     assets_end = serializers.FloatField()
     assets_change = serializers.FloatField()
+    # 物件净值变化（v3.64.91）：从「未解释差额」拆出的独立一行，避免折旧污染对账
+    property_net_start = serializers.FloatField()
+    property_net_end = serializers.FloatField()
+    property_change = serializers.FloatField()
     borrow_start = serializers.FloatField()
     borrow_end = serializers.FloatField()
     borrow_change = serializers.FloatField()

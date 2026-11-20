@@ -12,11 +12,13 @@
 
 口径（唯一真源，恒等式由测试锁住）
     Δ净资产 = Δ总资产 − Δ负债                                    （定义）
-    Δ总资产 = 账本净流量 + 未解释差额                                （分解）
+    Δ总资产 = Δ金融资产 + Δ物件净值                               （分解：物件是自用资产）
+    Δ金融资产 = 账本净流量 + 未解释差额                            （分解）
     账本净流量 = 收入 − 支出 + 余额变更
-    未解释差额 = Δ总资产 − 账本净流量                                （★ 这才是要看的数）
+    未解释差额 = Δ金融资产 − 账本净流量                             （★ 这才是要看的数，只算金融端）
+    物件变化   = Δ物件净值                                        （独立一行：折旧/买入不污染差额）
 
-    ⇒  Δ净资产 = 账本净流量 + 未解释差额 − Δ负债
+    ⇒  Δ净资产 = 账本净流量 + 物件变化 + 未解释差额 − Δ负债
 
 🔴 为什么「未解释差额」只算**资产端**，不把 Δ负债 减进去：
     还款时「现金 −8500、负债 −8500」，净资产一分没变。
@@ -101,6 +103,8 @@ def _period(prev, cur, user_id):
     to_date = cur.get('snapshot_date')
 
     assets_start, assets_end = _f(prev.get('total_assets')), _f(cur.get('total_assets'))
+    # 物件净值（自用资产）起点/终点 —— 已由 ratio_service 按各自 snapshot_date 重算并下发。
+    prop_start, prop_end = _f(prev.get('property_net_value')), _f(cur.get('property_net_value'))
     borrow_start, borrow_end = _f(prev.get('borrow')), _f(cur.get('borrow'))
     net_start, net_end = _f(prev.get('net_worth')), _f(cur.get('net_worth'))
 
@@ -113,6 +117,9 @@ def _period(prev, cur, user_id):
         'assets_start': _r2(assets_start),
         'assets_end': _r2(assets_end),
         'assets_change': _r2(assets_end - assets_start),
+        'property_net_start': _r2(prop_start),
+        'property_net_end': _r2(prop_end),
+        'property_change': _r2(prop_end - prop_start),
         'borrow_start': _r2(borrow_start),
         'borrow_end': _r2(borrow_end),
         'borrow_change': _r2(borrow_end - borrow_start),
@@ -140,7 +147,13 @@ def _period(prev, cur, user_id):
 
     flow = _flow(from_date, to_date, user_id)
     flow_net = _r2(flow['income'] - flow['expense'] + flow['adjustment'])
-    unexplained = _r2((assets_end - assets_start) - flow_net)
+    # 物件净值变化单独一行，未解释差额只算「金融端」（v3.64.91）：
+    #   Δ金融资产 = Δ总资产 − Δ物件净值
+    #   未解释差额 = Δ金融资产 − 账本净流量
+    # 否则物件折旧（月均 ~940）会每月灌进「未解释差额」，把「物件自然贬值」
+    # 误报成「钱少了没记账」。
+    financial_change = (assets_end - prop_end) - (assets_start - prop_start)
+    unexplained = _r2(financial_change - flow_net)
 
     row.update({
         'income': flow['income'],
@@ -161,13 +174,13 @@ def _period(prev, cur, user_id):
 
 
 def _identity_ok(row) -> bool:
-    """恒等式自检：Δ净资产 = 账本净流量 + 未解释差额 − Δ负债
+    """恒等式自检：Δ净资产 = 账本净流量 + 物件变化 + 未解释差额 − Δ负债
 
     算不出来（无窗口）的期次直接放过 —— 这条只在有完整数据时才有意义。
     """
     if row['window_reason'] != 'ok':
         return True
-    rebuilt = row['flow_net'] + row['unexplained'] - row['borrow_change']
+    rebuilt = row['flow_net'] + row['property_change'] + row['unexplained'] - row['borrow_change']
     return abs(rebuilt - row['net_worth_change']) < 0.02
 
 

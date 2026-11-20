@@ -299,6 +299,7 @@ def _build_overview(cf: WealthCashFlow, expense_estimate: dict | None = None,
         financial_assets = float(metrics.get('financial_assets') or 0)
         total_assets = float(metrics.get('total_assets') or 0)
         net_worth = float(metrics.get('net_worth') or 0)
+        property_net = float(metrics.get('property_net_value') or 0)
     else:
         flow_total = sum_liquid_accounts(cf)
         non_liquid = 0.0       # 旧表 8 列没有非流动项（见 ratio_service._legacy_position）
@@ -306,6 +307,7 @@ def _build_overview(cf: WealthCashFlow, expense_estimate: dict | None = None,
         financial_assets = flow_total + accumulationfund   # wealth_cash_flow.total 的既有口径
         total_assets = financial_assets + lend             # 总资产：补回应收借出
         net_worth = total_assets - borrow                  # 净资产（数值等于原 realnum）
+        property_net = 0.0     # 无 metrics 的旧路径：物件净值不在此算（测试/内存对象走这条）
 
     # 应急金分母 = 近 EMERGENCY_EXPENSE_MONTHS 个月支出的三点估算（PERT）。
     # 分母的**计算**不在这里 —— 单一实现在 `expense_estimate` 模块，
@@ -361,6 +363,7 @@ def _build_overview(cf: WealthCashFlow, expense_estimate: dict | None = None,
             'total': round(financial_assets, 2),
             'financial_assets': round(financial_assets, 2),
             'total_assets': round(total_assets, 2),
+            'property_net_value': round(property_net, 2),
             'net_worth': round(net_worth, 2),
             'borrow': round(borrow, 2),
             'lend': round(lend, 2),

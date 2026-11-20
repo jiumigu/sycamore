@@ -347,6 +347,23 @@ def get_summary(reference: date | None = None) -> dict:
     return calc.summarize(rows)
 
 
+def in_use_net_value_as_of(as_of: date | None = None) -> float | None:
+    """物件「在用 + 闲置」件的净值合计（按 as_of 日算，**不含报废件**）。
+
+    供「净资产」接入使用（v3.64.91）—— 与首屏 `get_summary` 的
+    `in_use_net_value` **完全同一口径**（同一个 compute_property + summarize），
+    不另写一份算法。
+
+    ⚠️ 返回 float（对齐 ratio_service 的浮点口径）；None 表示「没有能算出
+       净值的在用件」（没有任何物件，或全部缺金额/年限）——调用方据此把
+       物件净值**整块排除**在净资产之外，而不是当成 0 加进去。
+    """
+    block = get_summary(reference=as_of)['in_use_net_value']
+    if block['counted'] == 0:
+        return None
+    return round(float(block['total']), 2)
+
+
 def get_meta() -> dict:
     """口径与枚举的单一出口 —— 前端不硬编码任何文案或选项"""
     return {
@@ -354,7 +371,8 @@ def get_meta() -> dict:
         'conditions': [{'value': v, 'label': l} for v, l in PROPERTY_CONDITION_CHOICES],
         'metric_meta': calc.build_metric_meta(),
         'issue_labels': dict(PROPERTY_ISSUE_LABELS),
-        # 页面里固定那一句说明 —— 放这里是为了它只有一个来源
-        'not_in_net_worth_note': '此合计不计入净资产，仅作家当参考',
+        # 页面里固定那一句说明 —— 放这里是为了它只有一个来源。
+        # v3.64.91 起物件「在用净值」已计入净资产（作为自用资产），文案随之改。
+        'net_worth_note': '在用净值已计入净资产（作为自用资产）',
         'subtitle': '管的是物件：家电 / 家具 / 数码，不是钱',
     }

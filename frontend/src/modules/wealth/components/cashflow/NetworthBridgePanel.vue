@@ -20,7 +20,9 @@
         </el-button>
       </div>
       <InfoTip :width="420" title="这个卡片在算什么">
-        <p>净资产的变化 = 账本净流量 + 未解释差额 − Δ负债。</p>
+        <p>净资产的变化 = 账本净流量 + 物件资产变化 + 未解释差额 − Δ负债。</p>
+        <p>「物件资产变化」是物件净值的增减（买入 / 折旧 / 报废），单独一行列出，
+          免得每月的折旧被当成「钱少了没记账」。</p>
         <p>「未解释差额」只算<strong>资产端</strong>：还债本身不改变净资产，
           所以 Δ负债 单独一行列出，不混进差额里。</p>
         <p>窗口 = (上期盘点日, 本期盘点日]。账单精确到秒、盘点只到日，
@@ -66,6 +68,7 @@
             <tr>
               <th>区间</th>
               <th class="num">账本净流量</th>
+              <th class="num">物件变化</th>
               <th class="num">未解释</th>
               <th class="num">Δ负债</th>
             </tr>
@@ -74,6 +77,7 @@
             <tr v-for="p in history" :key="p.to_yearmon">
               <td>{{ p.from_yearmon }}→{{ p.to_yearmon }}</td>
               <td class="num">{{ amount(p.flow_net) }}</td>
+              <td class="num">{{ amount(p.property_change) }}</td>
               <td class="num" :class="{ 'is-warn': p.level === 'material' }">
                 {{ amount(p.unexplained) }}
               </td>
@@ -158,6 +162,12 @@ const lines = computed(() => {
     {
       label: '账本净流量',
       value: p.flow_net === null ? '—' : amount(p.flow_net),
+      tone: '',
+    },
+    {
+      // 物件净值增减：买入（+）或折旧/报废（−）。单独一行，不混进「未解释差额」（v3.64.91）
+      label: '物件资产变化',
+      value: amount(p.property_change),
       tone: '',
     },
     {

@@ -8,7 +8,7 @@
 新表不会自动出现）。
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 from django.utils import timezone
@@ -18,7 +18,10 @@ from apps.wealth.services.survival_service import _stock_stale_days
 
 pytestmark = pytest.mark.django_db
 
-TODAY = date(2026, 11, 18)
+# 🔴 不能写死某一天当「今天」：`created_at` 是用 `timezone.now()` 往回推的，
+#    写死日期后测试只在那一天成立 —— 第二天跑就 1 == 3 挂掉（真实踩过）。
+#    两处必须用同一个基准，所以取一次 `localdate()` 供造数与断言共用。
+TODAY = timezone.localdate()
 
 
 def _make_stocktake(days_ago: int) -> SurvivalStocktake:

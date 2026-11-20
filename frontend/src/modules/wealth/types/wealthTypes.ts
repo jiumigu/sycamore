@@ -358,6 +358,8 @@ export interface AssetSummary {
   total: number
   financial_assets: number
   total_assets: number
+  /** 物件净值（自用资产，v3.64.91）—— total_assets 已含它 */
+  property_net_value: number
   net_worth: number
   borrow: number
   lend: number
@@ -1273,6 +1275,10 @@ export interface NetworthBridgePeriod {
   assets_start: number
   assets_end: number
   assets_change: number
+  /** 物件净值起点/终点/变化（v3.64.91）—— 从「未解释差额」拆出的独立一行 */
+  property_net_start: number
+  property_net_end: number
+  property_change: number
   borrow_start: number
   borrow_end: number
   borrow_change: number

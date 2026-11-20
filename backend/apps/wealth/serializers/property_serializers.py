@@ -264,5 +264,5 @@ class PropertyMetaSerializer(serializers.Serializer):
     conditions = PropertyOptionSerializer(many=True)
     metric_meta = PropertyMetricMetaSerializer(many=True)
     issue_labels = serializers.DictField(child=serializers.CharField())
-    not_in_net_worth_note = serializers.CharField()
+    net_worth_note = serializers.CharField()
     subtitle = serializers.CharField()

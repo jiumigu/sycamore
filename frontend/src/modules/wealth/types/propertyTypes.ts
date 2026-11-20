@@ -247,7 +247,7 @@ export interface PropertyMeta {
   metric_meta: PropertyMetricMeta[]
   /** 原因码 → 给人看的一句话（唯一真源在后端 constants） */
   issue_labels: Record<string, string>
-  /** 页面里固定那一句说明 —— 放后端是为了它只有一个来源 */
-  not_in_net_worth_note: string
+  /** 页面里固定那一句说明 —— 放后端是为了它只有一个来源（v3.64.91 改：净值已计入净资产） */
+  net_worth_note: string
   subtitle: string
 }

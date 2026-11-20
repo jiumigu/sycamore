@@ -77,6 +77,14 @@ const assetItems = computed(() => {
     },
     { key: 'accumulationfund', label: '公积金', value: props.overview.accounts.accumulationfund },
     { key: 'lend', label: '应收借出', value: s.lend, hint: '上面「金融资产」的其中一部分' },
+    {
+      // 自用资产（v3.64.91）：物件净值计入总资产/净资产，但不属于金融资产，
+      // 所以单独一行 —— 金融资产 + 物件资产 = 总资产，净资产 = 总资产 − 负债。
+      key: 'property_net',
+      label: '物件资产',
+      value: s.property_net_value,
+      hint: '自用资产：家电/家具/数码的在用净值，已计入净资产',
+    },
     { key: 'borrow', label: '负债', value: s.borrow },
   ]
 })

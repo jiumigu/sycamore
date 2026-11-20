@@ -20,8 +20,11 @@ from apps.wealth.models import (
     WealthAssetSnapshot,
     WealthAssetSnapshotItem,
     WealthBillList,
+    WealthProperty,
+    WealthPropertyCategory,
 )
 from apps.wealth.services.networth_bridge import build_networth_bridge
+from apps.wealth.services import ratio_service
 
 D = dt.date
 
@@ -246,3 +249,59 @@ class TestScope:
         data = build_networth_bridge()
         assert data['periods'] == []
         assert data['as_of'] == '2026-09'
+
+
+def _category(name='家电'):
+    return WealthPropertyCategory.objects.create(name=name, user_id=1)
+
+
+def _property(amount, purchased, lifespan=120, category=None):
+    return WealthProperty.objects.create(
+        user_id=1,
+        category=category or _category(),
+        name='测试物件',
+        purchase_amount=Decimal(str(amount)),
+        purchase_date=purchased,
+        lifespan_months=lifespan,
+    )
+
+
+@pytest.mark.django_db
+class TestPropertyChange:
+    """物件净值接入净资产（v3.64.91）后，归因必须把「物件变化」从「未解释差额」拆出。
+
+    实测物件月折旧 ≈ 940 元，若混进「未解释差额」会把「自然贬值」误报成
+    「钱少了没记账」—— 这就是拆独立一行的原因。
+    """
+
+    def test_property_net_value_enters_net_worth(self):
+        # 物件：1200 元、2026-01-01 购入、规划 120 个月 → 月折旧 10 元
+        _property(1200, D(2026, 1, 1))
+        acc = _account()
+        _snapshot('2026-08', D(2026, 8, 1), 10000, account=acc)
+
+        pos = ratio_service.resolve_asset_position('2026-08', 1)
+        # 2026-08-01 已用 7 个月 → 净值 1200 − 70 = 1130
+        assert pos['property_net_value'] == 1130.0
+        assert pos['self_use_total'] == 1130.0
+        assert pos['total_assets'] == 11130.0
+        assert pos['net_worth'] == 11130.0
+        # 物件是自用资产，变不成钱 → 不进「可用净资产」
+        assert pos['available_net_worth'] == 10000.0
+
+    def test_depreciation_does_not_pollute_unexplained(self):
+        _property(1200, D(2026, 1, 1))
+        acc = _account()
+        _snapshot('2026-08', D(2026, 8, 1), 10000, account=acc)
+        _snapshot('2026-09', D(2026, 9, 1), 10000, account=acc)
+
+        p = _latest()
+        # 8 月净值 1130、9 月净值 1120 → 折旧 10 元
+        assert p['property_change'] == -10.0
+        # 金融端没变、账本没记 → 未解释差额应为 0，而不是 -10
+        assert p['unexplained'] == 0.0
+        # 净资产只少了折旧这一笔
+        assert p['net_worth_change'] == -10.0
+        # 恒等式：账本净流量 + 物件变化 + 未解释差额 − Δ负债
+        rebuilt = p['flow_net'] + p['property_change'] + p['unexplained'] - p['borrow_change']
+        assert abs(rebuilt - p['net_worth_change']) < 0.02

@@ -63,7 +63,7 @@ class TestMetaKeys:
         body = api.get(META).json()
         assert set(body) == {
             'statuses', 'conditions', 'metric_meta', 'issue_labels',
-            'not_in_net_worth_note', 'subtitle',
+            'net_worth_note', 'subtitle',
         }
 
     def test_every_required_metric_key_is_present(self):
@@ -256,5 +256,5 @@ class TestPageCopyHasOneSource:
         """这句说明必须来自后端 —— 前端再写一份就会出现两处措辞"""
         api = APIClient()
         body = api.get(META).json()
-        assert '净资产' in body['not_in_net_worth_note']
+        assert '净资产' in body['net_worth_note']
         assert body['subtitle']

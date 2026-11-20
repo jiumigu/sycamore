@@ -89,6 +89,7 @@ from .expense_estimate import estimate_from_buckets
 from .asset_service import rollup_items
 from .classify_service import monthly_classified_totals
 from .debt_service import ACTIVE_LIABILITY
+from .property_service import in_use_net_value_as_of
 from .ratio_grade import grade_ratio, ratio_meta
 
 
@@ -196,6 +197,13 @@ def _snapshot_position(snap: WealthAssetSnapshot) -> dict:
         .select_related('account')
     ]
     roll = rollup_items(rows, snap.borrow)
+    # 物件净值接入净资产（v3.64.91）：物件是「自用资产」，加进 self_use_total，
+    # 从而进 total_assets / net_worth；但**不进** available_net_worth（自用变不成钱）。
+    # 口径复用 property_calc（单一真源），按本快照的 snapshot_date 重算（定格语义）；
+    # snapshot_date 缺失时按今天算。
+    property_net = in_use_net_value_as_of(snap.snapshot_date)
+    self_use_total = _round(roll['self_use_total'] + (property_net or 0.0))
+    total_assets = _round(roll['financial_assets'] + self_use_total)
     return {
         'available': True,
         'source': RATIO_SOURCE_SNAPSHOT,
@@ -215,11 +223,12 @@ def _snapshot_position(snap: WealthAssetSnapshot) -> dict:
         # 应收 = 应收类科目合计，用于与快照头的 lend 对账
         'receivable': roll['category_totals'].get('应收', 0.0),
         'financial_assets': roll['financial_assets'],
-        'self_use_total': roll['self_use_total'],
-        'total_assets': roll['total_assets'],
+        'property_net_value': property_net,
+        'self_use_total': self_use_total,
+        'total_assets': total_assets,
         'available_net_worth': roll['available_net_worth'],
         'borrow': roll['borrow'],
-        'net_worth': roll['net_worth'],
+        'net_worth': _round(total_assets - roll['borrow']),
         # 按科目取数的明细 —— 资产全景的饼图与固定列靠它渲染。
         # 键不是纯 code：公积金按**形态**合并到 `accumulationfund`
         # （理由见 `_position_accounts`）。旧表路径返回**同一形状**，
@@ -237,6 +246,11 @@ def _legacy_position(cf) -> dict:
     lend = float(cf.lend or 0)
     financial_assets = liquid + provident_fund
     total_assets = financial_assets + lend
+    # 物件净值接入净资产（v3.64.91）：物件是自用资产，加进 self_use_total 与 total_assets，
+    # 不进 available_net_worth（自用变不成钱）。口径复用 property_calc，按 btime 重算。
+    property_net = in_use_net_value_as_of(cf.btime)
+    self_use_total = _round(property_net or 0.0)
+    total_assets = _round(total_assets + self_use_total)
     return {
         'available': True,
         'source': RATIO_SOURCE_LEGACY,
@@ -251,11 +265,12 @@ def _legacy_position(cf) -> dict:
         # （与 self_use_total 同一处理方式）。
         'non_liquid': 0.0,
         'receivable': _round(lend),
-        # 旧表没有自用资产概念 —— 显式给 0 而不是省略字段，
-        # 否则前端得为两个来源各写一套取值分支。
-        'self_use_total': 0.0,
+        # 物件净值作为自用资产进 self_use_total（v3.64.91）；旧表 8 列里没有
+        # 「自用」科目，故 self_use_total 就是物件净值这一项。
+        'property_net_value': property_net,
+        'self_use_total': self_use_total,
         'financial_assets': _round(financial_assets),
-        'total_assets': _round(total_assets),
+        'total_assets': total_assets,
         'available_net_worth': _round(financial_assets - borrow),
         'borrow': _round(borrow),
         'net_worth': _round(total_assets - borrow),
