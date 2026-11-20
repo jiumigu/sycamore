@@ -93,7 +93,9 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { quickRecord } from '@/shared/api/coreApi'
 import QuickBillInlineForm from '@/modules/wealth/components/common/QuickBillInlineForm.vue'
-import { createWeightRecord } from '@/modules/health/api/healthApi'
+// 🔴 体重走 weightStore.createRecord 而不是直连 api：user_id 由 store 统一补，
+//    直连会漏这个字段（后端 serializer 必填 ⇒ 400「user_id: This field is required」）
+import { useWeightStore } from '@/modules/health/stores/healthStore'
 import { todayLocal } from '@/shared/utils/datetime'
 import { apiErrorText } from '@/shared/utils/apiError'
 // 🔴 单位刻度、换算系数、上次用过的单位与体重页**同一份**（见 utils/weightUnits.ts）
@@ -111,6 +113,7 @@ const form = ref({ module: 'temporal', content: '' })
 
 const billRef = ref<InstanceType<typeof QuickBillInlineForm> | null>(null)
 const billSaving = ref(false)
+const weightStore = useWeightStore()
 
 // ─── 体重 ───
 const weightValue = ref<number | undefined>(undefined)
@@ -176,7 +179,7 @@ async function saveWeight() {
   }
   weightSaving.value = true
   try {
-    await createWeightRecord({ record_date: todayLocal(), weight_kg: kg })
+    await weightStore.createRecord({ record_date: todayLocal(), weight_kg: kg })
     dialogVisible.value = false
     emit('update:visible', false)
     // 体重页若正开着，让它自己重取 —— 否则「刚记的那条」要等下次进页面才出现
