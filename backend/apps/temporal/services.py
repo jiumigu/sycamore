@@ -1579,6 +1579,119 @@ def _line_configured(spec: dict, names: list[str]) -> bool:
     return bool(names)
 
 
+def _guard_bounds(spec: dict) -> tuple[float, float | None]:
+    """一条线的 `(下限, 上限)` —— 上限可能为 None。只有这里读 `threshold_hours` / `upper_hours`。"""
+    threshold = float(spec['threshold_hours'])
+    upper = spec.get('upper_hours')
+    return threshold, (float(upper) if upper is not None else None)
+
+
+def _guard_verdict(spec: dict, value: float | None) -> tuple[str, float | None, bool]:
+    """按 spec 判一条线的状态：`(status, gap, over)`。
+
+    🔴 阈值只来自 spec（`DAILY_GUARD_LINES`）。折线图和「今天的三条线」共用这一处 ——
+       同一晚的睡眠在两处出现两种判定，比没有判定更糟。
+    · `value is None` ⇒ `unrecorded`（**不是 0 小时**）
+    · `over` = 越过了**上限**那一端（睡眠睡过头）；服务 `gap_text` 用它决定「差 / 超」
+    """
+    if value is None:
+        return 'unrecorded', None, False
+    threshold, upper = _guard_bounds(spec)
+    if spec['direction'] == 'at_least':
+        over = upper is not None and value > upper
+        status = 'ok' if (value >= threshold and not over) else 'off'
+        gap = abs(round(value - (upper if over else threshold), 1))
+        return status, gap, over
+    over = value > threshold
+    return ('off' if over else 'ok'), abs(round(value - threshold, 1)), over
+
+
+def compute_sleep_series(start_date: date, end_date: date, *, role: str = 'sleep_night') -> dict:
+    """逐日睡眠时长：`[{date, hours, status, count}]` + 汇总。
+
+    🔴 三个容易做错的点：
+    ① **一次查询**、在内存里按本地日分桶。逐天查库会让 90 天的图打 90 次数据库，
+       而且每次都要重读 `TaskMeta` —— 图一慢就会有人去加缓存，然后旧数失去信号。
+    ② 夜间睡眠按**醒来那一刻**归属（23:40 睡 8h 归次日），与 `_guard_value_and_count`
+       同一口径；取数窗口两端各放宽 36h，跨零点前入睡的那一觉才不会漏。
+    ③ 没有记录的那天 `hours=None`、`status='unrecorded'` —— 不给 0，
+       否则折线图上会出现「那天只睡了 0 小时」的假谷底。
+    """
+    spec = next(s for s in DAILY_GUARD_LINES if s['key'] == 'sleep')
+    names = list(
+        TaskMeta.objects.filter(daily_role=role).values_list('task_name', flat=True),
+    )
+    threshold, upper = _guard_bounds(spec)
+    tz = timezone.get_current_timezone()
+
+    buckets: dict[date, dict] = {}
+    if names:
+        win_start, _ = _local_day_bounds(start_date)
+        _, win_end = _local_day_bounds(end_date)
+        rows = TemporalTask.objects.filter(
+            task_name__in=names,
+            start_time__gte=win_start - timedelta(hours=36),
+            start_time__lt=win_end + timedelta(hours=36),
+        ).values_list('start_time', 'duration_hours')
+        for start_time, hours in rows:
+            if not start_time or not hours:
+                continue
+            if timezone.is_naive(start_time):
+                start_time = timezone.make_aware(start_time, tz)
+            wake = start_time + timedelta(hours=float(hours))
+            if timezone.is_naive(wake):
+                wake = timezone.make_aware(wake, tz)
+            day = wake.astimezone(tz).date()
+            if day < start_date or day > end_date:
+                continue
+            slot = buckets.setdefault(day, {'hours': 0.0, 'count': 0})
+            slot['hours'] += float(hours)
+            slot['count'] += 1
+
+    days = []
+    cursor = start_date
+    while cursor <= end_date:
+        slot = buckets.get(cursor)
+        value = round(slot['hours'], 2) if slot else None
+        status, gap, over = _guard_verdict(spec, value)
+        days.append({
+            'date': cursor.isoformat(),
+            'hours': value,
+            'status': status,
+            # 有记录但不是整天 —— 图上照样画，只是旁边要知道这条是「补录的半天」
+            'count': slot['count'] if slot else 0,
+            'gap_hours': gap,
+            'over': over,
+        })
+        cursor += timedelta(days=1)
+
+    recorded = [d for d in days if d['hours'] is not None]
+    ok = [d for d in recorded if d['status'] == 'ok']
+    values = [d['hours'] for d in recorded]
+    return {
+        'start': start_date.isoformat(),
+        'end': end_date.isoformat(),
+        'label': spec['label'],
+        'threshold_hours': threshold,
+        'upper_hours': upper,
+        'threshold_text': (
+            f'{threshold:g}～{upper:g} 小时' if upper is not None else f'≥ {threshold:g} 小时'
+        ),
+        'configured': bool(names),
+        'days': days,
+        'summary': {
+            'total_days': len(days),
+            'recorded_days': len(recorded),
+            'ok_days': len(ok),
+            'off_days': len(recorded) - len(ok),
+            'unrecorded_days': len(days) - len(recorded),
+            'avg_hours': round(sum(values) / len(values), 2) if values else None,
+            'min_hours': min(values) if values else None,
+            'max_hours': max(values) if values else None,
+        },
+    }
+
+
 def compute_daily_guards(target_date: date | None = None) -> dict:
     """「今天的三条线」：每条线给实测值 / 阈值 / 状态（睡眠 / 午睡 / 流失）。
 
@@ -1599,15 +1712,9 @@ def compute_daily_guards(target_date: date | None = None) -> dict:
         names = roles.get(spec['role'], []) if spec.get('role') else []
         configured = _line_configured(spec, names)
         value, count = _guard_value_and_count(spec, names, target_date)
-        threshold = float(spec['threshold_hours'])
+        threshold, upper = _guard_bounds(spec)
         at_least = spec['direction'] == 'at_least'
-
-        if value is None:
-            status = 'unrecorded'
-            gap = None
-        else:
-            status = 'ok' if ((value >= threshold) if at_least else (value <= threshold)) else 'off'
-            gap = abs(round(value - threshold, 1))
+        status, gap, over = _guard_verdict(spec, value)
 
         if status == 'unrecorded':
             gap_text = ''
@@ -1616,9 +1723,11 @@ def compute_daily_guards(target_date: date | None = None) -> dict:
             detail_text = spec['unrecorded_text'] if configured else spec['unconfigured_text']
         elif status == 'ok':
             gap_text = ''
-            detail_text = f'线 {threshold:g} 小时'
+            detail_text = (
+                f'线 {threshold:g}～{upper:g} 小时' if upper is not None else f'线 {threshold:g} 小时'
+            )
         else:
-            gap_text = f'{"差" if at_least else "超"} {gap:g} 小时'
+            gap_text = f'{"超" if over else "差"} {gap:g} 小时'
             detail_text = gap_text
 
         lines.append({
@@ -1627,7 +1736,11 @@ def compute_daily_guards(target_date: date | None = None) -> dict:
             'direction': spec['direction'],
             'configured': configured,
             'threshold_hours': threshold,
-            'threshold_text': f'{"≥" if at_least else "≤"} {threshold:g} 小时',
+            'upper_hours': upper,
+            'threshold_text': (
+                f'{threshold:g}～{upper:g} 小时' if upper is not None
+                else f'{"≥" if at_least else "≤"} {threshold:g} 小时'
+            ),
             'value_hours': value,
             'value_text': f'{value:g} 小时' if value is not None else '—',
             'status': status,

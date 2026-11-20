@@ -544,13 +544,15 @@ export interface DailyGuardLine {
   /** 这条线「配好了没有」。false ⇒ 未记录是「还没配」（配置问题），不是「今天没做」 */
   configured: boolean
   threshold_hours: number
+  /** 上限（只有睡眠有，9.5h）；`null` = 这条线只判下限 */
+  upper_hours: number | null
   /** 「≥ 8 小时」/「≤ 1.5 小时」—— 后端给，前端不拼 */
   threshold_text: string
   /** 没记录时是 `null`，**不是 0**（`null` 与 `0` 是两件事） */
   value_hours: number | null
   value_text: string
   status: DailyGuardStatus
-  /** 「达标」/「未达」/「越线」/「未记录」—— 后端给，前端不写中文表 */
+  /** 「达标」/「偏离」/「越线」/「未记录」—— 后端给，前端不写中文表 */
   status_text: string
   /** 「差 0.6 小时」/「超 2 小时」；达标与未记录时为空串 */
   gap_text: string
@@ -564,5 +566,44 @@ export interface DailyGuardData {
   lines: DailyGuardLine[]
   /** 三条线里已落地的条数（睡眠/午睡看角色、流失看归因）；0 = 一条都还没配 */
   configured_lines: number
+}
+
+/** 睡眠折线的一天 */
+export interface SleepSeriesDay {
+  date: string
+  /** 没有记录 ⇒ `null`，**不是 0**：0 会在图上画出一个不存在的谷底 */
+  hours: number | null
+  status: DailyGuardStatus
+  /** 这一天凑了几条记录（跨夜中断会 >1） */
+  count: number
+  /** 离阈值多少；未记录时 `null` */
+  gap_hours: number | null
+  /** 越过上限（睡过头）—— 决定提示说「超」还是「差」 */
+  over: boolean
+}
+
+export interface SleepSeriesSummary {
+  total_days: number
+  recorded_days: number
+  ok_days: number
+  off_days: number
+  unrecorded_days: number
+  avg_hours: number | null
+  min_hours: number | null
+  max_hours: number | null
+}
+
+export interface SleepSeriesData {
+  start: string
+  end: string
+  label: string
+  threshold_hours: number
+  upper_hours: number | null
+  /** 「8～9.5 小时」—— 后端给，前端不拼 */
+  threshold_text: string
+  /** false ⇒ 还没有任务名标「夜间睡眠」角色，图会是空的 */
+  configured: boolean
+  days: SleepSeriesDay[]
+  summary: SleepSeriesSummary
 }
 

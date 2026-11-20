@@ -1,7 +1,7 @@
 import request from '@/shared/utils/request'
 import type {
   CompletenessData, DailyGuardData, FrequentNamesData, ImportPreview, MetaLedgerData,
-  OverlapCheckData, SourceOverview, SunburstData, TaskRenameResult, WeeklyStructure,
+  OverlapCheckData, SleepSeriesData, SourceOverview, SunburstData, TaskRenameResult, WeeklyStructure,
 } from '../types/temporalTypes'
 
 // ─── 每日记录 (OneDay) ───
@@ -242,6 +242,17 @@ export function deleteTaskName(data: { task_name: string }) {
  */
 export function getDailyGuards(params: { date?: string } = {}) {
   return request<DailyGuardData>({ url: '/temporal/tasks/daily_guards/', method: 'get', params })
+}
+
+/**
+ * 逐日睡眠时长（睡眠趋势折线图）。
+ *
+ * 🔴 阈值（8～9.5 小时）与达标判定都在后端 `DAILY_GUARD_LINES`，
+ *    与「今天的三条线」同一份；前端只画线、不判状态。
+ * 🔴 没记录的那天 `hours` 是 `null` —— 图上要断开，不能当 0 连过去。
+ */
+export function getSleepSeries(params: { days?: number; end?: string } = {}) {
+  return request<SleepSeriesData>({ url: '/temporal/tasks/sleep-series/', method: 'get', params })
 }
 
 export function getSunburst(params?: Record<string, unknown>) {

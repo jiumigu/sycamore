@@ -2,7 +2,7 @@ import json
 import os
 import re
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from django.utils import timezone
 from rest_framework import filters, status, viewsets
@@ -35,6 +35,7 @@ from .services import (
     _ensure_task_meta,
     batches_of_kind,
     compute_daily_guards,
+    compute_sleep_series,
     contrib_excluded_names,
     delete_task_name,
     find_overlaps,
@@ -718,6 +719,36 @@ class TemporalTaskViewSet(viewsets.ModelViewSet):
             except ValueError:
                 return Response({'error': 'date 格式 YYYY-MM-DD'}, status=400)
         return Response(compute_daily_guards(target))
+
+    @action(detail=False, methods=['get'], url_path='sleep-series')
+    def sleep_series(self, request):
+        """逐日睡眠时长（任务清单上方「睡眠趋势」入口的数据源）
+
+        `?days=30`（7~365，默认 30）、`?end=YYYY-MM-DD`（默认本地今天）。
+
+        🔴 与「今天的三条线」共用 `DAILY_GUARD_LINES` 里那条睡眠 spec
+           （8～9.5 小时、按醒来日归属）—— 两处各写一套阈值，同一晚会得出两种结论。
+        🔴 没记录的那天 `hours=null` / `status=unrecorded`，不填 0：填 0 会在折线上
+           画出一个根本不存在的「那天只睡了 0 小时」的谷底。
+        🔴 参数写错返 400，不静默回退默认值 —— 否则「写错了」看起来像「这段时间没数据」。
+        """
+        raw_days = request.query_params.get('days', '30')
+        try:
+            days = int(raw_days)
+        except (TypeError, ValueError):
+            return Response({'error': 'days 需为整数（7~365）'}, status=400)
+        if not 7 <= days <= 365:
+            return Response({'error': 'days 需在 7~365 之间'}, status=400)
+
+        end = timezone.localdate()
+        end_raw = request.query_params.get('end')
+        if end_raw:
+            try:
+                end = datetime.strptime(end_raw, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'error': 'end 格式 YYYY-MM-DD'}, status=400)
+
+        return Response(compute_sleep_series(end - timedelta(days=days - 1), end))
 
     @action(detail=False, methods=['get'])
     def unclassified(self, request):

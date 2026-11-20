@@ -261,6 +261,11 @@ DAILY_GUARD_LINES = [
         'label': '昨夜睡眠',
         'direction': 'at_least',
         'threshold_hours': 8.0,
+        # 🔴 上限不是「更严格」，是补一个原来量不到的错：只有下限时，睡 11.5 小时
+        #    和睡 8 小时一样判「达标」。实测 2026-11-17 那条就是 11.46h —— 数字看着
+        #    漂亮、实际是异常。上限只给睡眠这一条线，午睡/流失本来就是 at_most。
+        #    折线图与「今天的三条线」共用这一份，不另设第二套。
+        'upper_hours': 9.5,
         'day_bucket': 'wakeup_day',
         'unrecorded_text': '还没有今天的睡眠记录',
         'unconfigured_text': '还没标「夜间睡眠」角色',
@@ -299,7 +304,9 @@ DAILY_GUARD_LINES = [
 # 状态词（🔴 唯一一份；后端算好下发，前端不再写中文表）
 DAILY_GUARD_STATUS_TEXT = {
     ('at_least', 'ok'): '达标',
-    ('at_least', 'off'): '未达',
+    # 「未达」只在没加上限时才对；睡眠现在两个方向都可能偏离，
+    # 方向由 `gap_text` 说（“差 2 小时” / “超 1.5 小时”），状态词只表示“不在线内”。
+    ('at_least', 'off'): '偏离',
     ('at_most', 'ok'): '达标',
     ('at_most', 'off'): '越线',
     ('any', 'unrecorded'): '未记录',

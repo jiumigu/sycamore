@@ -11,6 +11,12 @@
           size="small"
           @click="$router.push({ path: '/temporal/contrib', query: { from: 'tasks' } })"
         >📈 贡献图</el-button>
+        <!-- 单看列表判断不了「这几周睡得行不行」：清单只给单条记录，
+             时长趋势要靠折线。入口与贡献图并列 —— 都是「同一批数据的另一种看法」。 -->
+        <el-button
+          size="small"
+          @click="$router.push('/temporal/sleep')"
+        >😴 睡眠趋势</el-button>
         <el-button size="small" type="primary" @click="openCreate">＋ 手工新增</el-button>
         <el-button size="small" @click="timerPanelVisible = true">⏱ 实时计时</el-button>
         <el-button size="small" @click="$router.push('/temporal/mapping')">🧩 映射编辑器</el-button>
@@ -735,7 +741,8 @@ onMounted(async () => {
 <style scoped lang="scss">
 .task-list-view { padding: 16px;
   .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
-    .page-title { margin: 0; font-size: 18px; font-weight: 600; }
+    // 7 个按钮后标题容易被压成两行（资产盘点页头踩过同一个坑）
+    .page-title { margin: 0; font-size: 18px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
     // 按钮组靠右：标题占左，出口集中在一处（这一页是主入口，不再有「返回」）
     .header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; } }
   .filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }

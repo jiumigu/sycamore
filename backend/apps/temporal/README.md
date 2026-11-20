@@ -301,9 +301,13 @@ L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
     23:40 睡 8h 算次日。若按 `start_time` 归属，**上午打开页面会永远显示
     「今天还没有睡眠记录」** —— 不报错、数字看着也合理。
   - 午睡 / 流失按开始时刻归属（都不跨日；跨零点的一整段归开始那天）。
-- 🔴 **阈值只在本 app 的 `constants.DAILY_GUARD_LINES`**（8h / 1.5h / 4h），
+- 🔴 **阈值只在本 app 的 `constants.DAILY_GUARD_LINES`**（睡眠 8～9.5h、午睡 1.5h、流失 4h），
   前端 0 个数字，只按 `status` 上色。⚠️ 别在文案里再抄一遍数字 ——
   曾经那句「≤2h」在阈值改成 4h 后就成了假话。
+- 🔴 **睡眠有上限**（v3.64.94）：`upper_hours: 9.5`。只有下限时，睡 11.46h 和睡 8h
+  一样判「达标」—— 数字漂亮、语义是错的。判定集中在 `services._guard_verdict()`，
+  低于下限说「差 N 小时」、高于上限说「超 N 小时」、中间「达标」。
+  ⚠️ 因此 `('at_least','off')` 的状态词从「未达」改成「偏离」（方向由 `gap_text` 给）。
 - 🔴 **三档状态，没有兜底桶**：`ok` / `off` / `unrecorded`。
   `unrecorded` **永远不等于达标** —— 当天没记就照实说没记，不拿 0 小时冒充
   「没流失」（`null` 与 `0` 是两件事）。
@@ -378,6 +382,7 @@ L3 任务  ATracker 原始 task_name（managed=False 外部表，不改）
 | GET | /tasks/meta/ | 任务元数据（**分类台账**主体，非「未归类池」） |
 | GET | /tasks/meta_ledger/ | 分类台账（**改归因的唯一入口**）；`?growth_only=1` 只看计入成长计时的任务名、`?role_only=1` 只看标了护栏角色的；每行带 `counts_growth` / `daily_role`，概要带 `growth_count` / `growth_hours` / `role_count` |
 | GET | /tasks/daily_guards/ | **今天的三条线**（睡眠 / 午睡 / 流失；`?date=YYYY-MM-DD`，不传 = 今天）：三条线各给实测值 / 阈值 / 状态（`ok` / `off` / `unrecorded`），口径见上「`daily_role`」 |
+| GET | /tasks/sleep-series/ | **逐日睡眠折线**（任务清单页头的「睡眠趋势」）：`?days=7~365`（默认 30）、`?end=YYYY-MM-DD`（默认今天）。每天给 `hours` / `status` / `gap_hours` / `over`，另给 `summary`；**与三条线共用同一份 sleep spec**，没记录那天 `hours=null`。参数写错返 400 |
 | GET | /tasks/unclassified/ | 未归类任务（**只是 meta 的筛选态**） |
 | POST | /tasks/batch_set_meta/ | 批量设置 L2 类型 / L1 归因 / **成长计时** / **护栏角色**（`counts_growth`、`daily_role` 均可单独发；不传 = 不动，`daily_role` 传空串 = 退出护栏） |
 | POST | /tasks/rename_task_name/ | **改名 / 合并**（v3.64.55）：`{task_name, new_name, dry_run?}`。新名已存在 = 合并（记录并过去、源行删掉），否则 = 纯改名。`dry_run=1` 只算不写，弹窗的影响预览走它。口径见下「任务名改名 / 合并」 |

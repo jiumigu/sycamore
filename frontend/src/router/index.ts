@@ -52,6 +52,13 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/modules/temporal/views/TaskListView.vue'),
     meta: { title: '时间任务清单' },
   },
+  // 睡眠趋势：低频页，不占侧边栏菜单，入口在任务清单页头（与贡献图同一套做法）
+  {
+    path: '/temporal/sleep',
+    name: 'temporal-sleep',
+    component: () => import('@/modules/temporal/views/SleepTrendView.vue'),
+    meta: { title: '睡眠趋势' },
+  },
 
   // 目标与项目
   { path: '/temporal/contrib', name: 'temporal-contrib', component: () => import('@/modules/temporal/views/contrib/TemporalContribView.vue'), meta: { title: '时间贡献图' } },
