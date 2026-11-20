@@ -10,7 +10,7 @@
 | ReaderGroup | relation_reader_group | 读者群体 |
 | ReaderInteraction | relation_reader_interaction | 读者互动记录（含 6 种互动类型 + 能量分 + 互动日期） |
 | ConflictEvent | relation_conflict_event | 冲突事件（情绪等级 1-5、解决状态、关联人、备注、事件时间） |
-| ReaderMonthlySummary | relation_reader_monthly_summary | 读者月末盘点（总关注数、新增关注、取关、最佳文章、年度月份唯一约束） |
+| ReaderMonthlySummary | relation_reader_monthly_summary | 读者月末复盘（总关注数、新增关注、取关、发文篇数、最佳文章与其阅读数、年度月份唯一约束） |
 
 ## Services
 - `services/quality_service.py`：自动质量诊断（近20次互动平均能量分 → nourishing/neutral/draining/toxic）
@@ -46,9 +46,9 @@ Interaction post_save/post_delete → 触发质量更新
 | GET/POST | /conflicts/ | 冲突事件列表（?contact=&status=&start_date=&end_date= 筛选）/ 创建 |
 | GET/PUT/DELETE | /conflicts/&lt;id&gt;/ | 冲突事件详情/更新/删除 |
 | GET | /conflicts/stats/ | 冲突统计（总次数/未解决数/按联系人汇总/情绪平均值/月度趋势） |
-| GET/POST | /reader-monthly-summaries/ | 读者月末盘点列表（?year=&month=&reader_group= 筛选）/ 创建 |
-| GET/PUT/DELETE | /reader-monthly-summaries/&lt;id&gt;/ | 盘点详情/更新/删除 |
-| GET | /reader-monthly-summaries/stats/ | 盘点年度统计（12 个月汇总 + 最佳月份） |
+| GET/POST | /reader-monthly-summaries/ | 读者月末复盘列表（?year=&month=&reader_group= 筛选，**不分页**：一年最多 12 条）/ 创建 |
+| GET/PUT/DELETE | /reader-monthly-summaries/&lt;id&gt;/ | 复盘详情/更新/删除 |
+| GET | /reader-monthly-summaries/stats/ | 复盘年度统计（?year= 省略即全期；12 个月汇总 + 最佳月份含年份 + 全年发文/最高阅读） |
 | GET/POST | /reader-groups/ | 读者群体列表/创建 |
 | GET/PUT/DELETE | /reader-groups/&lt;id&gt;/ | 群体详情/更新/删除 |
 | GET/POST | /reader-interactions/ | 读者互动列表（?group_id=）/ 创建 |

@@ -54,7 +54,9 @@ export interface ReaderMonthlySummary {
   total_followers: number
   total_interactions: number
   high_energy_count: number
+  published_count: number | null
   top_article: string
+  top_article_views: number | null
   notes: string
   created_at: string
 }
@@ -66,6 +68,15 @@ export interface ReaderYearlyStats {
   net_growth: number
   avg_monthly_interactions: number
   total_interactions: number
-  best_month: { month: number; total_interactions: number; top_article: string } | null
+  total_published: number | null
+  max_article_views: number | null
+  best_month: {
+    year: number
+    month: number
+    new_followers: number
+    total_interactions: number
+    top_article: string
+    top_article_views: number | null
+  } | null
   total_summaries: number
 }

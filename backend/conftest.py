@@ -1440,6 +1440,36 @@ def _patch_survival_item_columns(cursor) -> None:
         )
 
 
+# relation 0009 给**已存在**的 `relation_reader_monthly_summary` 加了两个可空列。
+# 与 survival 0021 同款坑：`--reuse-db` 复用的旧测试库不会因为迁移文件新增就补列，
+# 结果是 ORM 一 INSERT 就 `Unknown column 'published_count'`，看着像代码错、其实是环境错。
+# MySQL 没有 `ADD COLUMN IF NOT EXISTS`，所以先查 information_schema，只补缺的列。
+_READER_MONTHLY_COLUMNS_0009 = (
+    ('published_count', 'integer NULL'),
+    ('top_article_views', 'integer NULL'),
+)
+
+
+def _patch_reader_monthly_columns(cursor) -> None:
+    """给已存在的 `relation_reader_monthly_summary` 补 0009 的两列（幂等、不删不动）"""
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'relation_reader_monthly_summary'
+        """,
+    )
+    rows = {row[0] for row in cursor.fetchall()}
+    if not rows:
+        return          # 表还没建：迁移会在建表时带上这两列
+    for name, definition in _READER_MONTHLY_COLUMNS_0009:
+        if name in rows:
+            continue
+        # 列名与定义都是本文件里的字面量，不来自外部输入
+        cursor.execute(
+            f'ALTER TABLE `relation_reader_monthly_summary` ADD COLUMN `{name}` {definition}',
+        )
+
+
 def _patch_core_user_profile_columns(cursor) -> None:
     """给**已存在**的 `core_user_profile` 补上 0007 的新列（幂等、不删不动）。
 
@@ -1738,6 +1768,8 @@ def django_db_setup(django_db_setup, django_db_blocker):
             # 实盘盘点（v3.59.3）：先给 item 补上 0021 的新列，再建盘点两张表 ——
             # 明细表的 item_id 外键指向 item，先补列读起来顺序更清楚
             _patch_survival_item_columns(cursor)
+            # 读者月末复盘（relation 0009）：老表加两列，同款幂等补列
+            _patch_reader_monthly_columns(cursor)
             cursor.execute(_CREATE_SURVIVAL_STOCKTAKE_SQL)
             cursor.execute(_CREATE_SURVIVAL_STOCKTAKE_LINE_SQL)
             # 必需品基准清单（v3.59.7）：外键指向 category，故排在类别之后

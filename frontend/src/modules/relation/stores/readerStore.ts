@@ -13,6 +13,13 @@ export const useReaderStore = defineStore('reader', () => {
   const saving = ref(false)
   const selectedGroupId = ref<number | null>(null)
 
+  // 🔴 上次拉复盘用的筛选条件：保存/删除后必须按同一条件重拉。
+  //    否则子组件筛着 2026 年、store 却用无参重拉成「全部年份」，
+  //    标题写着「2026年复盘记录」、表里躺着 2025 的行 —— 两处口径不同源，静默错。
+  //    用 `{}` 表示「显式不筛」，与 `undefined`（不传=沿用上次）区分开。
+  let summaryParams: Record<string, unknown> | undefined
+  let statsParams: Record<string, unknown> | undefined
+
   const formVisible = ref(false)
   const groupFormVisible = ref(false)
 
@@ -105,18 +112,20 @@ export const useReaderStore = defineStore('reader', () => {
   }
 
   async function fetchMonthlySummaries(params?: Record<string, unknown>) {
+    if (params !== undefined) summaryParams = params
     try {
-      const res = await readerApi.getMonthlySummaries(params)
+      const res = await readerApi.getMonthlySummaries(summaryParams)
       monthlySummaries.value = extractList<ReaderMonthlySummary>(res.data)
     } catch (e) {
-      console.error('获取月末盘点失败:', e)
+      console.error('获取月末复盘失败:', e)
       monthlySummaries.value = []
     }
   }
 
   async function fetchYearlyStats(params?: Record<string, unknown>) {
+    if (params !== undefined) statsParams = params
     try {
-      const res = await readerApi.getReaderYearlyStats(params)
+      const res = await readerApi.getReaderYearlyStats(statsParams)
       yearlyStats.value = res.data
     } catch (e) {
       console.error('获取年度统计失败:', e)
@@ -124,10 +133,38 @@ export const useReaderStore = defineStore('reader', () => {
     }
   }
 
+  /**
+   * 按年月找一条复盘记录（算「取关」要用上月总关注）。
+   * 列表里只有当前筛选年，跨年（1 月要 12 月）会找不到 —— 这里按需补拉那一年并缓存，
+   * 别让「找不到」和「上月总关注真是 0」混成同一个结果。
+   */
+  const monthCache = new Map<string, ReaderMonthlySummary>()
+  async function findMonthSummary(
+    year: number,
+    month: number,
+    groupId: number | null,
+  ): Promise<ReaderMonthlySummary | null> {
+    const key = `${year}-${month}-${groupId}`
+    const pick = (rows: ReaderMonthlySummary[]) =>
+      rows.find((s) => s.year === year && s.month === month && s.reader_group === groupId) ?? null
+    const hit = pick(monthlySummaries.value) ?? monthCache.get(key)
+    if (hit) return hit
+    try {
+      const res = await readerApi.getMonthlySummaries({ year })
+      const rows = extractList<ReaderMonthlySummary>(res.data)
+      for (const r of rows) monthCache.set(`${r.year}-${r.month}-${r.reader_group}`, r)
+      return pick(rows)
+    } catch (e) {
+      console.error('获取上月复盘失败:', e)
+      return null
+    }
+  }
+
   async function createMonthlySummary(data: Record<string, unknown>) {
     saving.value = true
     try {
       await readerApi.createMonthlySummary(data)
+      monthCache.clear()
       await fetchMonthlySummaries()
       await fetchYearlyStats()
     } finally {
@@ -139,6 +176,7 @@ export const useReaderStore = defineStore('reader', () => {
     saving.value = true
     try {
       await readerApi.updateMonthlySummary(id, data)
+      monthCache.clear()
       await fetchMonthlySummaries()
       await fetchYearlyStats()
     } finally {
@@ -149,6 +187,7 @@ export const useReaderStore = defineStore('reader', () => {
   async function deleteMonthlySummary(id: number) {
     try {
       await readerApi.deleteMonthlySummary(id)
+      monthCache.clear()
       await fetchMonthlySummaries()
       await fetchYearlyStats()
     } catch (e) {
@@ -174,7 +213,7 @@ export const useReaderStore = defineStore('reader', () => {
     fetchGroups, createGroup, deleteGroup,
     fetchInteractions, createInteraction, deleteInteraction,
     fetchResonancePoints, fetchAll,
-    fetchMonthlySummaries, fetchYearlyStats,
+    fetchMonthlySummaries, fetchYearlyStats, findMonthSummary,
     createMonthlySummary, updateMonthlySummary, deleteMonthlySummary,
   }
 })

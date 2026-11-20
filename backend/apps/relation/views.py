@@ -314,6 +314,9 @@ class ReaderMonthlySummaryViewSet(viewsets.ModelViewSet):
     queryset = ReaderMonthlySummary.objects.all()
     permission_classes = [AllowAny]
     serializer_class = ReaderMonthlySummarySerializer
+    # 🔴 不分页：一年最多 12 条，全局 10 条/页会让「全部年份」只显示前 10 条，
+    #    而列表标题写的是「(本页条数)」—— 库里有 20 条却只看到 10 条，静默丢数。
+    pagination_class = None
 
     def get_queryset(self):
         qs = super().get_queryset().filter(user_id=1)
@@ -340,6 +343,8 @@ class ReaderMonthlySummaryViewSet(viewsets.ModelViewSet):
                 'total_new_unfollowers': 0,
                 'net_growth': 0,
                 'avg_monthly_interactions': 0,
+                'total_published': None,
+                'max_article_views': None,
                 'best_month': None,
                 'total_summaries': 0,
             })
@@ -352,13 +357,20 @@ class ReaderMonthlySummaryViewSet(viewsets.ModelViewSet):
             total_new_unfollowers=Sum('new_unfollowers'),
             total_interactions=Sum('total_interactions'),
             total_high_energy=Sum('high_energy_count'),
+            # 🔴 这两个**不做 `or 0`**：SUM/MAX 忽略 NULL，全月都没填时返回 None。
+            #    `or 0` 会把「一次都没盘过」说成「全年发了 0 篇」，正是这个项目最怕的假值。
+            total_published=Sum('published_count'),
+            max_article_views=Max('top_article_views'),
         )
         total_new_followers = agg['total_new_followers'] or 0
         total_new_unfollowers = agg['total_new_unfollowers'] or 0
         total_interactions = agg['total_interactions'] or 0
         count = qs.count()
 
-        best = qs.order_by('-total_interactions').first()
+        # 「最佳月份」按**本月新增关注**评，不按互动：互动字段从来没有数据（历史 20 期全为 0），
+        # 按互动排会稳定选中 1 月并显示「互动 0 次」—— 一个看起来像结论的假值。
+        # 新增关注每期都在填，才是这张卡真正想回答的问题。
+        best = qs.filter(new_followers__gt=0).order_by('-new_followers').first()
 
         return Response({
             'year': year,
@@ -367,10 +379,16 @@ class ReaderMonthlySummaryViewSet(viewsets.ModelViewSet):
             'net_growth': total_new_followers - total_new_unfollowers,
             'avg_monthly_interactions': round(total_interactions / count, 1) if count else 0,
             'total_interactions': total_interactions,
+            'total_published': agg['total_published'],
+            'max_article_views': agg['max_article_views'],
+            # 🔴 带上 year：不选年份时统计是全期合计，只给 month 会让人以为「6 月」是今年的 6 月
             'best_month': {
+                'year': best.year,
                 'month': best.month,
+                'new_followers': best.new_followers,
                 'total_interactions': best.total_interactions,
                 'top_article': best.top_article,
+                'top_article_views': best.top_article_views,
             } if best else None,
             'total_summaries': count,
         })

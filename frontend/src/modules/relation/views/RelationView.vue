@@ -174,8 +174,8 @@
         <ReaderList />
       </el-tab-pane>
 
-      <!-- 月末盘点 Tab -->
-      <el-tab-pane label="📊 月末盘点" name="monthly-summary">
+      <!-- 月末复盘 Tab -->
+      <el-tab-pane label="📊 月末复盘" name="monthly-summary">
         <MonthlySummaryTab />
       </el-tab-pane>
     </el-tabs>
@@ -301,10 +301,10 @@ function handleTabChange(name: string) {
     loadLocationStats()
   } else if (name === 'readers') {
     readerStore.fetchAll()
-  } else if (name === 'monthly-summary') {
-    readerStore.fetchMonthlySummaries()
-    readerStore.fetchYearlyStats()
   }
+  // 🔴 月末复盘不在这里拉：年份筛选的状态在 MonthlySummaryTab 里，
+  //    父视图再拉一次会把列表覆盖成别的年份（标题写 2026、表里躺着 2025）。
+  //    子组件 mount 时已按自己选中的年份拉过，且 store 记住上次的筛选条件。
 }
 
 // Filters

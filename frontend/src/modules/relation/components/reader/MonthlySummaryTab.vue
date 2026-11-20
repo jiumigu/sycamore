@@ -2,7 +2,7 @@
   <div class="monthly-summary-tab">
     <!-- 操作栏 -->
     <div class="tab-actions">
-      <el-button type="primary" @click="handleAdd">+ 新增盘点</el-button>
+      <el-button type="primary" @click="handleAdd">+ 新增复盘</el-button>
       <el-select v-model="filterYear" placeholder="选择年份" clearable style="width: 120px" @change="handleYearChange">
         <el-option v-for="y in yearOptions" :key="y" :label="String(y)" :value="y" />
       </el-select>
@@ -12,14 +12,14 @@
     <el-row :gutter="16" class="stats-row" v-if="store.yearlyStats">
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">全年新增关注</div>
-          <div class="stat-value text-green">+{{ store.yearlyStats.total_new_followers }}</div>
+          <div class="stat-label">{{ periodLabel }}新增关注</div>
+          <div class="stat-value text-green">{{ signedText(store.yearlyStats.total_new_followers, '+') }}</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">全年取关</div>
-          <div class="stat-value text-red">-{{ store.yearlyStats.total_new_unfollowers }}</div>
+          <div class="stat-label">{{ periodLabel }}取关</div>
+          <div class="stat-value text-red">{{ signedText(store.yearlyStats.total_new_unfollowers, '-') }}</div>
         </el-card>
       </el-col>
       <el-col :span="6">
@@ -40,43 +40,59 @@
 
     <!-- 最佳月份 -->
     <el-card v-if="store.yearlyStats?.best_month" shadow="hover" class="best-month-card">
-      <div class="best-month-header">🏆 年度最佳月份</div>
+      <div class="best-month-header">🏆 最佳月份</div>
       <div class="best-month-body">
-        <span class="best-month-name">{{ store.yearlyStats.best_month.month }}月</span>
-        <span class="best-month-stat">互动 {{ store.yearlyStats.best_month.total_interactions }} 次</span>
+        <span class="best-month-name">{{ store.yearlyStats.best_month.year }}年{{ store.yearlyStats.best_month.month }}月</span>
+        <span class="best-month-stat">新增关注 {{ signedText(store.yearlyStats.best_month.new_followers, '+') }}</span>
         <span v-if="store.yearlyStats.best_month.top_article" class="best-month-article">
           📄 {{ store.yearlyStats.best_month.top_article }}
+          <template v-if="store.yearlyStats.best_month.top_article_views !== null">
+            · {{ store.yearlyStats.best_month.top_article_views }} 阅读
+          </template>
         </span>
+        <span class="best-month-stat">{{ periodLabel }}发文 {{ store.yearlyStats.total_published ?? '—' }} 篇</span>
+        <span class="best-month-stat">单篇最高阅读 {{ store.yearlyStats.max_article_views ?? '—' }}</span>
       </div>
     </el-card>
 
-    <!-- 盘点列表 -->
+    <!-- 复盘列表 -->
     <el-card shadow="hover">
       <template #header>
         <div class="section-header">
-          <span>📋 {{ filterYear || '全部' }}年盘点记录 ({{ store.monthlySummaries.length }})</span>
+          <span>📋 {{ filterYear ? `${filterYear}年` : '全部' }}复盘记录 ({{ store.monthlySummaries.length }})</span>
         </div>
       </template>
 
-      <el-table v-loading="store.loading" :data="store.monthlySummaries" style="width: 100%" empty-text="暂无盘点记录">
+      <el-table v-loading="store.loading" :data="store.monthlySummaries" style="width: 100%" empty-text="暂无复盘记录">
         <el-table-column label="年月" width="100">
           <template #default="{ row }">{{ row.year }}.{{ String(row.month).padStart(2, '0') }}</template>
         </el-table-column>
-        <el-table-column prop="group_name" label="群体" width="100" />
-        <el-table-column label="新增关注" width="100" align="right">
-          <template #default="{ row }"><span class="text-green">+{{ row.new_followers }}</span></template>
+        <!-- 只有一个群体时这一列恒等于「公众号读者」，不占位置 -->
+        <el-table-column v-if="store.groups.length > 1" prop="group_name" label="群体" width="100" />
+        <el-table-column label="发文" width="80" align="right">
+          <template #default="{ row }">
+            <span>{{ row.published_count === null ? '—' : row.published_count }}</span>
+          </template>
         </el-table-column>
-        <el-table-column label="取关" width="80" align="right">
-          <template #default="{ row }"><span class="text-red">-{{ row.new_unfollowers }}</span></template>
+        <el-table-column label="新增关注" width="90" align="right">
+          <template #default="{ row }"><span class="text-green">{{ signedText(row.new_followers, '+') }}</span></template>
+        </el-table-column>
+        <el-table-column label="取关" width="70" align="right">
+          <template #default="{ row }"><span class="text-red">{{ signedText(row.new_unfollowers, '-') }}</span></template>
         </el-table-column>
         <el-table-column prop="total_followers" label="总关注" width="80" align="right" />
-        <el-table-column prop="total_interactions" label="互动" width="70" align="right" />
-        <el-table-column label="最佳文章" min-width="150" show-overflow-tooltip>
+        <el-table-column prop="total_interactions" label="互动" width="60" align="right" />
+        <el-table-column label="最佳文章" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="article-link">{{ row.top_article || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="130" align="center" fixed="right">
+        <el-table-column label="最高阅读" width="90" align="right">
+          <template #default="{ row }">
+            <span>{{ row.top_article_views === null ? '—' : row.top_article_views }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="118" align="center" fixed="right">
           <template #default="{ row }">
             <div class="action-btns">
               <el-button size="small" @click="handleEdit(row)">编辑</el-button>
@@ -87,8 +103,8 @@
       </el-table>
     </el-card>
 
-    <!-- 新增/编辑盘点弹窗 -->
-    <el-dialog v-model="showDialog" :title="editingId ? '编辑盘点' : '月末盘点'" width="450px" :close-on-click-modal="false">
+    <!-- 新增/编辑复盘弹窗 -->
+    <el-dialog v-model="showDialog" :title="editingId ? '编辑复盘' : '月末复盘'" width="450px" :close-on-click-modal="false">
       <el-form :model="form" label-width="120px" label-position="left">
         <el-form-item label="年月">
           <el-date-picker v-model="form.yearmon" type="month" value-format="YYYY-MM" style="width: 100%" />
@@ -98,15 +114,19 @@
             <el-option v-for="g in store.groups" :key="g.id" :label="g.name" :value="g.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="本月发文篇数">
+          <el-input-number v-model="form.published_count" :min="0" :value-on-clear="null" style="width: 100%" />
+          <div class="auto-tip">留空 = 本月没盘；0 = 确实一篇没发</div>
+        </el-form-item>
         <el-form-item label="本月新增关注">
           <el-input-number v-model="form.new_followers" :min="0" style="width: 100%" />
         </el-form-item>
         <el-form-item label="本月取关">
-          <el-input-number v-model="form.new_unfollowers" :min="0" :disabled="true" style="width: 100%" />
-          <div class="auto-tip">自动计算：{{ autoCalcUnfollow }}人</div>
+          <el-input-number :model-value="autoCalcUnfollow ?? undefined" :disabled="true" style="width: 100%" />
+          <div class="auto-tip">{{ unfollowTip }}</div>
         </el-form-item>
         <el-form-item label="截至本月总关注">
-          <el-input-number v-model="form.total_followers" :min="0" style="width: 100%" />
+          <el-input-number v-model="form.total_followers" :min="0" :value-on-clear="null" style="width: 100%" />
         </el-form-item>
         <el-form-item label="本月互动总量">
           <el-input-number v-model="form.total_interactions" :min="0" style="width: 100%" />
@@ -116,6 +136,9 @@
         </el-form-item>
         <el-form-item label="本月最佳文章">
           <el-input v-model="form.top_article" placeholder="如：《如何搭建个人系统》" />
+        </el-form-item>
+        <el-form-item label="最佳文章阅读数">
+          <el-input-number v-model="form.top_article_views" :min="0" :value-on-clear="null" style="width: 100%" />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.notes" type="textarea" :rows="2" />
@@ -131,13 +154,19 @@
 
 <script setup lang="ts">
 import { apiErrorText } from '@/shared/utils/apiError'
+import { todayLocal } from '@/shared/utils/datetime'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { onMounted, reactive, ref, computed } from 'vue'
+import { onMounted, reactive, ref, computed, watch } from 'vue'
 import { useReaderStore } from '../../stores/readerStore'
-import * as readerApi from '../../api/readerApi'
-import type { ReaderMonthlySummary, ReaderGroup } from '../../types/readerTypes'
+import type { ReaderMonthlySummary } from '../../types/readerTypes'
 
 const store = useReaderStore()
+
+/** 增减量带符号的显示：0 不写成「+0」/「-0」，空值给「—」 */
+function signedText(n: number | null | undefined, sign: '+' | '-') {
+  if (n === null || n === undefined) return '—'
+  return n === 0 ? '0' : `${sign}${n}`
+}
 
 const showDialog = ref(false)
 const filterYear = ref(new Date().getFullYear())
@@ -149,32 +178,40 @@ const yearOptions = computed(() => {
   return [y, y - 1, y - 2, y - 3]
 })
 
+/** 选了年份才叫「全年」；不选年份看的是全期合计，别让「全年」跨到全期上 */
+const periodLabel = computed(() => (filterYear.value ? '全年' : '全期'))
+
 const form = reactive({
   yearmon: '',
+  published_count: null as number | null,
   new_followers: 0,
-  new_unfollowers: 0,
-  total_followers: 0,
+  // 🔴 不默认 0：粉丝数是要手填的（三个数之一），默认 0 忘了改就会把总关注记成断崖
+  total_followers: null as number | null,
   total_interactions: 0,
   high_energy_count: 0,
   top_article: '',
+  top_article_views: null as number | null,
   notes: '',
 })
 
 function resetForm() {
   form.yearmon = ''
+  form.published_count = null
   form.new_followers = 0
-  form.new_unfollowers = 0
-  form.total_followers = 0
+  form.total_followers = null
   form.total_interactions = 0
   form.high_energy_count = 0
   form.top_article = ''
+  form.top_article_views = null
   form.notes = ''
 }
 
 function handleAdd() {
   editingId.value = null
   resetForm()
-  form.yearmon = new Date().toISOString().slice(0, 7)
+  // 🔴 不能用 `new Date().toISOString().slice(0, 7)`：那是 UTC，晚上 8 点后点「新增」
+  //    会把月份填成下个月（月初 0-8 点则填成上个月），而且填出来的值看起来合法、不会报错。
+  form.yearmon = todayLocal().slice(0, 7)
   showDialog.value = true
 }
 
@@ -183,42 +220,75 @@ function handleEdit(row: ReaderMonthlySummary) {
   defaultGroupId.value = row.reader_group
   form.yearmon = `${row.year}-${String(row.month).padStart(2, '0')}`
   form.new_followers = row.new_followers
-  form.new_unfollowers = row.new_unfollowers
   form.total_followers = row.total_followers
   form.total_interactions = row.total_interactions
   form.high_energy_count = row.high_energy_count
+  form.published_count = row.published_count
   form.top_article = row.top_article || ''
+  form.top_article_views = row.top_article_views
   form.notes = row.notes || ''
   showDialog.value = true
 }
 
-/** 取关 = 上月总关注 + 本月新增 - 本月总关注 */
-const autoCalcUnfollow = computed(() => {
-  if (!form.yearmon) return 0
-  const [year, month] = form.yearmon.split('-').map(Number)
-  const prevMonth = month === 1 ? 12 : month - 1
-  const prevYear = month === 1 ? year - 1 : year
+/** 上月那条复盘记录：算「取关」必须真拿到，拿不到就说拿不到，不当 0 */
+const prevRow = ref<ReaderMonthlySummary | null>(null)
 
-  const prev = store.monthlySummaries.find(
-    s => s.year === prevYear && s.month === prevMonth && s.reader_group === defaultGroupId.value,
-  )
-  const prevTotal = prev?.total_followers ?? 0
-  if (!prevTotal && !form.new_followers) return 0
+watch(
+  [() => form.yearmon, defaultGroupId],
+  async () => {
+    if (!form.yearmon) {
+      prevRow.value = null
+      return
+    }
+    const [year, month] = form.yearmon.split('-').map(Number)
+    const prevMonth = month === 1 ? 12 : month - 1
+    const prevYear = month === 1 ? year - 1 : year
+    prevRow.value = await store.findMonthSummary(prevYear, prevMonth, defaultGroupId.value)
+  },
+  { immediate: true },
+)
 
-  const result = prevTotal + form.new_followers - form.total_followers
-  return Math.max(0, result)
+/** 取关 = 上月总关注 + 本月新增 − 本月总关注；任一端缺失给 null，不静默算成 0 */
+const autoCalcUnfollow = computed<number | null>(() => {
+  if (!prevRow.value || form.total_followers === null) return null
+  return Math.max(0, prevRow.value.total_followers + form.new_followers - form.total_followers)
+})
+
+/** 「本月取关」下面那行提示：三种状态各自说清楚，别用一个 0 糊过去 */
+const unfollowTip = computed(() => {
+  if (!form.yearmon) return '先选年月'
+  if (!prevRow.value) return '缺上月复盘记录，取关算不出来（请先补上月）'
+  if (form.total_followers === null) return '填完「截至本月总关注」后自动算'
+  return `自动计算：${autoCalcUnfollow.value} 人`
 })
 
 function handleYearChange() {
-  store.fetchMonthlySummaries(filterYear.value ? { year: filterYear.value } : undefined)
-  store.fetchYearlyStats(filterYear.value ? { year: filterYear.value } : undefined)
+  // 清空年份 = 显式不筛（`{}`），不能传 undefined：那在 store 里表示「沿用上次条件」
+  const params = filterYear.value ? { year: filterYear.value } : {}
+  store.fetchMonthlySummaries(params)
+  store.fetchYearlyStats(params)
 }
 
 async function saveSummary() {
-  if (!form.yearmon) return
+  if (!form.yearmon) {
+    ElMessage.warning('请先选年月')
+    return
+  }
+  if (!defaultGroupId.value) {
+    ElMessage.warning('请先选所属群体')
+    return
+  }
+  if (form.total_followers === null) {
+    ElMessage.warning('请填「截至本月总关注」')
+    return
+  }
+  if (autoCalcUnfollow.value === null) {
+    ElMessage.warning('缺上月复盘记录，取关算不出来，请先补上月那条')
+    return
+  }
   const [year, month] = form.yearmon.split('-')
   const data = {
-    reader_group: defaultGroupId.value!,
+    reader_group: defaultGroupId.value,
     year: parseInt(year),
     month: parseInt(month),
     new_followers: form.new_followers,
@@ -226,7 +296,9 @@ async function saveSummary() {
     total_followers: form.total_followers,
     total_interactions: form.total_interactions,
     high_energy_count: form.high_energy_count,
+    published_count: form.published_count,
     top_article: form.top_article,
+    top_article_views: form.top_article_views,
     notes: form.notes,
   }
 
@@ -248,7 +320,7 @@ async function saveSummary() {
 
 async function handleDelete(row: { id: number }) {
   try {
-    await ElMessageBox.confirm('确定删除这条盘点记录吗？', '确认删除', {
+    await ElMessageBox.confirm('确定删除这条复盘记录吗？', '确认删除', {
       type: 'warning',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
@@ -260,12 +332,10 @@ async function handleDelete(row: { id: number }) {
 }
 
 onMounted(async () => {
+  // 群体列表写进 store：表单里「所属群体」和表格里「群体」列都看 store.groups
+  await store.fetchGroups()
   // 默认选中"公众号读者"
-  const res = await readerApi.getReaderGroups()
-  const groups: ReaderGroup[] = Array.isArray(res.data)
-    ? res.data
-    : (res.data as { results?: ReaderGroup[] })?.results || []
-  const defaultGroup = groups.find((g: { name: string }) => g.name === '公众号读者')
+  const defaultGroup = store.groups.find((g) => g.name === '公众号读者')
   if (defaultGroup) {
     defaultGroupId.value = defaultGroup.id
   }
@@ -330,7 +400,11 @@ onMounted(async () => {
 .best-month-body {
   display: flex;
   align-items: center;
-  gap: 16px;
+  /* 一行放不下就换行：这一行现在有五个数（月份 / 新增 / 文章 / 全年发文 / 最高阅读） */
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+  gap: 12px 16px;
   font-size: 13px;
 }
 

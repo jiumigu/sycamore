@@ -184,7 +184,12 @@ class ReaderMonthlySummary(models.Model):
     total_followers = models.IntegerField(default=0, verbose_name='截至本月总关注')
     total_interactions = models.IntegerField(default=0, verbose_name='本月互动总量')
     high_energy_count = models.IntegerField(default=0, verbose_name='本月高能量互动数')
+    # 🔴 可空而不是 default=0：这是「公众号读者」专属的两个量 —— 对「读者」「同事」这类群体
+    #    根本没有「本月发了几篇」这回事。给 0 会被读成「发了 0 篇」，是同一事实两个含义。
+    #    null = 这个月没盘/该群体不适用；0 = 确实一篇没发。
+    published_count = models.IntegerField(null=True, blank=True, db_comment='本月发文篇数', verbose_name='本月发文篇数')
     top_article = models.CharField(max_length=255, blank=True, default='', verbose_name='本月最佳文章')
+    top_article_views = models.IntegerField(null=True, blank=True, db_comment='最佳文章阅读数', verbose_name='最佳文章阅读数')
     notes = models.TextField(blank=True, default='', verbose_name='备注')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
 
